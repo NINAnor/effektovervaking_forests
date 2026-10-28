@@ -12,6 +12,9 @@ is the order they are listed by `--help`:
     forestmon run kalklindeskog               # the operational cycle
 
 Everything is per-AOI and idempotent; `run` is the one a timer calls.
+
+`forestmon condition ...` is the separate, annual AlphaEarth condition pipeline
+(docs/condition/README.md); it shares only the configuration with the above.
 """
 
 from __future__ import annotations
@@ -64,6 +67,11 @@ publish_app = typer.Typer(
     no_args_is_help=True, help="Build the public site's data artefacts."
 )
 app.add_typer(publish_app, name="publish")
+condition_app = typer.Typer(
+    no_args_is_help=True,
+    help="Stand condition and trajectory from AlphaEarth embeddings (annual).",
+)
+app.add_typer(condition_app, name="condition")
 
 
 @app.callback()
@@ -951,6 +959,110 @@ def doctor():
     for name in config.AOI_PARQUET:
         p = aoi_mod.grid_path(name)
         _echo(f"  {'OK ' if p.exists() else '-  '}  grid: {name}")
+    raise typer.Exit(code=0 if ok else 1)
+
+
+# ── condition (AlphaEarth, annual) ───────────────────────────────────────────
+@condition_app.command("steps")
+def condition_steps():
+    """List the pipeline steps in run order."""
+    from .condition.steps import STEPS
+
+    for s in STEPS:
+        note = " (needs Earth Engine)" if s.needs_ee else ""
+        note += "" if s.in_run else " (not in `run`)"
+        _echo(f"  {s.id:<4} {s.module:<24} {s.summary}{note}")
+
+
+@condition_app.command(
+    "step",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def condition_step(
+    ctx: typer.Context,
+    step_id: str = typer.Argument(..., help="Step id, e.g. 04 (see `steps`)."),
+):
+    """Run one step in-process; any further arguments go to the step
+    (`forestmon condition step 04 -- --help` lists them)."""
+    from .condition.steps import BY_ID, run_step
+
+    if step_id not in BY_ID:
+        _fail(f"unknown step {step_id!r}; one of: {', '.join(BY_ID)}")
+    run_step(step_id, list(ctx.args))
+
+
+@condition_app.command("run")
+def condition_run(
+    start: str = typer.Option(None, "--from", help="First step id (inclusive)."),
+    stop: str = typer.Option(None, "--to", help="Last step id (inclusive)."),
+    ee_project: str = typer.Option(
+        config.EE_PROJECT,
+        help="Earth Engine project for 02e (Hansen). Without it 02e is skipped "
+        "and 03 falls back to the uncalibrated p-value rule.",
+    ),
+    dry_run: bool = typer.Option(False, help="Print the plan and exit."),
+):
+    """Run the pipeline, or a --from/--to slice of it, stopping at the first
+    failing step. Each step is logged under <FORESTMON_LOG_DIR>/condition/."""
+    from .condition import paths
+    from .condition.steps import plan, run_pipeline
+
+    try:
+        steps, skipped = plan(start, stop, ee_project)
+    except ValueError as e:
+        _fail(str(e))
+    log_dir = config.LOG_DIR / "condition"
+    _echo(f"data/outputs : {paths.ROOT}")
+    _echo(f"logs         : {log_dir}")
+    for s, args in steps:
+        _echo(f"  {s.id:<4} {s.module} {' '.join(args)}".rstrip())
+    for s in skipped:
+        _echo(
+            f"  ({s.id} skipped: needs --ee-project/FORESTMON_EE_PROJECT and the "
+            "gee extra; trajectory classes will have no stated false-positive rate)"
+        )
+    if dry_run:
+        return
+    raise typer.Exit(code=run_pipeline(steps, log_dir, echo=_echo))
+
+
+@condition_app.command("doctor")
+def condition_doctor():
+    """Check inputs, optional speed-ups and where the pipeline will write."""
+    import importlib.util
+
+    import rasterio
+
+    from .condition import aef_backend, paths
+
+    ok = True
+    gpkg = paths.KARTLEGGING_GPKG.exists()
+    _echo(
+        f"  {'OK ' if gpkg else 'MISSING'}  stand polygons {paths.KARTLEGGING_GPKG}"
+        f"{'' if gpkg else ' (set FORESTS_KARTLEGGING_GPKG)'}"
+    )
+    ok &= gpkg
+    with rasterio.Env() as e:
+        drivers = e.drivers()
+    gtiff = "GTiff" in drivers
+    _echo(f"  {'OK ' if gtiff else 'MISSING'}  GDAL GTiff driver (mirror COGs)")
+    ok &= gtiff
+    for mod, why in (
+        ("numba", "step 04 runs ~3x faster; `--extra fast`"),
+        ("threadpoolctl", "step 04 --workers; `--extra fast`"),
+        ("ee", "steps 02e and 09 only; `--extra gee`"),
+    ):
+        have = importlib.util.find_spec(mod) is not None
+        _echo(f"  {'OK ' if have else 'WARN'}  {mod}{'' if have else f' ({why})'}")
+    loader = aef_backend.loader_available()
+    _echo(
+        f"  {'OK ' if loader else 'WARN'}  aef_loader_plus "
+        f"{'' if loader else '(optional faster download backend; AEF_LOADER_PATH)'}"
+    )
+    _echo(f"  AEF_DEQUANT: {paths.AEF_DEQUANT}")
+    _echo(f"  root:        {paths.ROOT}")
+    for name, p in (("polygons", paths.POLYGONS), ("condition", paths.CONDITION)):
+        _echo(f"  {'OK ' if p.exists() else '-  '}  {name}: {p}")
     raise typer.Exit(code=0 if ok else 1)
 
 

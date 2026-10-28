@@ -1,7 +1,11 @@
 # Effektovervaking Forests (forestmon)
 
-Near-real-time forest-loss monitor for the NINA effect-monitoring programme.
-It reads Sentinel-2 L2A directly from the Copernicus Data Space Ecosystem
+Forest monitoring for the NINA effect-monitoring programme. This repo hosts two
+pipelines: the near-real-time S-CCD loss monitor (below) and the annual
+AlphaEarth stand-condition pipeline (`forestmon condition`, see
+[Condition pipeline](#condition-pipeline-annual)).
+
+The loss monitor reads Sentinel-2 L2A directly from the Copernicus Data Space Ecosystem
 (CDSE), keeps a per-pixel S-CCD model up to date for each AOI, and raises
 alerts when a pixel breaks. S-CCD is the one validated detector that is
 architecturally near-real-time, not the most accurate: cross-validated loss F1
@@ -83,16 +87,40 @@ uv run forestmon publish site <aoi>        # PMTiles + COG for the web map / GIS
 
 `forestmon --help` lists all commands.
 
+## Condition pipeline (annual)
+Condition score and trajectory class per 10 m cell and per stand for
+olivinskog and kalklindeskog, from AlphaEarth 2017–2025 embeddings. Separate
+from the loss monitor; it shares only the configuration. ~30 min, ~50 GB read.
+
+```bash
+uv run forestmon condition doctor            # stand gpkg, GDAL, numba/ee, data root
+uv run forestmon condition steps             # the 14 steps
+uv run forestmon condition run               # all but 09; fail-fast, logged; --from/--to/--dry-run
+uv run forestmon condition step 04 -- --help # one step; args after -- are the step's own
+```
+
+Config: `CONDITION_ROOT` (data + outputs, default `<FORESTMON_DATA_DIR>/condition`),
+`FORESTS_KARTLEGGING_GPKG` (stand polygons). `uv sync --extra fast` (numba,
+threadpoolctl) speeds up step 04; `--extra gee` is needed for 02e/09 only.
+Details, outputs and the production-takeover recipe:
+[docs/condition/README.md](docs/condition/README.md); method and evidence:
+[docs/condition/METHODS.md](docs/condition/METHODS.md).
+
 ## Deploy
 `scripts/forestmon_cycle.sh` runs one cycle under `flock`; install it with
 `scripts/forestmon_cycle.sh --install-cron` and configure it via environment
 variables (see the script header). `forestmon health` exits 0 healthy, 2
 unhealthy, and 1 for degraded only with `--strict`, so it can gate or page.
+Docker, compose and systemd recipes, new-AOI onboarding and backups:
+[docs/deployment.md](docs/deployment.md).
 
 ## Test
 ```bash
 uv run pytest        # offline
 ```
+`tests/condition` has network tests (hit the AlphaEarth mirror), deselected by
+default; run them with `uv run pytest tests/condition -m network`.
+
 Two drift guards compare against the research repo and run only when
 `FORESTMON_INSPECTOR_SRC` and `FORESTMON_LABEL_TUNING_CSV` are set; otherwise
 the pinned values in `tests/test_operational.py` are the contract.

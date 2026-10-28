@@ -1,0 +1,20 @@
+# EXAMPLE ONLY: adapt paths and the AOI name before use (see docs/deployment.md).
+# One service = one AOI. Run it from a scheduler (cron/systemd timer):
+#   docker compose run --rm forestmon run kalklindeskog
+# `docker compose up` would run `run` once and exit; it does not loop.
+services:
+  forestmon:
+    image: forestmon:latest
+    build: .
+    command: ["run", "kalklindeskog"]
+    # CDSE_S3_ACCESS_KEY / CDSE_S3_SECRET_KEY (and any FORESTMON_* overrides)
+    # live in ./.env on the host, which is git-ignored and docker-ignored.
+    env_file: .env
+    environment:
+      FORESTMON_DATA_DIR: /data
+      FORESTMON_AOI_DIR: /data/aoi
+      FORESTMON_LOG_DIR: /data/logs
+    volumes:
+      # Must be writable by uid 10001 (the image's non-root user).
+      - ./data:/data
+    restart: "no"

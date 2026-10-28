@@ -1,0 +1,42 @@
+# Keep the build context small and credential-free.
+.git
+.github
+.gitignore
+
+# Secrets and local config: pass these at run time instead.
+.env
+.env.*
+!.env.example
+**/credentials
+.config
+
+# Data and outputs (mounted at /data, never baked in)
+data
+**/*.parquet
+**/*.pkl
+**/*.pmtiles
+**/*.tif
+logs
+
+# Environments and caches
+.venv
+venv
+env
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+.vscode
+.idea
+
+# Not needed in the image
+tests
+docs
+scripts
+prek.toml
+.pinact.yaml
+.copier-answers.yml
+.editorconfig

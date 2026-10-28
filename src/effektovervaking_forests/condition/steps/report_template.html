@@ -1,0 +1,1285 @@
+<title>Forest Condition from AlphaEarth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --ground:#eef2ef; --surface:#ffffff; --surface-2:#f7faf8;
+  --ink:#101d18; --ink-2:#4a5a53; --muted:#78877f;
+  --rule:#dbe3dd; --rule-strong:#c3cfc8;
+  --accent:#0f6350; --accent-soft:#e2efe9; --accent-ink:#0b4b3c;
+  --ok:#0ca30c; --bad:#d03b3b;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --ord1:#86b6ef; --ord2:#5598e7; --ord3:#2a78d6; --ord4:#184f95;
+  --grid:#e3e8e4; --axis:#c3cfc8; --chart-surface:#ffffff;
+  --shadow:0 1px 2px rgba(16,29,24,.05), 0 8px 24px -16px rgba(16,29,24,.18);
+  --measure:68ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#0b100e; --surface:#141b18; --surface-2:#19211d;
+    --ink:#eaf1ec; --ink-2:#a9b8b0; --muted:#7d8c84;
+    --rule:#25302b; --rule-strong:#334039;
+    --accent:#4cbf9f; --accent-soft:#152e27; --accent-ink:#7ad3b8;
+    --ok:#3fbf3f; --bad:#e46a6a;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --ord1:#86b6ef; --ord2:#5598e7; --ord3:#2a78d6; --ord4:#184f95;
+    --grid:#232d28; --axis:#334039; --chart-surface:#141b18;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0b100e; --surface:#141b18; --surface-2:#19211d;
+  --ink:#eaf1ec; --ink-2:#a9b8b0; --muted:#7d8c84;
+  --rule:#25302b; --rule-strong:#334039;
+  --accent:#4cbf9f; --accent-soft:#152e27; --accent-ink:#7ad3b8;
+  --ok:#3fbf3f; --bad:#e46a6a;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --ord1:#86b6ef; --ord2:#5598e7; --ord3:#2a78d6; --ord4:#184f95;
+  --grid:#232d28; --axis:#334039; --chart-surface:#141b18;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px 96px}
+.col{max-width:var(--measure)}
+h1,h2,h3{font-family:"IBM Plex Serif",Georgia,serif;text-wrap:balance;line-height:1.22;margin:0}
+h1{font-size:clamp(2rem,1.3rem + 2.6vw,3.1rem);font-weight:600;letter-spacing:-.015em}
+h2{font-size:clamp(1.35rem,1.1rem + .9vw,1.85rem);font-weight:600;letter-spacing:-.01em}
+h3{font-size:1.06rem;font-weight:600}
+p{margin:0}
+a{color:var(--accent-ink);text-underline-offset:3px;text-decoration-thickness:1px}
+code,kbd{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.86em}
+:where(p,li,td,figcaption) code{background:var(--surface-2);border:1px solid var(--rule);
+  border-radius:4px;padding:.05em .32em;color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+
+header.top{border-bottom:1px solid var(--rule);background:var(--surface)}
+header.top .wrap{padding-top:44px;padding-bottom:36px;display:flex;flex-direction:column;gap:20px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--accent-ink);font-weight:500}
+.lede{font-size:1.12rem;color:var(--ink-2);max-width:64ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-family:"IBM Plex Mono",monospace;
+  font-size:.76rem;color:var(--muted)}
+.meta b{color:var(--ink-2);font-weight:500}
+
+nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 88%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--rule)}
+nav.toc ul{max-width:1120px;margin:0 auto;padding:0 24px;list-style:none;display:flex;
+  gap:2px;overflow-x:auto;scrollbar-width:thin}
+nav.toc a{display:block;padding:11px 12px;font-size:.8rem;color:var(--ink-2);
+  text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
+nav.toc a:hover{color:var(--ink);border-bottom-color:var(--rule-strong)}
+
+section{padding-top:60px}
+section > .col + .col{margin-top:18px}
+.h-rule{display:flex;align-items:baseline;gap:14px;margin-bottom:22px}
+.h-rule::after{content:"";flex:1;height:1px;background:var(--rule)}
+.stack{display:flex;flex-direction:column;gap:18px}
+.stack-sm{display:flex;flex-direction:column;gap:10px}
+
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:26px 0 0}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:10px;
+  padding:16px 18px;display:flex;flex-direction:column;gap:3px;box-shadow:var(--shadow)}
+.tile .v{font-size:1.75rem;font-weight:600;letter-spacing:-.02em;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.tile .k{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted)}
+.tile .n{font-size:.82rem;color:var(--ink-2)}
+
+figure{margin:30px 0 0;background:var(--surface);border:1px solid var(--rule);
+  border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+figure .fig-head{padding:18px 22px 0;display:flex;flex-direction:column;gap:5px}
+figure .fig-title{font-family:"IBM Plex Serif",serif;font-weight:600;font-size:1.02rem}
+figure .fig-sub{font-size:.85rem;color:var(--ink-2);max-width:70ch}
+figure .fig-body{padding:14px 22px 6px;overflow-x:auto}
+figcaption{padding:12px 22px 18px;font-size:.82rem;color:var(--ink-2);border-top:1px solid var(--rule);
+  margin-top:10px;background:var(--surface-2)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;padding:4px 22px 0;
+  font-family:"IBM Plex Mono",monospace;font-size:.74rem;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.swatch{width:11px;height:11px;border-radius:3px;flex:none}
+.swatch.line{height:3px;width:16px;border-radius:2px}
+svg{display:block;max-width:100%;height:auto}
+svg text{font-family:"IBM Plex Mono",monospace}
+
+.tbl-wrap{overflow-x:auto;margin-top:22px;border:1px solid var(--rule);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--rule);white-space:nowrap}
+thead th{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--muted);font-weight:500;background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:"IBM Plex Mono",monospace}
+tbody tr.hi td{background:var(--accent-soft)}
+caption{caption-side:top;text-align:left;padding:12px 14px 8px;font-size:.82rem;color:var(--ink-2)}
+.best{color:var(--accent-ink);font-weight:600}
+.worst{color:var(--bad);font-weight:600}
+
+.code{margin-top:20px;border:1px solid var(--rule);border-radius:10px;overflow:hidden;background:var(--surface)}
+.code .src{display:flex;justify-content:space-between;gap:12px;align-items:center;
+  padding:9px 14px;background:var(--surface-2);border-bottom:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--muted)}
+.code .src b{color:var(--accent-ink);font-weight:500}
+.code pre{margin:0;padding:14px;overflow-x:auto;font-family:"IBM Plex Mono",monospace;
+  font-size:.775rem;line-height:1.62;color:var(--ink)}
+.code .cm{color:var(--muted)}
+
+.note{margin-top:22px;border-left:3px solid var(--accent);background:var(--accent-soft);
+  border-radius:0 8px 8px 0;padding:14px 18px;font-size:.92rem;color:var(--ink)}
+.note b{font-weight:600}
+.warn{border-left-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--surface))}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px}
+.chip{font-family:"IBM Plex Mono",monospace;font-size:.72rem;padding:4px 10px;border-radius:999px;
+  border:1px solid var(--rule-strong);color:var(--ink-2);background:var(--surface)}
+.chip.pass{border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}
+.chip.fail{border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}
+ul.plain{margin:0;padding-left:1.15em}
+ul.plain li{margin-top:7px}
+ul.plain li::marker{color:var(--muted)}
+.two{display:grid;gap:22px;grid-template-columns:1fr}
+@media (min-width:860px){.two{grid-template-columns:1fr 1fr}}
+
+#tip{position:fixed;pointer-events:none;z-index:60;opacity:0;transition:opacity .1s;
+  background:var(--ink);color:var(--ground);border-radius:7px;padding:7px 10px;
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;line-height:1.5;
+  box-shadow:0 6px 20px rgba(0,0,0,.28);max-width:280px}
+#tip b{color:var(--ground);font-weight:600}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.75rem;color:var(--muted)}
+</style>
+<header class="top">
+  <div class="wrap">
+    <div class="stack-sm">
+      <div class="eyebrow">Effektovervåking 2026–2030 · opsjon 2 fjernmåling</div>
+      <h1>Forest condition from<br>satellite embeddings</h1>
+    </div>
+    <p class="lede">Every mapped <b>olivinskog</b> and <b>kalklindeskog</b> stand in Norway is
+      assessed twice: which direction it has moved over nine years, and where it sits today
+      compared with stands that surveyors recorded as being in good condition. The input is
+      the AlphaEarth annual embeddings for 2017–2025 — one 64-number summary of every 10 m
+      cell, every year.</p>
+    <div class="meta">
+      <span><b>Package</b> condition/</span>
+      <span><b>Assessment year</b> 2025</span>
+      <span><b>Stands</b> <span data-d="n_polygons"></span></span>
+      <span><b>Cells scored</b> <span data-d="outputs.n_cells"></span></span>
+      <span><b>Run</b> <span id="run-date"></span></span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <ul>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#how">What is measured</a></li>
+    <li><a href="#traj">Step 1 · Direction</a></li>
+    <li><a href="#cond">Step 2 · Condition</a></li>
+    <li><a href="#scope">Local and global</a></li>
+    <li><a href="#controls">What survives a control</a></li>
+    <li><a href="#found">What it found</a></li>
+    <li><a href="#limits">Limits</a></li>
+    <li><a href="#files">The files</a></li>
+  </ul>
+</nav>
+
+<main class="wrap">
+
+<section id="summary">
+  <div class="col h-rule"><h2>Summary</h2></div>
+  <div class="col stack">
+    <p>Both steps measure along the <b>same direction in embedding space</b>, so their two
+      answers can be read together rather than side by side. All <b><span data-d="n_polygons"></span></b>
+      mapped stands are scored, one cell at a time, in all nine years.</p>
+    <p>Against the surveyors' own <code>tilstand</code> labels the scores come out in the
+      right order: <code>god</code> highest, then <code>moderat</code>, then
+      <code>dårlig</code>, then <code>sværtRedusert</code> lowest. The
+      <code>moderat</code> class never enters a reference set, so its position was not
+      fitted and is a genuine out-of-sample check.</p>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Stands assessed</div>
+      <div class="v" data-d="n_polygons"></div>
+      <div class="n"><span data-d="poly_counts.kalklindeskog"></span> kalklindeskog ·
+        <span data-d="poly_counts.olivinskog"></span> olivinskog</div></div>
+    <div class="tile"><div class="k">10 m cells scored</div>
+      <div class="v" data-d="outputs.n_cells"></div>
+      <div class="n">each one scored separately, in all nine years</div></div>
+    <div class="tile"><div class="k">Separation, whole country</div>
+      <div class="v" data-d="auc_stand.local.both.auc" data-fmt="3"></div>
+      <div class="n">good against poor field labels</div></div>
+    <div class="tile"><div class="k">Separation, one locality</div>
+      <div class="v" style="color:var(--bad)" data-d="controls.dor_local.within_locality.auc" data-fmt="3"></div>
+      <div class="n">the same test inside a 5 km cluster</div></div>
+  </div>
+
+  <div class="col note warn" style="margin-top:26px">
+    <b>The one thing to say out loud when presenting this.</b> Across the country the score
+    puts a good-labelled stand above a poor-labelled one
+    <b><span data-d="auc_stand.local.both.auc" data-pct="0"></span></b> of the time.
+    Compare stands only against their neighbours in the same 5 km locality and that falls to
+    <b><span data-d="controls.dor_local.within_locality.auc" data-pct="0"></span></b>, while
+    <em>stand size alone</em> reaches
+    <b><span data-d="controls.area_ha.within_locality.auc" data-pct="0"></span></b> on the same
+    comparison. Some of the national figure is the model recognising <em>where</em> a stand
+    is rather than <em>what condition</em> it is in. That within-locality figure rests on
+    <b><span data-d="blocks.with_both"></span> localities</b>, so treat it as a warning
+    rather than a measurement.
+  </div>
+</section>
+
+<section id="how">
+  <div class="col h-rule"><h2>What is being measured</h2></div>
+  <div class="col stack">
+    <p>AlphaEarth gives 64 numbers per cell per year, which is too many to reason about. The
+      pipeline reduces them to one: the position along a line drawn from the average
+      converted-land cell to the average good-condition cell. Call that line the
+      <b>naturalness axis</b>. Step 1 asks how a cell has moved along it since 2017. Step 2
+      asks where it sits on it now.</p>
+    <p>Because both steps use the same line, a stand can be described by two independent
+      facts — its level and its direction — without stitching together two unrelated
+      methods.</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>The words used throughout this page.</caption>
+      <thead><tr><th>Term</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td><b>condition score</b></td><td style="white-space:normal">A number from 0 to 1.
+          How close a cell sits to good-condition reference stands, set against how far it
+          sits from converted land. Higher is better.</td></tr>
+        <tr><td><b>threshold</b></td><td style="white-space:normal">The score above which a
+          stand counts as being in good condition. It is fitted separately for each locality,
+          leaving that locality's own stands out of the fit, so <em>each stand has its own
+          threshold</em> and a single national cutoff is not correct.</td></tr>
+        <tr><td><b>separation</b></td><td style="white-space:normal">The chance that a
+          randomly chosen good-labelled stand scores above a randomly chosen poor-labelled
+          one. 0.50 is a coin flip, 1.00 is perfect. Statisticians call it AUC.</td></tr>
+        <tr><td><b>trajectory</b></td><td style="white-space:normal">The direction of the
+          nine-year series: improving, stable, fluctuating or declining.</td></tr>
+        <tr><td><b>locality</b></td><td style="white-space:normal">A cluster of stands within
+          5 km of each other. There are <span data-d="blocks.total"></span> of them. They are
+          used to keep a stand from being compared with its own neighbours.</td></tr>
+        <tr><td><b>local / global</b></td><td style="white-space:normal">Which good-condition
+          stands are used as the reference: the nearest ones of the same forest type
+          (<em>local</em>), or all of them (<em>global</em>). Both exclude any reference
+          stand within 3 km of the cell being scored.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="traj">
+  <div class="col h-rule"><h2>Step 1 · Which direction a stand has moved</h2></div>
+  <div class="col stack">
+    <p>Each stand and each cell gives nine annual positions on the naturalness axis. A
+      straight line is fitted through them (a Theil–Sen slope, which ignores one-off
+      outliers), and the stand is classified by <b>how steep that line is</b> — not by
+      whether the trend passes a significance test.</p>
+    <p>That choice matters. A significance test asks whether a trend exists; on nine annual
+      points it will call a tiny but tidy decline significant and a large but noisy one not.
+      The steepness gate is set at the 2nd and 98th percentile of slopes measured on ground
+      that Hansen Global Forest Change never recorded as cleared, so each class carries a
+      <b>2 % false-alarm rate by construction</b>. On this area the gates are
+      <span data-d="gate.stand.0" data-fmt="3"></span> and
+      +<span data-d="gate.stand.1" data-fmt="3"></span> per year.</p>
+  </div>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">Four stands, four verdicts</div>
+      <div class="fig-sub">Annual position on the naturalness axis, 2017–2025, with the
+        fitted line. Higher means closer to the good-condition reference stands. One panel
+        per class, each the clearest example in this run.</div>
+    </div>
+    <div class="legend">
+      <span><i class="swatch line" style="background:var(--s1)"></i> annual value</span>
+      <span><i class="swatch line" style="background:var(--accent)"></i> fitted line</span>
+    </div>
+    <div class="fig-body"><div id="ch-traj"></div></div>
+    <figcaption><code>stable</code> and <code>fluctuating</code> both have slopes inside the
+      gate; they are told apart by how much the series moves up and down from year to year.
+      The p-value is still reported for every stand but decides nothing.</figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Trajectory classes across all <span data-d="n_polygons"></span> stands.</caption>
+      <thead><tr><th>Class</th><th>Rule</th><th class="num">Kalklindeskog</th>
+        <th class="num">Olivinskog</th><th class="num">Total</th></tr></thead>
+      <tbody id="tbl-traj"></tbody>
+    </table>
+  </div>
+
+  <div class="col note">
+    <b>This step has an outside check.</b> Hansen Global Forest Change is built from Landsat
+    and uses nothing from AlphaEarth, so agreement with it is real evidence.
+    On <span data-d="hansen.n_cleared"></span> cells it records as cleared between 2018 and
+    2024, the <code>declining</code> class catches
+    <b><span data-d="hansen.recall" data-pct="1"></span></b> of them, while raising a false
+    alarm on <span data-d="hansen.fpr" data-pct="1"></span> of the
+    <span data-d="hansen.n_clean"></span> cells in stands with no recorded loss at all. The
+    slope itself separates the two groups at
+    <span data-d="hansen.auc" data-fmt="3"></span>.
+    <b>Read that recall as a floor, not an estimate</b>: Hansen only sees canopy removal, and
+    these habitat types are mostly lost to selective removal and understorey change that
+    leave the canopy standing.
+  </div>
+</section>
+
+<section id="cond">
+  <div class="col h-rule"><h2>Step 2 · Where the stand has arrived</h2></div>
+  <div class="col stack">
+    <p>Every labelled stand is scored <b>in the year it was actually surveyed</b>. Scoring a
+      stand labelled <code>god</code> in 2017 against its 2025 embedding would test what
+      happened in the eight years since, not the method.</p>
+    <p>The first check is ordering: the median score should fall from <code>god</code> to
+      <code>sværtRedusert</code>. It does, under both reference scopes, and the
+      <code>moderat</code> class lands in between without ever having been used as a
+      reference.</p>
+  </div>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">Score distribution by field condition label</div>
+      <div class="fig-sub">Each labelled stand scored in its own survey year, global scope.
+        The box is the median and quartiles, the line the full range, the dots individual
+        stands. The dashed line is the calibrated threshold.</div>
+    </div>
+    <div class="fig-body"><div id="ch-box"></div></div>
+    <figcaption>The medians fall in the right order, but look at the spacing against the
+      spread: <code>god</code> to <code>dårlig</code> is a gap of about
+      <span data-d="resolution.global.god_minus_darlig" data-fmt="3"></span> while the
+      distributions overlap almost completely. The ordering is real; per-stand resolution is
+      not.</figcaption>
+  </figure>
+
+  <div class="two" style="margin-top:30px">
+    <figure style="margin:0">
+      <div class="fig-head">
+        <div class="fig-title">Good against poor, global scope</div>
+        <div class="fig-sub">Every labelled stand, in its survey year.</div>
+      </div>
+      <div class="fig-body"><div id="ch-roc"></div></div>
+      <figcaption>Pooled across the whole country. The
+        <a href="#controls">controls section</a> shows what happens to these curves when the
+        comparison is restricted to one locality.</figcaption>
+    </figure>
+    <div class="stack" style="gap:14px">
+      <div class="tbl-wrap" style="margin-top:0">
+        <table>
+          <caption>Separation of good from poor field labels, both scopes. Ranges are 95 %
+            intervals from resampling whole localities.</caption>
+          <thead><tr><th>Forest type</th><th>Scope</th><th class="num">Separation</th>
+            <th class="num">good</th><th class="num">poor</th></tr></thead>
+          <tbody id="tbl-auc"></tbody>
+        </table>
+      </div>
+      <div class="note warn" style="margin-top:8px">
+        <b>The uncertainty on one stand is larger than the effect being measured.</b> The
+        typical stand's interval is
+        <span data-d="resolution.global.ci_width_median" data-fmt="3"></span> wide, and the
+        whole gap between the <code>god</code> and <code>dårlig</code> medians is
+        <span data-d="resolution.global.god_minus_darlig" data-fmt="3"></span>. This is why
+        the score ranks a <em>group</em> of stands usefully and often cannot decide about an
+        <em>individual</em> one.
+      </div>
+    </div>
+  </div>
+
+  <div class="col stack" style="margin-top:26px">
+    <h3>The score is a ratio, and both halves matter</h3>
+    <p>A cell scores well by being close to good-condition stands <em>and</em> far from
+      converted land. Neither half should be read on its own. Measured separately, distance
+      from converted land separates the labels at
+      <span data-d="components.m_bad" data-fmt="3"></span> and closeness to good stands at
+      <span data-d="components.m_good_local" data-fmt="3"></span> (local) or
+      <span data-d="components.m_good_global" data-fmt="3"></span> (global). The combined
+      score beats both, at <span data-d="components.dor_local" data-fmt="3"></span> and
+      <span data-d="components.dor_global" data-fmt="3"></span> per cell. Both distances ship
+      as their own columns so this stays checkable.</p>
+  </div>
+</section>
+
+<section id="scope">
+  <div class="col h-rule"><h2>Local and global reference scopes</h2></div>
+  <div class="col stack">
+    <p>The score depends on which good-condition stands it is measured against, and the
+      pipeline computes it two ways. <b>Global</b> uses every <code>god</code> stand of the
+      same forest type in the country. <b>Local</b> uses only the nearest eight. Both refuse
+      any reference stand within 3 km of the cell being scored, so a stand is never compared
+      with its own surroundings.</p>
+    <p>Neither is simply better, and both ship. The three figures below are the whole
+      comparison.</p>
+  </div>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">How well each scope separates the field labels</div>
+      <div class="fig-sub">Higher is better; 0.50 is a coin flip. Whiskers are 95 %
+        intervals from resampling whole localities, which is why they are wide — 286 stands
+        in 39 localities are not 286 independent observations.</div>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--s1)"></i> local scope</span>
+      <span><i class="swatch" style="background:var(--s2)"></i> global scope</span>
+    </div>
+    <div class="fig-body"><div id="ch-scope-auc"></div></div>
+    <figcaption>Local is ahead overall and clearly ahead on olivinskog; global is very
+      slightly ahead on kalklindeskog. Every one of these differences sits inside the
+      intervals, so the ranking is a preference, not a result.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">Median score by field condition label, under each scope</div>
+      <div class="fig-sub">The two scopes sit at different absolute levels, so they are drawn
+        on separate scales. What matters is that both fall in the right order, and that
+        <code>moderat</code> — which is never used as a reference — lands between
+        <code>god</code> and <code>dårlig</code> in both.</div>
+    </div>
+    <div class="fig-body"><div id="ch-scope-median"></div></div>
+    <figcaption>The local scope spreads the classes further apart, which is consistent with
+      its higher separation. Absolute values are not comparable between the two panels and
+      should never be quoted without the scope attached.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">What each scope calls the <span data-d="n_polygons"></span> stands</div>
+      <div class="fig-sub">A stand is called good or poor only if its whole interval falls on
+        one side of its own threshold; otherwise it is left undecided.</div>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--ok)"></i> good condition</span>
+      <span><i class="swatch" style="background:var(--muted)"></i> indistinguishable</span>
+      <span><i class="swatch" style="background:var(--bad)"></i> poor condition</span>
+      <span><i class="swatch" style="background:var(--rule-strong)"></i> not scored</span>
+    </div>
+    <div class="fig-body"><div id="ch-scope-calls"></div></div>
+    <figcaption>The local scope is far readier to call a stand poor, and it cannot score
+      <span data-d="cond_counts.local.no_data"></span> stands at all — those have too few
+      good-condition stands of their own forest type nearby. The global scope scores
+      everything and is the more cautious caller.</figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Where the two scopes agree and disagree, stand by stand. Rows are the local
+        verdict, columns the global one.</caption>
+      <thead><tr><th>local ↓ / global →</th><th class="num">good</th>
+        <th class="num">indistinguishable</th><th class="num">poor</th></tr></thead>
+      <tbody id="tbl-scope"></tbody>
+    </table>
+  </div>
+
+  <div class="col note">
+    <b>Which to use.</b> The disagreement runs almost entirely one way: stands called poor
+    under the local scope but good under the global one, and essentially none the other way.
+    That is the expected direction — a stand can look poor beside its immediate neighbours
+    and ordinary by national standards. Use <b>global</b> when a stand has to be comparable
+    with the rest of the country, which is also the only scope that covers all
+    <span data-d="n_polygons"></span> stands. Use <b>local</b> when the question is about
+    this stand against its neighbours, and expect roughly three times as many stands to be
+    flagged. The GeoPackage carries both.
+  </div>
+</section>
+
+<section id="controls">
+  <div class="col h-rule"><h2>What the separation survives</h2></div>
+  <div class="col stack">
+    <p>The numbers so far pool stands from all over the country. That lets a score score well
+      simply by telling <em>places</em> apart, which is not the question anyone is asking.
+      The question a manager asks is inside one place: of the stands here, which are
+      degraded?</p>
+    <p>Two controls test that. The first recomputes the separation inside each 5 km locality.
+      The second recomputes it inside groups of similar-sized stands, because the
+      poor-labelled stands are systematically smaller, and a small stand is mostly edge — its
+      cells are mixtures of the stand and whatever is next to it. Stand area is put through
+      exactly the same tests as a baseline.</p>
+  </div>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">The same three predictors, asked four different questions</div>
+      <div class="fig-sub">Left to right: pooled across the country, then holding locality
+        fixed, then holding stand size fixed, then holding both fixed.</div>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--ord1)"></i> pooled</span>
+      <span><i class="swatch" style="background:var(--ord2)"></i> within one locality</span>
+      <span><i class="swatch" style="background:var(--ord3)"></i> within one size group</span>
+      <span><i class="swatch" style="background:var(--ord4)"></i> within both</span>
+    </div>
+    <div class="fig-body"><div id="ch-controls"></div></div>
+    <figcaption>Holding locality and size fixed together leaves the score at
+      <span data-d="controls.dor_local.within_both.auc" data-fmt="3"></span> (local) and
+      <span data-d="controls.dor_global.within_both.auc" data-fmt="3"></span> (global) on
+      <span data-d="controls.dor_local.within_both.pairs"></span> good–poor pairs — above a
+      coin flip, but not by much. Size may not be pure nuisance: small remnant patches
+      plausibly <em>are</em> more degraded. Both readings are still open.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">Almost all of the within-locality evidence is one locality</div>
+      <div class="fig-sub">Only <span data-d="blocks.with_both"></span> of the
+        <span data-d="blocks.total"></span> localities hold both good and poor labels in
+        usable numbers. Bar length is how many good–poor comparisons each contributes.</div>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--s1)"></i> local scope</span>
+      <span><i class="swatch" style="background:var(--s2)"></i> global scope</span>
+    </div>
+    <div class="fig-body"><div id="ch-blocks"></div></div>
+    <figcaption>Locality 23 alone supplies 83 % of the comparisons, and it is the locality where
+      the score does worst. Weight the three localities equally instead of by comparison
+      count and the picture improves considerably — which is exactly why neither weighting
+      should be quoted as the answer.</figcaption>
+  </figure>
+
+  <div class="col note">
+    <b>One problem no amount of statistics removes.</b> All
+    <span data-d="n_labelled.bad"></span> poor-labelled stands come from the MI survey
+    layers; the NiN5k stands are all labelled <code>god</code>. So part of any good-versus-poor
+    contrast is a contrast between two survey protocols. Only new field data can separate
+    those.
+  </div>
+</section>
+
+<section id="found">
+  <div class="col h-rule"><h2>What this run found</h2></div>
+  <div class="col stack">
+    <p>Because both steps measure along the same axis, the useful output is the combination.
+      Agreement between them is reassuring; disagreement is where the management questions
+      are. A stand still in good condition but losing ground is a priority. A stand in poor
+      condition but recovering probably needs to be left alone.</p>
+  </div>
+
+  <figure>
+    <div class="fig-head">
+      <div class="fig-title">Condition by trajectory</div>
+      <div class="fig-sub">Share of stands in each condition class, within each trajectory
+        class, global scope. Counts are printed on the segments and row totals on the
+        right.</div>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--ok)"></i> good condition</span>
+      <span><i class="swatch" style="background:var(--muted)"></i> indistinguishable</span>
+      <span><i class="swatch" style="background:var(--bad)"></i> poor condition</span>
+    </div>
+    <div class="fig-body"><div id="ch-xtab"></div></div>
+    <figcaption>The improving and declining rows hold
+      <span data-d="traj_counts.improving"></span> and
+      <span data-d="traj_counts.declining"></span> stands, so their proportions are noisy.
+      Read them as a list of stands worth visiting, not as rates.</figcaption>
+  </figure>
+
+  <div class="col stack" style="margin-top:26px">
+    <h3>The priority list: good condition today, declining</h3>
+    <p>These stands score above their own threshold now and have a slope past the calibrated
+      gate. Neither step could have found them alone.</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Global scope, steepest decline first. <code>slope</code> is the fitted trend
+        per year; <code>frac poor</code> is the share of the stand's own cells below its
+        threshold.</caption>
+      <thead><tr><th>Stand</th><th>Forest type</th><th>tilstand</th>
+        <th class="num">score</th><th class="num">slope</th><th class="num">frac poor</th>
+        <th class="num">ha</th></tr></thead>
+      <tbody id="tbl-priority"></tbody>
+    </table>
+  </div>
+  <div class="col note" id="note-priority"></div>
+</section>
+
+<section id="limits">
+  <div class="col h-rule"><h2>Limits</h2></div>
+  <div class="col stack">
+    <ul class="plain">
+      <li><b>Inside one locality, and controlling for stand size, the score is only a little
+        better than chance.</b>
+        <span data-d="controls.dor_local.within_both.auc" data-fmt="3"></span> to
+        <span data-d="controls.dor_global.within_both.auc" data-fmt="3"></span> on
+        <span data-d="controls.dor_local.within_both.pairs"></span> comparisons. This governs
+        every other number on this page.</li>
+      <li><b>The within-locality evidence is <span data-d="blocks.with_both"></span>
+        localities, and one of them dominates.</b> Only
+        <span data-d="blocks.with_poor"></span> of <span data-d="blocks.total"></span>
+        localities contain a poor label at all. Nothing here is established across places,
+        and the ranking of methods changes between them.</li>
+      <li><b>There are only <span data-d="n_labelled.bad"></span> poor-labelled stands.</b>
+        That is the binding constraint on the threshold, on every interval, and on any
+        attempt to put a calibrated error rate on a single stand's class.</li>
+      <li><b>Every poor label comes from one survey protocol.</b> See the note above.</li>
+      <li><b>Step 2 has no fully independent check.</b> <code>moderat</code> is held out of
+        the reference sets, but it comes from the same survey campaign and the same protocol
+        as the labels that define them. Step 1 does have one, in Hansen.</li>
+      <li><b>Cells near a stand boundary are mixtures.</b> Below 20 m from the edge a cell
+        contains the stand and its surroundings in unknown proportion. The
+        <code>edge_m</code> column is there so these can be excluded; many small stands have
+        no cells that survive that filter.</li>
+      <li><b>Tested and not shipped.</b> Eleven alternative definitions of "converted land"
+        for the far end of the ratio, and the Global Human Modification layer as a forestry
+        indicator. The first is a genuinely open question — some alternatives separate better
+        within a locality; the second was rejected because its forestry band is effectively
+        zero across Fennoscandia. Both are written up in <code>docs/METHODS.md</code> and
+        <code>research/</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="files">
+  <div class="col h-rule"><h2>The files this run produced</h2></div>
+  <div class="col stack">
+    <p>Two products, from the same numbers. One is for analysis and keeps the original grid
+      exactly. The other is a single file to open and look at.</p>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">GeoTIFFs</div><div class="v" data-d="outputs.n_tif"></div>
+      <div class="n"><span data-d="outputs.tif_mb"></span> MB · one per locality · original
+        10 m grid, no reprojection</div></div>
+    <div class="tile"><div class="k">GeoPackage</div>
+      <div class="v"><span data-d="outputs.gpkg_mb"></span> MB</div>
+      <div class="n">one file · two layers · opens in QGIS already styled</div></div>
+    <div class="tile"><div class="k">Cells in both</div>
+      <div class="v" data-d="outputs.n_cells"></div>
+      <div class="n">same values, checked against the rasters</div></div>
+  </div>
+
+  <div class="col stack" style="margin-top:26px">
+    <h3>condition_results.gpkg — the single file</h3>
+    <p>Layer <code>condition_pixels</code> holds every scored 10 m cell as a square, with the
+      same twenty measurements the rasters carry. Layer <code>condition_stands</code> holds
+      the <span data-d="n_polygons"></span> stands with their verdict, their interval and
+      their nine-year series. A <code>readme</code> table inside the file explains every
+      column, and both layers carry a default QGIS style, so dragging the file into QGIS is
+      enough.</p>
+    <p><b>Why it is vector and not one large raster.</b> The stands are spread over most of
+      Norway across five UTM zones. A single raster has to choose one projection, and moving
+      a 10 m grid between zones means resampling — the number in the cell would no longer be
+      the number that was scored. Reprojecting a <em>square</em> resamples nothing: the cell
+      becomes a slightly rotated quadrilateral over the same ground, carrying the same value.
+      A national raster would also be wasteful: it would need 12.2 billion cells to carry
+      <span data-d="outputs.n_cells"></span> real ones. Everything is in ETRS89 / UTM 33N
+      (EPSG:25833).</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>The columns worth knowing. The rest are documented in the file's own
+        <code>readme</code> table.</caption>
+      <thead><tr><th>Column</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr class="hi"><td><code>dor_global_2017…2025</code></td>
+          <td style="white-space:normal">The condition score in each year, global scope.</td></tr>
+        <tr><td><code>dor_local_2025</code></td>
+          <td style="white-space:normal">The same score against nearby good stands only.
+            Empty where a cell has too few of them within reach.</td></tr>
+        <tr class="hi"><td><code>threshold_global</code></td>
+          <td style="white-space:normal">This stand's own threshold, fitted without its own
+            locality. <b>Compare each cell to this</b>, not to one national number.</td></tr>
+        <tr><td><code>below_threshold</code></td>
+          <td style="white-space:normal">The comparison above, precomputed: 1 if the cell is
+            below its own threshold.</td></tr>
+        <tr><td><code>m_good_global_2025</code>, <code>m_bad_2025</code></td>
+          <td style="white-space:normal">The two halves of the ratio. Read them together.</td></tr>
+        <tr><td><code>sen_slope</code>, <code>trajectory</code></td>
+          <td style="white-space:normal">The fitted trend per year, and its class:
+            1 improving, 2 stable, 3 fluctuating, 4 declining.</td></tr>
+        <tr class="hi"><td><code>edge_m</code></td>
+          <td style="white-space:normal">Distance inside the stand boundary. <b>Below 20 m
+            the cell is a mixture</b> of the stand and its surroundings.</td></tr>
+        <tr><td><code>n_polygons</code></td>
+          <td style="white-space:normal">How many mapped stands claim this cell. Where more
+            than one does, every value comes from the largest of them.</td></tr>
+        <tr><td><code>priority</code> <span style="color:var(--muted)">(stands)</span></td>
+          <td style="white-space:normal">Good condition today, declining trend. One filter to
+            get the list above.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col note">
+    <b>Three things to do before drawing conclusions from the map.</b> Compare
+    <code>dor_global_2025</code> against <code>threshold_global</code> and not against a fixed
+    value. Exclude cells with <code>edge_m</code> below 20 m when looking at small stands.
+    Read <code>m_good_global_2025</code> beside the score, because the score can rise either
+    by being close to good stands or by being far from converted land.
+  </div>
+</section>
+
+<section id="run">
+  <div class="col h-rule"><h2>Reproducing it</h2></div>
+  <div class="code">
+    <div class="src"><span>the whole pipeline, in order</span><b>pixi env: geo</b></div>
+<pre>G=~/.pixi/envs/geo/bin/python
+
+$G condition/scripts/00_build_polygons.py     <span class="cm"># stands, roles, survey years</span>
+$G condition/scripts/01_plan_reads.py         <span class="cm"># blocks, time and bytes, before committing</span>
+$G condition/scripts/02_extract_embeddings.py <span class="cm"># the download — ~10 min, ~31 GB</span>
+$G condition/scripts/02b_membership.py        <span class="cm"># cell &lt;-&gt; stand, overlap-safe</span>
+$G condition/scripts/02c_plan_bad_pool.py     <span class="cm"># which blocks the converted-land set needs</span>
+$G condition/scripts/02d_extract_bad_pool.py  <span class="cm"># that download — ~4 min</span>
+$G condition/scripts/03_trajectory.py         <span class="cm"># STEP 1</span>
+$G condition/scripts/04_condition.py          <span class="cm"># STEP 2</span>
+$G condition/scripts/05_validate.py           <span class="cm"># the checks on this page</span>
+$G condition/scripts/06_rasterize.py          <span class="cm"># 66 GeoTIFFs on the original grid</span>
+$G condition/scripts/07_package.py            <span class="cm"># the single GeoPackage</span>
+$G condition/scripts/08_report_data.py        <span class="cm"># the numbers behind this page</span></pre>
+  </div>
+  <div class="col note" style="margin-top:20px">
+    <b>Every figure and number on this page is read from
+    <code>outputs/report/report_data.json</code></b>, which step 8 writes from the shipped
+    outputs. Nothing is typed in by hand, so re-running the pipeline and step 8 is enough to
+    bring the page up to date.
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Where to look for more.</caption>
+      <thead><tr><th>File</th><th>What is in it</th></tr></thead>
+      <tbody>
+        <tr><td><code>docs/METHODS.md</code></td><td style="white-space:normal">The full argument behind every choice on this page</td></tr>
+        <tr><td><code>src/condition/score.py</code></td><td style="white-space:normal">The scoring itself, and how the threshold is calibrated</td></tr>
+        <tr><td><code>src/condition/trend.py</code></td><td style="white-space:normal">The slope, the gate, and why it is not a p-value</td></tr>
+        <tr><td><code>src/condition/refs.py</code></td><td style="white-space:normal">How the local and global reference sets are chosen</td></tr>
+        <tr><td><code>research/</code></td><td style="white-space:normal">The experiments, including the alternatives that were not shipped</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="wrap">
+  Generated by <code>condition/scripts/08_report_data.py</code> from the shipped pipeline
+  outputs. Figures are drawn from <code>outputs/report/report_data.json</code>. Numbers on
+  this page describe the deployed configuration and no other.
+</footer>
+</main>
+<div id="tip" role="status" aria-live="polite"></div>
+<script type="application/json" id="report-data">__REPORT_DATA__</script>
+<script>
+(function(){
+"use strict";
+const D = JSON.parse(document.getElementById("report-data").textContent);
+const NS = "http://www.w3.org/2000/svg";
+const fmt = (v,d=3) => (v==null || !isFinite(v)) ? "—" : Number(v).toFixed(d);
+const num = v => (v==null) ? "—" : Number(v).toLocaleString("en-US");
+const dig = (o,path) => path.split(".").reduce((a,k)=> (a==null?a:a[k]), o);
+
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in (attrs||{})) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, s, attrs){
+  const t = el("text", Object.assign({x, y, fill:"var(--muted)", "font-size":11}, attrs||{}), parent);
+  t.textContent = s; return t;
+}
+function mkSvg(host, w, h, label){
+  const h0 = (typeof host === "string") ? document.getElementById(host) : host;
+  if (!h0) return null;
+  if (typeof host === "string") h0.textContent = "";
+  return el("svg", {viewBox:`0 0 ${w} ${h}`, width:w, height:h, role:"img",
+                    "aria-label":label}, h0);
+}
+
+/* ---- one hover layer for every chart ---- */
+const tip = document.getElementById("tip");
+function hover(node, html){
+  const show = ev => {
+    tip.innerHTML = html; tip.style.opacity = 1;
+    const r = tip.getBoundingClientRect();
+    let x = ev.clientX + 14, y = ev.clientY - r.height - 10;
+    if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+    if (y < 8) y = ev.clientY + 16;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  };
+  node.addEventListener("pointerenter", show);
+  node.addEventListener("pointermove", show);
+  node.addEventListener("pointerleave", () => { tip.style.opacity = 0; });
+  node.setAttribute("tabindex","0");
+  node.addEventListener("focus", () => {
+    const b = node.getBoundingClientRect();
+    show({clientX:b.left + b.width/2, clientY:b.top});
+  });
+  node.addEventListener("blur", () => { tip.style.opacity = 0; });
+}
+
+/* ---- inline values: <span data-d="a.b.c" data-fmt="3"> ---- */
+document.querySelectorAll("[data-d]").forEach(node => {
+  const v = dig(D, node.dataset.d);
+  if (v == null) { node.textContent = "—"; return; }
+  if (node.dataset.pct != null) node.textContent = (v*100).toFixed(+node.dataset.pct) + " %";
+  else if (node.dataset.fmt != null) node.textContent = fmt(v, +node.dataset.fmt);
+  else node.textContent = (typeof v === "number" && Number.isInteger(v)) ? num(v) : String(v);
+});
+const rd = document.getElementById("run-date");
+if (rd) rd.textContent = D.run_date || "—";
+
+/* ---- shared axis helpers ---- */
+function xAxis(g, x0, x1, y, lo, hi, ticks, d){
+  el("line",{x1:x0,y1:y,x2:x1,y2:y,stroke:"var(--axis)","stroke-width":1},g);
+  ticks.forEach(t=>{
+    const px = x0 + (t-lo)/(hi-lo)*(x1-x0);
+    el("line",{x1:px,y1:y,x2:px,y2:y+4,stroke:"var(--axis)","stroke-width":1},g);
+    txt(g,px,y+16,fmt(t,d==null?2:d),{"text-anchor":"middle","font-size":10});
+  });
+}
+function vGrid(g, x0, x1, yTop, yBot, lo, hi, ticks){
+  ticks.forEach(t=>{
+    const px = x0 + (t-lo)/(hi-lo)*(x1-x0);
+    el("line",{x1:px,y1:yTop,x2:px,y2:yBot,stroke:"var(--grid)","stroke-width":1},g);
+  });
+}
+
+/* ================= trajectory small multiples ================= */
+(function(){
+  const host = document.getElementById("ch-traj"); if(!host) return;
+  host.textContent = "";
+  const grid = document.createElement("div");
+  grid.style.cssText = "display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));max-width:760px";
+  host.appendChild(grid);
+  const NAME = {declining:"Declining", improving:"Improving", stable:"Stable",
+                fluctuating:"Fluctuating"};
+  const years = D.years;
+  (D.examples||[]).forEach(ex => {
+    const card = document.createElement("div");
+    card.style.cssText = "border:1px solid var(--rule);border-radius:9px;padding:12px 12px 6px;background:var(--surface-2)";
+    const head = document.createElement("div");
+    head.style.cssText = "display:flex;flex-direction:column;gap:2px;margin-bottom:6px";
+    head.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">'+
+      '<b style="font-family:\'IBM Plex Serif\',serif;font-size:.95rem">'+NAME[ex.cls]+'</b>'+
+      '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:.68rem;color:var(--muted)">'+
+      ex.forest_type+'</span></div>'+
+      '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:.68rem;color:var(--ink-2)">'+
+      'slope '+fmt(ex.sen_slope,3)+'/yr &nbsp;·&nbsp; p '+fmt(ex.mk_p,3)+
+      ' &nbsp;·&nbsp; year-to-year spread '+fmt(ex.sd,2)+'</div>';
+    card.appendChild(head); grid.appendChild(card);
+    const W=320,H=170,L=44,R=12,T=10,B=26;
+    const s = mkSvg(card, W, H, NAME[ex.cls]+" trajectory");
+    const vals = ex.c.concat(ex.fit);
+    let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    const pad = Math.max((hi-lo)*0.22, 0.02); lo -= pad; hi += pad;
+    const X = i => L + i*(W-L-R)/(years.length-1);
+    const Y = v => T + (hi-v)*(H-T-B)/(hi-lo);
+    for(let g=0; g<=2; g++){
+      const v = lo + g*(hi-lo)/2;
+      el("line",{x1:L,x2:W-R,y1:Y(v),y2:Y(v),stroke:"var(--grid)","stroke-width":1},s);
+      txt(s,L-7,Y(v)+3.5,fmt(v,2),{"text-anchor":"end","font-size":9.5});
+    }
+    el("line",{x1:L,x2:W-R,y1:H-B,y2:H-B,stroke:"var(--axis)","stroke-width":1},s);
+    [0,4,8].forEach(i => txt(s,X(i),H-B+15,years[i],{"text-anchor":"middle","font-size":9.5}));
+    el("line",{x1:X(0),y1:Y(ex.fit[0]),x2:X(years.length-1),y2:Y(ex.fit[1]),
+               stroke:"var(--accent)","stroke-width":1.6,"stroke-linecap":"round",opacity:.85},s);
+    const d = ex.c.map((v,i)=>(i?"L":"M")+X(i)+" "+Y(v)).join(" ");
+    el("path",{d,fill:"none",stroke:"var(--s1)","stroke-width":2,
+               "stroke-linejoin":"round","stroke-linecap":"round"},s);
+    ex.c.forEach((v,i)=>{
+      el("circle",{cx:X(i),cy:Y(v),r:4,fill:"var(--s1)",stroke:"var(--surface-2)",
+                   "stroke-width":2},s);
+      const hit = el("circle",{cx:X(i),cy:Y(v),r:13,fill:"transparent"},s);
+      hover(hit, "<b>"+years[i]+"</b><br>position on the axis "+fmt(v,4));
+    });
+  });
+})();
+
+/* ================= score distribution by field label ================= */
+(function(){
+  const host = document.getElementById("ch-box"); if(!host) return;
+  host.textContent = "";
+  const rows = D.box.global; if(!rows || !rows.length) return;
+  const RH=62,L=128,R=118,T=34,B=38,W=900,H=T+rows.length*RH+B;
+  const s = mkSvg(host, W, H, "Condition score distribution by field condition label");
+  const all = rows.flatMap(r=>[r.lo,r.hi]);
+  let lo=Math.min.apply(null,all), hi=Math.max.apply(null,all);
+  const pad=(hi-lo)*0.06; lo-=pad; hi+=pad;
+  const X = v => L + (v-lo)*(W-L-R)/(hi-lo);
+  const RAMP = ["var(--ord1)","var(--ord2)","var(--ord3)","var(--ord4)"];
+  for(let i=0;i<=6;i++){
+    const v = lo + i*(hi-lo)/6;
+    el("line",{x1:X(v),x2:X(v),y1:T-8,y2:H-B,stroke:"var(--grid)","stroke-width":1},s);
+    txt(s,X(v),H-B+16,fmt(v,2),{"text-anchor":"middle"});
+  }
+  const th = D.threshold.global.threshold;
+  el("line",{x1:X(th),x2:X(th),y1:T-18,y2:H-B,stroke:"var(--ink-2)",
+             "stroke-width":1.5,"stroke-dasharray":"4 3"},s);
+  txt(s,X(th),T-23,"threshold "+fmt(th,3),
+      {"text-anchor":"middle",fill:"var(--ink-2)","font-size":10.5});
+  let seed=7; const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff;};
+  rows.forEach((r,i)=>{
+    const cy = T + i*RH + RH/2, color = RAMP[Math.min(i,3)];
+    txt(s,L-14,cy+4,r.label,{"text-anchor":"end",fill:"var(--ink)","font-size":12});
+    r.values.forEach(v=>{
+      el("circle",{cx:X(v),cy:cy+(rnd()-0.5)*22,r:2.3,fill:"var(--muted)",opacity:.34},s);
+    });
+    el("line",{x1:X(r.lo),x2:X(r.hi),y1:cy,y2:cy,stroke:"var(--axis)","stroke-width":1.5},s);
+    el("rect",{x:X(r.q1),y:cy-11,width:Math.max(X(r.q3)-X(r.q1),2),height:22,rx:3,
+               fill:color,opacity:.9,stroke:"var(--chart-surface)","stroke-width":2},s);
+    el("line",{x1:X(r.med),x2:X(r.med),y1:cy-13,y2:cy+13,
+               stroke:"var(--ink)","stroke-width":2.5,"stroke-linecap":"round"},s);
+    txt(s,W-R+12,cy-1,"n = "+r.n,{fill:"var(--ink-2)","font-size":11});
+    txt(s,W-R+12,cy+13,"median "+fmt(r.med,3),{fill:"var(--muted)","font-size":10.5});
+    const hit = el("rect",{x:L,y:cy-RH/2+4,width:W-L-R,height:RH-8,fill:"transparent"},s);
+    hover(hit,"<b>"+r.label+"</b> · n = "+r.n+"<br>median "+fmt(r.med,3)+
+              "<br>quartiles "+fmt(r.q1,3)+" to "+fmt(r.q3,3));
+  });
+  txt(s,(L+W-R)/2,H-8,"condition score  →  closer to the good-condition references",
+      {"text-anchor":"middle","font-size":10.5});
+})();
+
+/* ================= ROC, global scope ================= */
+(function(){
+  const host = document.getElementById("ch-roc"); if(!host) return;
+  host.textContent = "";
+  const P=62,W=380,H=372;
+  const s = mkSvg(host, W, H, "Separation of good from poor stands, global scope");
+  const size = Math.min(W-P-18, H-34-14);
+  const X = v => P + v*size, Y = v => 14 + (1-v)*size;
+  [0,0.25,0.5,0.75,1].forEach(v=>{
+    el("line",{x1:X(v),x2:X(v),y1:14,y2:Y(0),stroke:"var(--grid)","stroke-width":1},s);
+    el("line",{x1:X(0),x2:X(1),y1:Y(v),y2:Y(v),stroke:"var(--grid)","stroke-width":1},s);
+    txt(s,X(v),Y(0)+15,fmt(v,2),{"text-anchor":"middle","font-size":9.5});
+    txt(s,X(0)-7,Y(v)+3.5,fmt(v,2),{"text-anchor":"end","font-size":9.5});
+  });
+  el("line",{x1:X(0),y1:Y(0),x2:X(1),y2:Y(1),stroke:"var(--axis)","stroke-width":1},s);
+  txt(s,X(0.62),Y(0.52),"coin flip",{fill:"var(--muted)","font-size":9.5,
+      transform:"rotate(-45 "+X(0.62)+" "+Y(0.52)+")"});
+  const SER=[["kalklindeskog","var(--s1)"],["olivinskog","var(--s2)"],["both","var(--s3)"]];
+  SER.forEach(([k,col])=>{
+    const r = D.roc.global[k]; if(!r) return;
+    const d = r.fpr.map((x,i)=>(i?"L":"M")+X(x)+" "+Y(r.tpr[i])).join(" ");
+    el("path",{d,fill:"none",stroke:col,"stroke-width":2,
+               "stroke-linejoin":"round","stroke-linecap":"round"},s);
+  });
+  const lx=X(0.30), ly=Y(0.26);
+  SER.forEach(([k,col],i)=>{
+    const r = D.roc.global[k]; if(!r) return;
+    el("rect",{x:lx,y:ly+i*19-8,width:11,height:11,rx:3,fill:col},s);
+    txt(s,lx+18,ly+i*19+1,k+"  "+fmt(r.auc,2),{fill:"var(--ink)","font-size":11});
+  });
+  txt(s,X(0.5),H-6,"false alarms →",{"text-anchor":"middle","font-size":10.5});
+  txt(s,14,Y(0.5),"poor stands found →",{"text-anchor":"middle","font-size":10.5,
+      transform:"rotate(-90 14 "+Y(0.5)+")"});
+})();
+
+/* ================= NEW: separation by scope ================= */
+(function(){
+  const rows = [["both","all labelled stands"],["kalklindeskog","kalklindeskog"],
+                ["olivinskog","olivinskog"]];
+  const W=820, rowH=64, padT=22, L=190, R=W-56, H=padT+rows.length*rowH+40;
+  const s = mkSvg("ch-scope-auc", W, H, "Separation by reference scope and forest type");
+  if(!s) return;
+  const lo=0.45, hi=1.0, ticks=[0.5,0.6,0.7,0.8,0.9,1.0];
+  vGrid(s,L,R,padT,padT+rows.length*rowH,lo,hi,ticks);
+  const px = v => L + (v-lo)/(hi-lo)*(R-L);
+  el("line",{x1:px(0.5),y1:padT,x2:px(0.5),y2:padT+rows.length*rowH,
+             stroke:"var(--rule-strong)","stroke-width":1,"stroke-dasharray":"3 3"},s);
+  txt(s,px(0.5),padT-8,"coin flip",{"text-anchor":"middle","font-size":10});
+  rows.forEach(([ft,label],i)=>{
+    const y0 = padT + i*rowH;
+    txt(s,L-12,y0+rowH/2+4,label,{"text-anchor":"end",fill:"var(--ink-2)","font-size":11});
+    [["local","var(--s1)",-14],["global","var(--s2)",4]].forEach(([sc,col,dy])=>{
+      const r = D.auc_stand[sc][ft]; if(!r) return;
+      const y = y0 + rowH/2 + dy;
+      el("line",{x1:px(r.lo),y1:y+5,x2:px(r.hi),y2:y+5,stroke:"var(--ink)",
+                 opacity:.30,"stroke-width":1.5},s);
+      [r.lo,r.hi].forEach(v => el("line",{x1:px(v),y1:y+1,x2:px(v),y2:y+9,
+                 stroke:"var(--ink)",opacity:.30,"stroke-width":1.5},s));
+      const b = el("rect",{x:L,y:y,width:Math.max(2,px(r.auc)-L),height:11,rx:4,fill:col},s);
+      hover(b, "<b>"+label+" · "+sc+" scope</b><br>separation "+fmt(r.auc,3)+
+               "<br>95 % interval "+fmt(r.lo,2)+" to "+fmt(r.hi,2)+
+               "<br>"+r.n_good+" good · "+r.n_bad+" poor");
+      txt(s,px(r.hi)+8,y+9.5,fmt(r.auc,3),{fill:"var(--ink-2)","font-size":10});
+    });
+  });
+  xAxis(s,L,R,padT+rows.length*rowH,lo,hi,ticks);
+})();
+
+/* ================= NEW: medians by scope ================= */
+(function(){
+  const host = document.getElementById("ch-scope-median"); if(!host) return;
+  host.textContent = "";
+  const grid = document.createElement("div");
+  grid.style.cssText = "display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));max-width:820px";
+  host.appendChild(grid);
+  const CLS = ["god","moderat","dårlig","sværtRedusert"];
+  const RAMP = ["var(--ord4)","var(--ord3)","var(--ord2)","var(--ord1)"];
+  ["local","global"].forEach(sc=>{
+    const m = D.medians[sc]; if(!m) return;
+    const card = document.createElement("div");
+    card.style.cssText = "border:1px solid var(--rule);border-radius:9px;padding:12px 14px 8px;background:var(--surface-2)";
+    const head = document.createElement("div");
+    head.style.cssText = "font-family:'IBM Plex Mono',monospace;font-size:.74rem;color:var(--ink-2);margin-bottom:8px";
+    head.innerHTML = "<b style=\"color:var(--ink)\">"+sc+" scope</b> &nbsp;·&nbsp; threshold "+
+      fmt(D.threshold[sc].threshold,3)+" &nbsp;·&nbsp; "+
+      (m.monotone ? '<span style="color:var(--ok)">ordered</span>'
+                  : '<span style="color:var(--bad)">OUT OF ORDER</span>');
+    card.appendChild(head); grid.appendChild(card);
+    const vals = CLS.map(c=>m.values[c]).filter(v=>v!=null);
+    const lo = Math.min.apply(null,vals)-0.03, hi = Math.max.apply(null,vals)+0.012;
+    const W=330,RH=38,T=8,L=104,R=44,H=T+CLS.length*RH+30;
+    const s = mkSvg(card, W, H, "Median score by field label, "+sc+" scope");
+    const px = v => L + (v-lo)/(hi-lo)*(W-L-R);
+    CLS.forEach((c,i)=>{
+      const v = m.values[c], y = T + i*RH + RH/2 - 9;
+      txt(s,L-10,y+13,c,{"text-anchor":"end",fill:"var(--ink)","font-size":11});
+      if(v==null) return;
+      const b = el("rect",{x:L,y:y,width:Math.max(2,px(v)-L),height:18,rx:4,
+                           fill:RAMP[i]},s);
+      hover(b,"<b>"+c+" · "+sc+" scope</b><br>median score "+fmt(v,4)+
+              "<br>"+m.counts[c]+" stands");
+      txt(s,px(v)+7,y+13,fmt(v,3),{fill:"var(--ink-2)","font-size":10});
+    });
+    const th = D.threshold[sc].threshold;
+    if(th>lo && th<hi){
+      el("line",{x1:px(th),y1:T-2,x2:px(th),y2:T+CLS.length*RH,stroke:"var(--ink-2)",
+                 "stroke-width":1.3,"stroke-dasharray":"4 3"},s);
+    }
+    const step = (hi-lo) > 0.13 ? 0.05 : 0.04, ticks = [];
+    for(let t = Math.ceil(lo/step)*step; t < hi; t += step) ticks.push(+t.toFixed(2));
+    xAxis(s,L,W-R,T+CLS.length*RH,lo,hi,ticks,2);
+  });
+})();
+
+/* ================= NEW: what each scope calls the stands ================= */
+(function(){
+  const KEYS = [["good_condition","good condition","var(--ok)"],
+                ["indistinguishable","indistinguishable","var(--muted)"],
+                ["poor_condition","poor condition","var(--bad)"],
+                ["no_data","not scored","var(--rule-strong)"]];
+  const W=860, RH=76, T=16, L=96, R=76, H=T+2*RH+18;
+  const s = mkSvg("ch-scope-calls", W, H, "Condition class counts under each scope");
+  if(!s) return;
+  const span = W-L-R;
+  ["local","global"].forEach((sc,i)=>{
+    const c = D.cond_counts[sc] || {};
+    const tot = KEYS.reduce((a,[k])=>a+(c[k]||0), 0);
+    const y = T + i*RH;
+    txt(s,L-14,y+RH/2,sc,{"text-anchor":"end",fill:"var(--ink)","font-size":13});
+    txt(s,L-14,y+RH/2+16,"scope",{"text-anchor":"end","font-size":10});
+    let x = L;
+    KEYS.forEach(([k,label,col])=>{
+      const v = c[k]||0; if(!v) return;
+      const w = span*v/tot;
+      const seg = el("rect",{x:x+(x>L?2:0),y:y+16,width:Math.max(w-(x>L?2:0),0),
+                             height:RH-38,rx:3,fill:col,opacity:.9},s);
+      hover(seg,"<b>"+sc+" scope · "+label+"</b><br>"+v+" of "+tot+" stands ("+
+                Math.round(100*v/tot)+" %)");
+      if(w>44) txt(s,x+w/2,y+RH/2+4,v,{"text-anchor":"middle",fill:"var(--ground)",
+                                       "font-size":11.5,"font-weight":600});
+      x += w;
+    });
+    txt(s,W-R+12,y+RH/2+4,"n = "+tot,{fill:"var(--ink-2)","font-size":11});
+  });
+  txt(s,L,H-4,"0 %",{"font-size":10});
+  txt(s,L+span,H-4,"100 %",{"text-anchor":"end","font-size":10});
+})();
+
+/* ================= controls: four questions ================= */
+(function(){
+  const keys = [["dor_local","condition score · local"],
+                ["dor_global","condition score · global"],
+                ["area_ha","stand size alone"]];
+  const Q = [["pooled","pooled across the country","var(--ord1)"],
+             ["within_locality","within one locality","var(--ord2)"],
+             ["within_size","within one size group","var(--ord3)"],
+             ["within_both","within both","var(--ord4)"]];
+  const W=830, rowH=74, padT=26, L=200, R=W-60, H=padT+keys.length*rowH+40;
+  const s = mkSvg("ch-controls", W, H, "Separation under four controls, three predictors");
+  if(!s) return;
+  const lo=0.45, hi=0.85, ticks=[0.5,0.6,0.7,0.8];
+  vGrid(s,L,R,padT,padT+keys.length*rowH,lo,hi,ticks);
+  const px = v => L + (v-lo)/(hi-lo)*(R-L);
+  el("line",{x1:px(0.5),y1:padT,x2:px(0.5),y2:padT+keys.length*rowH,
+             stroke:"var(--rule-strong)","stroke-width":1,"stroke-dasharray":"3 3"},s);
+  txt(s,px(0.5),padT-8,"coin flip",{"text-anchor":"middle","font-size":10});
+  keys.forEach(([k,label],i)=>{
+    const c = D.controls[k], y = padT + i*rowH + rowH/2;
+    txt(s,L-12,y+4,label,{"text-anchor":"end",fill:"var(--ink-2)","font-size":11});
+    const pts = Q.map(([q,name,col])=>{
+      const o = c[q];
+      const v = (q==="pooled") ? o : (o && o.auc);
+      return v==null ? null : {v, name, col, meta:(q==="pooled") ? null : o};
+    }).filter(Boolean);
+    if(pts.length>1){
+      const xs = pts.map(p=>px(p.v));
+      el("line",{x1:Math.min.apply(null,xs),y1:y,x2:Math.max.apply(null,xs),y2:y,
+                 stroke:"var(--rule-strong)","stroke-width":2},s);
+    }
+    pts.forEach((p,j)=>{
+      const m = el("circle",{cx:px(p.v),cy:y,r:7,fill:p.col,
+                             stroke:"var(--chart-surface)","stroke-width":2},s);
+      hover(m,"<b>"+label+"</b><br>"+p.name+" "+fmt(p.v,3)+
+              (p.meta ? "<br>"+p.meta.pairs+" comparisons in "+p.meta.cells+" groups" : ""));
+      txt(s,px(p.v), y + (j%2 ? 22 : -14), fmt(p.v,3),
+          {"text-anchor":"middle",fill:p.col,"font-size":10});
+    });
+  });
+  xAxis(s,L,R,padT+keys.length*rowH,lo,hi,ticks);
+})();
+
+/* ================= which localities carry the evidence ================= */
+(function(){
+  const rows = D.locality_weight || [];
+  const W=820, rowH=56, padT=24, L=180, R=W-160, H=padT+rows.length*rowH+30;
+  const s = mkSvg("ch-blocks", W, H, "Good-poor comparisons contributed by each locality");
+  if(!s || !rows.length) return;
+  const maxP = Math.max.apply(null, rows.map(r=>r.pairs));
+  const total = rows.reduce((a,r)=>a+r.pairs,0);
+  rows.forEach((r,i)=>{
+    const y = padT + i*rowH + rowH/2;
+    txt(s,L-12,y-2,"locality "+r.block,{"text-anchor":"end",fill:"var(--ink)","font-size":11});
+    txt(s,L-12,y+12,r.forest_type,{"text-anchor":"end",fill:"var(--muted)","font-size":9.5});
+    const w = (r.pairs/maxP)*(R-L);
+    const b = el("rect",{x:L,y:y-11,width:Math.max(2,w),height:22,rx:4,
+                         fill:"var(--s1)",opacity:.26},s);
+    hover(b,"<b>locality "+r.block+"</b> · "+r.forest_type+"<br>"+
+            r.good+" good × "+r.bad+" poor = "+r.pairs+" comparisons<br>"+
+            Math.round(100*r.pairs/total)+" % of all of them");
+    txt(s,L+8,y+4,r.pairs+" comparisons",{fill:"var(--ink-2)","font-size":10.5});
+    [["auc_local","var(--s1)",0],["auc_global","var(--s2)",1]].forEach(([k,col,j])=>{
+      const v = r[k]; if(v==null) return;
+      txt(s,R+16+j*74, y+4, fmt(v,3),
+          {fill: col, "font-size":11, "font-weight":500});
+    });
+  });
+  txt(s,L,padT-8,"good–poor comparisons contributed",{"font-size":10});
+  txt(s,R+16,padT-8,"local",{"font-size":10,fill:"var(--s1)"});
+  txt(s,R+90,padT-8,"global",{"font-size":10,fill:"var(--s2)"});
+})();
+
+/* ================= condition by trajectory ================= */
+(function(){
+  const host = document.getElementById("ch-xtab"); if(!host) return;
+  host.textContent = "";
+  const {index, columns, values} = D.xtab.global;
+  const COL = ["var(--ok)","var(--muted)","var(--bad)"];
+  const NICE = {good_condition:"good", indistinguishable:"indistinguishable",
+                poor_condition:"poor"};
+  const L=116,R=78,T=12,RH=54,W=860,H=T+index.length*RH+26;
+  const s = mkSvg(host, W, H, "Condition class shares within each trajectory class");
+  const span = W-L-R;
+  index.forEach((row,i)=>{
+    const y = T + i*RH, tot = values[i].reduce((a,b)=>a+b,0);
+    txt(s,L-14,y+RH/2+4,row,{"text-anchor":"end",fill:"var(--ink)","font-size":12});
+    if(!tot) return;
+    let x = L;
+    values[i].forEach((v,j)=>{
+      const w = span*v/tot, g = j?2:0;
+      const seg = el("rect",{x:x+g,y:y+14,width:Math.max(w-g,0),height:RH-30,rx:3,
+                             fill:COL[j],opacity:.88},s);
+      hover(seg,"<b>"+row+" · "+NICE[columns[j]]+"</b><br>"+v+" of "+tot+
+                " stands ("+Math.round(100*v/tot)+" %)");
+      if(w>40) txt(s,x+w/2,y+RH/2+4,v,{"text-anchor":"middle",fill:"var(--ground)",
+                                       "font-size":11.5,"font-weight":600});
+      x += w;
+    });
+    txt(s,W-R+12,y+RH/2+4,"n = "+tot,{fill:"var(--ink-2)","font-size":11});
+  });
+  txt(s,L,H-4,"0 %",{"font-size":10});
+  txt(s,L+span,H-4,"100 %",{"text-anchor":"end","font-size":10});
+})();
+
+/* ================= tables ================= */
+(function(){
+  const ta = document.getElementById("tbl-auc");
+  if(ta) ["both","kalklindeskog","olivinskog"].forEach(ft=>{
+    ["local","global"].forEach((sc,j)=>{
+      const r = D.auc_stand[sc][ft]; if(!r) return;
+      const tr = document.createElement("tr");
+      tr.innerHTML = (j===0 ? "<td>"+(ft==="both"?"<b>all stands</b>":ft)+"</td>"
+                            : "<td></td>") +
+        "<td><code>"+sc+"</code></td>"+
+        '<td class="num">'+fmt(r.auc,3)+
+        '<span style="color:var(--muted)"> ['+fmt(r.lo,2)+"–"+fmt(r.hi,2)+"]</span></td>"+
+        '<td class="num">'+r.n_good+'</td><td class="num">'+r.n_bad+"</td>";
+      if(ft==="both") tr.className = "hi";
+      ta.appendChild(tr);
+    });
+  });
+
+  const ts = document.getElementById("tbl-scope");
+  if(ts){
+    const {index, columns, values} = D.scope_xtab;
+    const NICE = {good_condition:"good", indistinguishable:"indistinguishable",
+                  poor_condition:"poor", no_data:"not scored"};
+    index.forEach((row,i)=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>"+(NICE[row]||row)+"</td>" +
+        columns.map((c,j)=>{
+          const v = values[i][j];
+          const off = (row!=="no_data" && row!==c && v>0);
+          return '<td class="num"'+(off?' style="color:var(--bad);font-weight:600"':'')+
+                 ">"+v+"</td>";
+        }).join("");
+      ts.appendChild(tr);
+    });
+  }
+
+  const tt = document.getElementById("tbl-traj");
+  if(tt){
+    const RULE = {improving:"slope steeper than +"+fmt(D.gate.stand[1],3)+" per year",
+                  stable:"inside the gate, steady year to year",
+                  fluctuating:"inside the gate, moves about a lot",
+                  declining:"slope steeper than "+fmt(D.gate.stand[0],3)+" per year"};
+    const {index, columns, values} = D.traj_by_type;
+    const ORDER = ["declining","fluctuating","stable","improving"];
+    ORDER.forEach(row=>{
+      const i = index.indexOf(row); if(i<0) return;
+      const tot = values[i].reduce((a,b)=>a+b,0);
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td><b>"+row+"</b></td>"+
+        "<td style='white-space:normal'>"+(RULE[row]||"")+"</td>"+
+        values[i].map(v=>'<td class="num">'+v+"</td>").join("")+
+        '<td class="num"><b>'+tot+"</b></td>";
+      if(row==="declining") tr.className = "hi";
+      tt.appendChild(tr);
+    });
+  }
+
+  const tp = document.getElementById("tbl-priority");
+  const list = (D.priority && D.priority.global) || [];
+  if(tp){
+    if(!list.length){
+      const tr = document.createElement("tr");
+      tr.innerHTML = '<td colspan="7" style="color:var(--muted);white-space:normal">'+
+        "No stand is both above its own threshold and past the declining gate in this run.</td>";
+      tp.appendChild(tr);
+    }
+    list.forEach(r=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td><code>"+r.poly_id+"</code></td><td>"+r.ft+"</td>"+
+        "<td>"+(r.tilstand||"—")+"</td>"+
+        '<td class="num">'+fmt(r.dor,3)+"</td>"+
+        '<td class="num" style="color:var(--bad)">'+fmt(r.slope,3)+"</td>"+
+        '<td class="num">'+fmt(r.frac_poor,2)+"</td>"+
+        '<td class="num">'+fmt(r.area,2)+"</td>";
+      tp.appendChild(tr);
+    });
+  }
+  const np = document.getElementById("note-priority");
+  if(np) np.innerHTML = "<b>"+list.length+" stands are in that quadrant, and "+
+    D.priority.global_recovering+" are in the mirror image of it</b> — poor condition but "+
+    "improving, which reads as recovery under way and argues for leaving the current "+
+    "management in place. Under the local scope the same two counts are "+
+    (D.priority.local||[]).length+" and "+D.priority.local_recovering+
+    ", because that scope calls far more stands poor to begin with.";
+})();
+})();
+</script>
