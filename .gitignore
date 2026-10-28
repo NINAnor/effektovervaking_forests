@@ -177,3 +177,7 @@ pyrightconfig.json
 
 # forestmon default data root (FORESTMON_DATA_DIR)
 /data/
+
+# S3 credentials (never commit)
+.env.s3
+*.credentials
