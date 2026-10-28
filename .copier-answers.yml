@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier
+_commit: v0.3.0
+_src_path: gh:ninanor/template-python
+author_name: Geethen Singh
+debug: false
+default_branch_name: main
+docker: false
+email: geethen.singh@nina.no
+notebook: false
+project_name: Effektovervaking Forests
+project_slug: effektovervaking_forests
+repo_name: effektovervaking_forests
+repo_org: NINAnor
+template_type: python
+type_annotations: true
