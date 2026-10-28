@@ -1,0 +1,89 @@
+[build-system]
+build-backend = "uv_build"
+requires = ["uv_build>=0.8,<0.12"]
+
+[dependency-groups]
+dev = [
+  "deptry",
+  "pytest"
+]
+
+[project]
+authors = [
+  { name = "Geethen Singh", email = "geethen.singh@nina.no" }
+]
+dependencies = [
+  "duckdb>=1.0",
+  "geopandas>=1.0",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyarrow>=15",
+  "pystac-client>=0.8",
+  "pyxccd>=1.0.3",
+  "rasterio>=1.3",
+  "s3fs>=2024.2",
+  "scipy>=1.10",
+  "shapely>=2.0",
+  "typer>=0.12"
+]
+description = "Monitoring script that detects forest loss using the SCCD algorithm"
+license = "GPL-3.0-or-later"
+name = "effektovervaking_forests"
+readme = "README.md"
+requires-python = ">=3.11"
+version = "0.1.0"
+
+[project.optional-dependencies]
+# `bench-*` commands only: experimental zarr/virtual-tiff read paths.
+bench = ["obspec-utils", "obstore", "virtual-tiff", "xarray", "zarr>=3"]
+# `parity check` only: compares CDSE reads against Earth Engine.
+gee = ["earthengine-api>=1.0"]
+
+[project.scripts]
+effektovervaking-forests = "effektovervaking_forests.cli:app"
+forestmon = "effektovervaking_forests.cli:app"
+
+[tool.deptry]
+known_first_party = ["effektovervaking_forests"]
+
+[tool.deptry.package_module_name_map]
+earthengine-api = "ee"
+obspec-utils = "obspec_utils"
+virtual-tiff = "virtual_tiff"
+
+[tool.deptry.per_rule_ignores]
+# Parquet engine for pandas/geopandas: used at runtime, never imported by name.
+DEP002 = ["pyarrow"]
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+testpaths = ["tests"]
+
+[tool.ruff]
+fix = true
+
+[tool.ruff.lint]
+ignore = ["COM812"]
+select = ["E", "W", "I", "F", "UP", "S", "B", "A", "COM", "LOG", "PTH", "Q", "ANN"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ported field-tested code: sweeping annotation / pathlib / zip-strict rewrites
+# are out of scope for the port and risk behaviour changes; revisit incrementally.
+"src/*" = [
+  "ANN",  # full type annotations not retrofitted onto ported code
+  "B905",  # zip(strict=...) would change behaviour on mismatched lengths
+  "PTH105",  # os.replace used for atomic writes; semantics identical, left as-is
+  "PTH123",  # open() -> Path.open() rewrite not required
+  "S110",  # deliberate best-effort try/except/pass in benchmarks
+  "S603",  # subprocess calls use fixed argv lists (no shell, no user input)
+  "S301",  # pickle only reads our own state files written by this package
+  "S608",  # SQL built from internal identifiers, not user input
+  "S105",  # env-var *name* constant (S3_SECRET_ENV), not a secret
+  "B008"  # typer.Argument/Option defaults are the idiomatic typer pattern
+]
+"tests/*" = [
+  "S101",  # asserts are the point of tests
+  "ANN",  # test functions/fixtures/fakes left unannotated
+  "B905",  # zip(strict=) not needed in test fixtures
+  "S603"  # test runs our own CLI via subprocess with fixed argv
+]
