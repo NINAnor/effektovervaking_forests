@@ -118,6 +118,9 @@ def test_append_writes_parts_and_never_rewrites_them():
     # The first batch's file is untouched: appends are additive, not read-modify-write.
     assert all(p.stat().st_mtime_ns == mtimes[p] for p in first)
     assert len(obs.load(AOI)) == 4
+    # A column subset without the sort key (what `obs status` asks for).
+    sub = obs.load(AOI, columns=["pix_id", "scene_id"], clear_only=False)
+    assert list(sub.columns) == ["pix_id", "scene_id"] and len(sub) == 4
 
 
 def test_reprocessed_product_supersedes_rather_than_duplicates():
