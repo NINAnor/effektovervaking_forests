@@ -1,4 +1,4 @@
-"""Read AlphaEarth annual embeddings from Source Cooperative (no Earth Engine).
+"""Read AlphaEarth annual embeddings from Source Cooperative.
 
 The mirror holds 64-band, 10 m int8 COGs (8192x8192, one directory per year and
 UTM zone) plus a tile index (`aef_index.parquet`). Design constraints:
@@ -6,26 +6,23 @@ UTM zone) plus a tile index (`aef_index.parquet`). Design constraints:
 1. COGs are band-interleaved with 1024x1024 blocks, so small windows are
    expensive. This module block-aligns: it finds the blocks the polygons touch,
    reads each once in full, and cuts polygons out in memory.
-2. The `.tiff` is bottom-up (origin at the SOUTH edge). The sibling `.vrt` is
-   north-up but re-blocks to 128x512, defeating (1), so `_read_block` reads the
-   `.tiff` natively and flips.
+2. The `.tiff` is bottom-up (origin at the SOUTH edge); blocks are flipped
+   to north-up after reading.
 3. Values are int8, nodata -128, quantised with a signed square root;
    `dequantise` inverts it.
 
-Reads use `/vsicurl` against data.source.coop (no credentials); `gdal_env()`
-applies the HTTP tuning.
+Reads go through `aef_loader_plus` (no credentials).
 """
 
 from __future__ import annotations
 
-import os
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import Affine, xy
 
@@ -34,15 +31,14 @@ from effektovervaking_forests.condition.paths import (
     AEF_INDEX_URL,
     AEF_NODATA,
     BANDS,
+    CACHE,
 )
 
 __all__ = [
-    "gdal_env",
     "dequantise",
     "open_tile",
     "ensure_index",
     "tiles_for_geometries",
-    "tile_uri",
     "blocks_for_geometries",
     "extract_from_tile",
     "extract_polygon_pixels",
@@ -51,42 +47,9 @@ __all__ = [
 
 BLOCK = 1024  # the COGs' internal block size, in pixels
 TILE_SIZE = 8192  # tile width/height, in pixels
-
-_GDAL_ENV = {
-    # /vsis3 fallback; harmless when reading over /vsicurl.
-    "AWS_NO_SIGN_REQUEST": "YES",
-    "AWS_DEFAULT_REGION": "us-west-2",
-    # Never list a prefix just to open one object.
-    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-    "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tiff,.vrt",
-    # Most important setting: issue the 64 per-band block ranges concurrently.
-    "GDAL_HTTP_MULTIRANGE": "YES",
-    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
-    "GDAL_HTTP_MULTIPLEX": "YES",
-    "GDAL_HTTP_VERSION": "2",
-    # rasterio.Env passes these to CPLSetConfigOption by type: the size options
-    # must stay ints, not strings, or GDAL raises "an integer is required".
-    "GDAL_CACHEMAX": 2048,
-    "VSI_CACHE": True,
-    "VSI_CACHE_SIZE": 64 * 1024 * 1024,
-    "GDAL_NUM_THREADS": "ALL_CPUS",
-    # data.source.coop (Cloudflare) returns 520/522/525 under concurrency; GDAL
-    # does not retry those by default, so list them with the usual 5xx.
-    "GDAL_HTTP_MAX_RETRY": 5,
-    "GDAL_HTTP_RETRY_DELAY": 2,
-    "GDAL_HTTP_RETRY_CODES": "429,500,502,503,504,520,521,522,523,524,525",
-}
-
-
-def gdal_env(**overrides) -> rasterio.Env:
-    """A `rasterio.Env` configured for anonymous Source Cooperative reads."""
-    cfg = dict(_GDAL_ENV)
-    cfg.update(overrides)
-    # Also export to os.environ: the AWS options are read when the /vsis3 handler
-    # is first created rather than per-Env, so an Env alone can be too late.
-    for k, v in cfg.items():
-        os.environ.setdefault(k, str(v))
-    return rasterio.Env(**cfg)
+PIXEL_M = 10.0
+BATCH_BLOCKS = 8  # blocks fetched concurrently; 8 x 67 MB of int8
+MANIFEST_CACHE = CACHE / "aef_manifests"  # parsed COG headers, reused across runs
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +78,7 @@ def tiles_for_geometries(
     """Index rows for every (tile, year) intersecting the given geometries.
 
     `gpkg_or_gdf` is a path to any OGR/GeoParquet-readable file or a
-    GeoDataFrame. Returns the index columns plus `uri`, the GDAL path to open.
+    GeoDataFrame. Returns the index columns plus `tile_id`.
     """
     import duckdb
     import geopandas as gpd
@@ -143,23 +106,10 @@ def tiles_for_geometries(
         ORDER BY i.year, i.utm_zone, i.path
         """
     ).df()
-    df["uri"] = df["path"].map(tile_uri)
     df["tile_id"] = (
         df["path"].str.rsplit("/", n=1).str[-1].str.replace(".tiff", "", regex=False)
     )
     return df
-
-
-def tile_uri(path: str, via: str = "curl") -> str:
-    """s3:// path from the index -> a GDAL URI for the bottom-up `.tiff`.
-
-    `via="curl"` (default) goes through the public HTTPS mirror and needs no
-    credentials; `via="s3"` uses /vsis3 with AWS_NO_SIGN_REQUEST.
-    """
-    if via == "s3":
-        return path.replace("s3://", "/vsis3/")
-    rest = path.replace("s3://us-west-2.opendata.source.coop/", "")
-    return f"/vsicurl/https://data.source.coop/{rest}"
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +123,9 @@ class Block:
     bcol: int  # block column, counted from the tile's WEST edge
 
     def bounds(self, tile: dict) -> tuple[float, float, float, float]:
-        w = tile["utm_west"] + self.bcol * BLOCK * 10.0
-        s = tile["utm_south"] + self.brow * BLOCK * 10.0
-        return (w, s, w + BLOCK * 10.0, s + BLOCK * 10.0)
+        w = float(tile["utm_west"]) + self.bcol * BLOCK * PIXEL_M
+        s = float(tile["utm_south"]) + self.brow * BLOCK * PIXEL_M
+        return (w, s, w + BLOCK * PIXEL_M, s + BLOCK * PIXEL_M)
 
 
 def blocks_for_geometries(gdf_utm, tile: dict) -> list[Block]:
@@ -216,75 +166,89 @@ def _build_dequant_lut() -> np.ndarray:
 _DEQUANT_LUT = _build_dequant_lut()
 
 
-def open_tile(tile: dict):
-    """A tile open for block reads.
-
-    Gives `.read_block(blk) -> (float32 (64, 1024, 1024) north-up, Affine)` and is
-    a context manager.
-    """
-    return _GdalTile(tile)
+def open_tile(tile: dict) -> _Tile:
+    """A tile open for block reads: `.read_block(blk) -> (float32 (64, 1024,
+    1024) north-up, Affine)`. A context manager."""
+    return _Tile(tile)
 
 
-class _GdalTile:
-    """rasterio over /vsicurl -- the block reader."""
+class _Tile:
+    """Source Cooperative through `aef_loader_plus`."""
 
     def __init__(self, tile: dict):
-        self.tile, self._env, self._ds = tile, None, None
+        self.tile = tile
+        self._da = None
+        self._plan: list[Block] = []
+        self._cache: dict[Block, np.ndarray] = {}
 
-    def __enter__(self) -> _GdalTile:
-        self._env = gdal_env()
-        self._env.__enter__()
-        self._ds = rasterio.open(self.tile["uri"])
+    def __enter__(self) -> _Tile:
         return self
 
     def __exit__(self, *exc) -> None:
-        if self._ds is not None:
-            self._ds.close()
-        if self._env is not None:
-            self._env.__exit__(*exc)
-        self._ds = self._env = None
+        self._da, self._cache = None, {}
 
-    def read_block(self, blk: Block):
-        return _read_block(self._ds, blk)
+    def prefetch(self, blocks: Sequence[Block]) -> None:
+        """Blocks to fetch concurrently, `BATCH_BLOCKS` at a time, on demand."""
+        self._plan = list(blocks)
+
+    def read_block(self, blk: Block) -> tuple[np.ndarray, Affine]:
+        west, south, _, north = blk.bounds(self.tile)
+        transform = Affine(PIXEL_M, 0.0, west, 0.0, -PIXEL_M, north)
+        if blk not in self._cache:
+            self._fetch(blk)
+        raw = self._cache.pop(blk)
+        return dequantise(raw[:, ::-1, :]), transform  # bottom-up file
+
+    def _open(self):
+        from aef_loader import AEFTileInfo, DataSource, VirtualTiffReader
+
+        t = self.tile
+        west, south = float(t["utm_west"]), float(t["utm_south"])
+        span = TILE_SIZE * PIXEL_M
+        info = AEFTileInfo(
+            id=str(t.get("tile_id", t["path"])),
+            path=t["path"],
+            year=int(t["year"]),
+            bbox=_wgs84_bounds(t["crs"], west, south, west + span, south + span),
+            crs_epsg=int(str(t["crs"]).split(":")[-1]),
+            utm_zone=t["utm_zone"],
+            utm_bounds=(west, south, west + span, south + span),
+            source=DataSource.SOURCE_COOP,
+        )
+        MANIFEST_CACHE.mkdir(parents=True, exist_ok=True)
+
+        async def _go():
+            async with VirtualTiffReader(manifest_cache_dir=MANIFEST_CACHE) as r:
+                # One chunk per stored block with all 64 bands: the per-band
+                # byte ranges of a block are then fetched together.
+                return await r.open_tiles_by_zone([info], chunks="all-bands")
+
+        return asyncio.run(_go())[t["utm_zone"]].ds["embeddings"]
+
+    def _fetch(self, blk: Block) -> None:
+        import dask
+
+        if self._da is None:
+            self._da = self._open()
+        todo = [blk] + [b for b in self._plan if b != blk and b not in self._cache]
+        batch = todo[:BATCH_BLOCKS]
+        self._plan = [b for b in self._plan if b not in batch]
+        half = PIXEL_M / 2
+        wins = []
+        for b in batch:
+            w, s, e, n = b.bounds(self.tile)
+            sel = self._da.sel(x=slice(w + half, e - half), y=slice(s + half, n - half))
+            wins.append(sel.data)
+        for b, arr in zip(batch, dask.compute(*wins, scheduler="threads")):
+            self._cache[b] = np.asarray(arr).squeeze(axis=0)
 
 
-def _read_block(ds, blk: Block) -> tuple[np.ndarray, Affine]:
-    """Read one whole block and return it north-up, with a north-up affine.
+def _wgs84_bounds(crs, w, s, e, n) -> tuple[float, float, float, float]:
+    from pyproj import Transformer
 
-    `brow` counts north from the tile's SOUTH edge; file rows are derived from
-    the dataset's own transform, so this works for the bottom-up `.tiff` and the
-    north-up `.vrt`. Getting it backwards silently reads a mirrored block
-    (pinned by tests/test_aef_reader.py).
-    """
-    west, south, north = _tile_origin(ds)
-    step = abs(ds.transform.e)
-    bw = west + blk.bcol * BLOCK * ds.transform.a
-    bs = south + blk.brow * BLOCK * step
-    bn = bs + BLOCK * step
-
-    inv = ~ds.transform
-    c0, r0 = inv * (bw, bn)
-    c1, r1 = inv * (bw, bs)
-    row_off, col_off = int(round(min(r0, r1))), int(round(c0))
-    if (
-        row_off < 0
-        or col_off < 0
-        or row_off + BLOCK > ds.height
-        or col_off + BLOCK > ds.width
-    ):
-        raise IndexError(f"block {blk} outside {ds.width}x{ds.height} tile")
-
-    arr = ds.read(window=((row_off, row_off + BLOCK), (col_off, col_off + BLOCK)))
-    if ds.transform.e > 0:  # bottom-up: rows run S -> N
-        arr = arr[:, ::-1, :]
-    return dequantise(arr), Affine(ds.transform.a, 0.0, bw, 0.0, -step, bn)
-
-
-def _tile_origin(ds) -> tuple[float, float, float]:
-    """(west, south, north) of a dataset, for either row orientation."""
-    y0 = ds.transform.f
-    y1 = ds.transform.f + ds.height * ds.transform.e
-    return ds.transform.c, min(y0, y1), max(y0, y1)
+    tr = Transformer.from_crs(crs, 4326, always_xy=True)
+    xs, ys = tr.transform([w, e, w, e], [s, s, n, n])
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +290,7 @@ def extract_from_tile(
     bounds = sub.geometry.bounds.to_numpy()
     with open_tile(tile) as src:
         blocks = blocks_for_geometries(sub, tile)
+        src.prefetch(blocks)
         for blk in blocks:
             bb = blk.bounds(tile)
             keep = (
@@ -411,6 +376,7 @@ def _sample_points(tile, sub, id_col, empty) -> pd.DataFrame:
     frames = []
     with open_tile(tile) as src:
         blocks = blocks_for_geometries(sub, tile)
+        src.prefetch(blocks)
         for blk in blocks:
             bb = blk.bounds(tile)
             here = sub[

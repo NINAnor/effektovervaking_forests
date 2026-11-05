@@ -54,8 +54,7 @@ def run_tile(
     if out.exists():
         return out.name, -1, 0.0
     t0 = time.time()
-    # Retry the whole tile with backoff: GDAL retries single requests, but a
-    # tile can still fail when the server sheds load.
+    # Retry the whole tile with backoff: the server sheds load under concurrency.
     for attempt in range(1, attempts + 1):
         try:
             df = extract_from_tile(
