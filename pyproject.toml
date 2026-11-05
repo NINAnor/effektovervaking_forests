@@ -38,8 +38,6 @@ requires-python = ">=3.11"
 version = "0.1.0"
 
 [project.optional-dependencies]
-# `bench-*` commands only: experimental zarr/virtual-tiff read paths.
-bench = ["obspec-utils", "obstore", "virtual-tiff", "xarray", "zarr>=3"]
 # `forestmon condition step 04` only: numba kernels for the kNN top-k and the
 # bootstrap (numpy fallback without it; pixel scores agree to ~2e-7), and
 # threadpoolctl for --workers > 1.
@@ -56,8 +54,6 @@ known_first_party = ["effektovervaking_forests"]
 
 [tool.deptry.package_module_name_map]
 earthengine-api = "ee"
-obspec-utils = "obspec_utils"
-virtual-tiff = "virtual_tiff"
 
 [tool.deptry.per_rule_ignores]
 # condition.aef_backend's optional download backend: aef_loader_plus (and the
@@ -95,7 +91,6 @@ select = ["E", "W", "I", "F", "UP", "S", "B", "A", "COM", "LOG", "PTH", "Q", "AN
   "B905",  # zip(strict=...) would change behaviour on mismatched lengths
   "PTH105",  # os.replace used for atomic writes; semantics identical, left as-is
   "PTH123",  # open() -> Path.open() rewrite not required
-  "S110",  # deliberate best-effort try/except/pass in benchmarks
   "S603",  # subprocess calls use fixed argv lists (no shell, no user input)
   "S301",  # pickle only reads our own state files written by this package
   "S608",  # SQL built from internal identifiers, not user input

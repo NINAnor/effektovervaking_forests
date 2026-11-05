@@ -751,63 +751,6 @@ def logs_cmd(
     _echo(f"\n{obslog.log_path(aoi)}")
 
 
-@app.command("bench-gdal")
-def bench_gdal(
-    aoi: str = AOI_ARG,
-    scenes: int = typer.Option(4, help="Scenes per preset"),
-    repeats: int = typer.Option(2, help="Passes (order alternates)"),
-    presets: str = typer.Option(None, help="Comma-separated subset"),
-):
-    """Sweep GDAL transport settings against the JP2 read path.
-
-    Attacks the three costs of a scene — 7 opens, ~63 block range-GETs, ~90 MB
-    of JPEG 2000 decode. Preset position is balanced across scenes and repeats
-    (a fixed order measures the cache, not the setting) and every preset's values
-    are compared cell-for-cell against the baseline, because a transport change
-    that alters the numbers is a different dataset, not a faster reader.
-
-    Do not run this while a backfill is going: they contend for the same
-    connection budget and neither measurement survives it.
-    """
-    from . import bench as B
-
-    sel = None
-    if presets:
-        want = [p.strip() for p in presets.split(",") if p.strip()]
-        missing = [w for w in want if w not in B.GDAL_PRESETS]
-        if missing:
-            _fail(f"unknown preset(s): {missing}. Known: {list(B.GDAL_PRESETS)}")
-        sel = {w: B.GDAL_PRESETS[w] for w in want}
-    df = B.gdal_option_sweep(
-        aoi,
-        n_scenes=scenes,
-        repeats=repeats,
-        presets=sel,
-        progress=lambda r: _echo(
-            f"  {r['preset']:<15} rep{r['rep']} "
-            f"{r['seconds'] if r['seconds'] is not None else 'FAIL':>7} s  "
-            f"{r['scene'][:38]}"
-            + (
-                ""
-                if r.get("values_match", True)
-                else f"  MISMATCH {r.get('n_mismatched', '')}{r.get('error', '')}"
-            )
-        ),
-    )
-    out = B.summarise_gdal_sweep(df)
-    _echo("\n" + out.to_string())
-    path = config.OPS / f"{aoi}_gdal_sweep.csv"
-    df.to_csv(path, index=False)
-    _echo(f"\n{path}")
-    bad = out[~out["values_match"]]
-    if len(bad):
-        typer.secho(
-            f"presets returning different values: {list(bad.index)} — "
-            "discard these however fast they were",
-            fg=typer.colors.RED,
-        )
-
-
 # ── the operational entrypoint ───────────────────────────────────────────────
 @app.command("run")
 def run(
@@ -853,64 +796,6 @@ def run(
             f"{res['n_new_breaks']} new break(s) — `forestmon alerts list {aoi}`",
             fg=typer.colors.YELLOW,
         )
-
-
-@app.command("bench")
-def bench_cmd(
-    aoi: str = AOI_ARG,
-    scenes: int = typer.Option(5, help="Scenes to time per method"),
-    methods: str = typer.Option("cdse_jp2,e84_cog,e84_vzarr"),
-    workers: str = typer.Option(
-        "1,4,8,16", help="Worker counts for the throughput sweep"
-    ),
-    skip_concurrency: bool = typer.Option(False),
-):
-    """Measure the data-access options for both workloads.
-
-    Operational cares about per-scene latency; backfill cares about throughput
-    under concurrency. They can have different winners, so both are reported.
-    """
-    from . import bench as B
-
-    ms = tuple(m.strip() for m in methods.split(",") if m.strip())
-    _echo(f"latency: {scenes} scenes x {len(ms)} methods")
-    lat = B.run(
-        aoi,
-        n_scenes=scenes,
-        methods=ms,
-        progress=lambda r: _echo(
-            f"  {r['method']:11s} {r['seconds']:6.2f}s  "
-            f"{r['n_pixels']:>6,} px  {r['scene'][:38]}"
-            + ("" if r["ok"] else f"  FAILED {r.get('error', '')}")
-        ),
-    )
-    conc = None
-    if not skip_concurrency:
-        wl = tuple(int(w) for w in workers.split(",") if w.strip())
-        _echo(f"\nthroughput sweep (cdse_jp2): workers {wl}")
-        conc = B.concurrency(
-            aoi,
-            n_scenes=max(8, min(24, scenes * 3)),
-            workers_list=wl,
-            progress=lambda r: _echo(
-                f"  {r['workers']:>3} workers: {r['seconds']:6.1f}s "
-                f"for {r['n_scenes']} scenes -> "
-                f"{r['scenes_per_min']:6.1f} scenes/min"
-            ),
-        )
-    total = len(catalog.dedupe_versions(catalog.load(aoi)))
-    rep = B.summarise(lat, conc, total)
-    _echo("\n=== per-scene latency (seconds) ===")
-    _echo(pd.DataFrame(rep["latency_per_scene"]).T.to_string())
-    if rep["backfill_estimate"]:
-        e = rep["backfill_estimate"]
-        _echo(f"\n=== backfill: {total:,} scenes ===")
-        _echo(
-            f"  best {e['best_workers']} workers -> {e['scenes_per_min']} scenes/min "
-            f"-> {e['backfill_hours']} hours"
-        )
-    B.report_path(aoi).write_text(json.dumps(rep, indent=1))
-    _echo(f"\nreport -> {B.report_path(aoi)}")
 
 
 @app.command("doctor")

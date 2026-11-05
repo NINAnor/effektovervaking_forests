@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from effektovervaking_forests import alerts as alerts_mod
-from effektovervaking_forests import bench, config, obs, pipeline, reader, runs, store
+from effektovervaking_forests import config, obs, pipeline, reader, runs, store
 from effektovervaking_forests import sccd as sccd_mod
 
 AOI = "testaoi"
@@ -554,56 +554,3 @@ def test_loss_gate_is_the_label_tuned_argmax():
     )
 
 
-# ── the transport benchmark must measure the settings it claims to ───────────
-def test_read_scene_applies_gdal_overrides_inside_every_band_worker(monkeypatch):
-    import contextlib
-
-    calls = []
-
-    def fake_env(**overrides):
-        calls.append(dict(overrides))
-        return contextlib.nullcontext()
-
-    def fake_read(path, xs, ys, crs):
-        return np.ones(len(xs), dtype="int32"), np.ones(len(xs), dtype=bool)
-
-    monkeypatch.setattr(reader, "_gdal_env", fake_env)
-    monkeypatch.setattr(reader, "_read_at", fake_read)
-    assets = {
-        asset: f"s3://test/{asset}.jp2"
-        for asset in [*config.ASSET_FOR_BAND.values(), config.SCL_ASSET]
-    }
-    scene = pd.Series(
-        {
-            "id": "scene",
-            "datetime": pd.Timestamp("2026-01-01", tz="UTC"),
-            "assets": assets,
-        }
-    )
-    pixels = pd.DataFrame(
-        {"pix_id": ["p1"], "utm_x": [1.0], "utm_y": [2.0], "utm_crs": ["EPSG:32632"]}
-    )
-
-    reader.read_scene(
-        scene,
-        pixels,
-        apply_offset=False,
-        scl_first=False,
-        gdal_overrides={"GDAL_HTTP_VERSION": "2"},
-    )
-
-    assert len(calls) == 7
-    assert all(c == {"GDAL_HTTP_VERSION": "2"} for c in calls)
-
-
-def test_transport_parity_rejects_missing_rows_and_changed_cells():
-    base = obs_frame("scene", "2026-01-01", ["p1", "p2"])
-    same_reordered = base.iloc[::-1].reset_index(drop=True)
-    assert bench._same_scene_values(base, same_reordered) == (True, 0)
-
-    missing = base.iloc[:1]
-    assert bench._same_scene_values(base, missing)[0] is False
-
-    changed = base.copy()
-    changed.loc[0, "B08"] += 1
-    assert bench._same_scene_values(base, changed) == (False, 1)

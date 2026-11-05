@@ -188,7 +188,7 @@ def ingest(
                 ),
                 batch_scenes_per_min=round(60 * len(rows) / max(batch_s, 1e-6), 1),
                 scenes_per_min=round(60 * done / max(time.time() - t_start, 1e-6), 1),
-                gdal_num_threads=config.gdal_opts().get("GDAL_NUM_THREADS", "unset"),
+                gdal_num_threads=config.GDAL_OPTS["GDAL_NUM_THREADS"],
                 eta_min=round(
                     (n - done) * (time.time() - t_start) / max(done, 1) / 60, 1
                 ),

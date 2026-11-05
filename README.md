@@ -25,8 +25,8 @@ uv run forestmon doctor      # checks dependencies, credentials, AOIs
 ```
 
 Console scripts `forestmon` and `effektovervaking-forests` are the same app.
-Extras: `--extra gee` (earthengine-api, only for `parity check`) and
-`--extra bench` (experimental read benchmarks). `publish site` also needs the
+Extras: `--extra gee` (earthengine-api, only for `parity check`).
+`publish site` also needs the
 `ogr2ogr` CLI (GDAL >= 3.8, PMTiles driver) on `PATH` or via `FORESTMON_GDAL_BIN`.
 The JP2 driver ships with the rasterio wheel.
 

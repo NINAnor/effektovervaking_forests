@@ -133,53 +133,18 @@ S3_ENDPOINT = (
 S3_KEY_ENV = "CDSE_S3_ACCESS_KEY"
 S3_SECRET_ENV = "CDSE_S3_SECRET_KEY"  # pragma: allowlist secret
 
-# GDAL/CURL tuning for the JP2 range reads. Kept here, and overridable from the
-# environment, so the transport can be swept on a test machine without editing
-# code — see `forestmon bench-gdal`.
-#
-# Measured shape of one scene (kalklindeskog, 17,179 px on T32VNL): B02 is
-# 10980^2 in 1024x1024 blocks and our pixels touch 9 of 121 of them; B11 is
-# 640x640 blocks, 9 of 81. That is ~19 MB decoded per 10 m band to extract
-# 0.034 MB of wanted pixels — ~550x read amplification, and close to
-# irreducible, since the polygons are clustered and 9 blocks is about the
-# smallest set that covers them. So the cost is (a) 7 opens, (b) ~63 block
-# range-GETs, (c) ~90 MB of JPEG 2000 decode. Anything that speeds this up has
-# to attack one of those three, which is what the options below are for.
+# GDAL/CURL settings for the JP2 byte-range reads, fixed to the values that
+# measured best (2026-08). GDAL_NUM_THREADS=2 beat both 1 and ALL_CPUS at the
+# two-scene concurrency the pipeline runs with.
 GDAL_OPTS = {
-    # Never list a SAFE directory to open one file.
-    "GDAL_DISABLE_READDIR_ON_OPEN": (
-        os.environ.get("FORESTMON_GDAL_READDIR") or "EMPTY_DIR"
-    ),
+    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".jp2,.xml",
     "GDAL_HTTP_MAX_RETRY": "5",
     "GDAL_HTTP_RETRY_DELAY": "2",
     "VSI_CACHE": "TRUE",
-    # 25 MB per opened file. This is compressed VSI byte-range cache, not GDAL's
-    # decoded raster block cache; larger values only help if the JP2 driver
-    # revisits compressed ranges and multiply by the seven concurrent files.
-    "VSI_CACHE_SIZE": (os.environ.get("FORESTMON_VSI_CACHE_SIZE") or "26214400"),
-    # Measured 2026-08-19. GDAL already defaults MULTIPLEX and
-    # MERGE_CONSECUTIVE_RANGES to YES, but they only act on ReadMultiRange calls
-    # (and multiplexing additionally needs HTTP/2). Forcing HTTP/2 produced no
-    # reliable gain and was 22% slower in the final controlled head-to-head, so
-    # leave HTTP_VERSION unset.
-    "GDAL_HTTP_VERSION": (os.environ.get("FORESTMON_HTTP_VERSION") or ""),
-    "GDAL_HTTP_MULTIPLEX": (os.environ.get("FORESTMON_HTTP_MULTIPLEX") or ""),
-    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": (
-        os.environ.get("FORESTMON_MERGE_RANGES") or ""
-    ),
-    # JP2 decode is CPU-bound at ~90 MB/scene. A balanced 18-unique-scene
-    # crossover at the real two-scene concurrency found 2 threads won 8/9
-    # batches: 1.91x median paired and 3.52x total-throughput speedup, with exact
-    # parity. ALL_CPUS caused severe long-tail stalls. Still overridable for a
-    # machine with materially different CPU or scene concurrency.
-    "GDAL_NUM_THREADS": (os.environ.get("FORESTMON_GDAL_NUM_THREADS") or "2"),
+    "VSI_CACHE_SIZE": "26214400",  # 25 MB compressed byte-range cache per file
+    "GDAL_NUM_THREADS": "2",
 }
-
-
-def gdal_opts() -> dict:
-    """GDAL_OPTS with empty values dropped — an empty string is not 'unset'."""
-    return {k: v for k, v in GDAL_OPTS.items() if v != ""}
 
 
 # ── the processing recipe ────────────────────────────────────────────────────
