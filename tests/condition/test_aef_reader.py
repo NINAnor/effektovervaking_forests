@@ -1,12 +1,20 @@
-"""AEF block reader: geolocation against the mirror.
+"""AEF block reader: geolocation against the mirror, and the Earth Engine backup.
 
 Tests marked `network` hit data.source.coop (`pytest -m network`).
 """
 
+import importlib.machinery
+import sys
+import types
+
 import numpy as np
 import pytest
 
+from effektovervaking_forests import config
+from effektovervaking_forests.condition import aef
 from effektovervaking_forests.condition.aef import (
+    BANDS,
+    BLOCK,
     Block,
     blocks_for_geometries,
     dequantise,
@@ -72,3 +80,72 @@ def test_block_pixels_land_where_the_returned_transform_says_they_do():
     assert transform.e < 0
     assert transform.c == pytest.approx(blk.bounds(TILE)[0])
     assert transform.f == pytest.approx(blk.bounds(TILE)[3])
+
+
+@pytest.fixture
+def fake_ee(monkeypatch: pytest.MonkeyPatch) -> list:
+    """An `ee` module whose computePixels returns the chunk's row offset."""
+    calls = []
+
+    class Img:
+        def __getattr__(self, name):
+            return lambda *a, **k: self
+
+    def compute_pixels(req):
+        g = req["grid"]
+        calls.append(g)
+        r = round(
+            (TILE["utm_south"] + 4 * BLOCK * 10 - g["affineTransform"]["translateY"])
+            / 10
+        )
+        n = g["dimensions"]["height"]
+        a = np.zeros((n, n), dtype=[(b, "f4") for b in BANDS])
+        a["A00"] = r
+        a["A01"][0, 0] = aef.EE_NODATA
+        return a
+
+    ee = types.SimpleNamespace(
+        ImageCollection=lambda *_: Img(),
+        Geometry=types.SimpleNamespace(Rectangle=lambda *a, **k: None),
+        Filter=types.SimpleNamespace(eq=lambda *a: None),
+        Initialize=lambda **k: None,
+        data=types.SimpleNamespace(
+            is_initialized=lambda: True, computePixels=compute_pixels
+        ),
+    )
+    ee.__spec__ = importlib.machinery.ModuleSpec("ee", None)
+    monkeypatch.setitem(sys.modules, "ee", ee)
+    monkeypatch.setattr(config, "EE_PROJECT", "test-project")
+    return calls
+
+
+def test_ee_block_is_assembled_north_up_from_chunks(fake_ee):
+    blk = Block(4, 0)  # north edge at utm_south + 5 blocks
+    arr = aef._ee_block(TILE, blk)
+    assert arr.shape == (len(BANDS), BLOCK, BLOCK)
+    assert len(fake_ee) == (BLOCK // aef.EE_CHUNK) ** 2
+    assert all(g["crsCode"] == TILE["crs"] for g in fake_ee)
+    # each row holds its chunk's distance south of the block's north edge
+    assert arr[0, 0, 0] == -1024 and arr[0, aef.EE_CHUNK, 0] == -1024 + aef.EE_CHUNK
+    assert np.isnan(arr[1, 0, 0]), "EE_NODATA becomes NaN"
+
+
+def test_failed_source_coop_read_falls_back_to_ee(fake_ee, monkeypatch):
+    def broken(self, blk):
+        raise OSError("520 from Cloudflare")
+
+    monkeypatch.setattr(aef._Tile, "_fetch", broken)
+    with open_tile(TILE) as src:
+        arr, transform = src.read_block(Block(4, 0))
+    assert fake_ee and arr.shape == (len(BANDS), BLOCK, BLOCK)
+    assert transform.f == pytest.approx(Block(4, 0).bounds(TILE)[3])
+
+
+def test_without_an_ee_project_the_read_error_propagates(monkeypatch):
+    def broken(self, blk):
+        raise OSError("520 from Cloudflare")
+
+    monkeypatch.setattr(aef._Tile, "_fetch", broken)
+    monkeypatch.setattr(config, "EE_PROJECT", None)
+    with open_tile(TILE) as src, pytest.raises(OSError):
+        src.read_block(Block(0, 0))

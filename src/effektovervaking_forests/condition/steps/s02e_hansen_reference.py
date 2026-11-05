@@ -7,7 +7,7 @@ pixels not cleared, and by step 05 to report recall on cleared pixels. Absence o
 Hansen loss is not evidence of no degradation. See METHODS.md.
 
 Needs an Earth Engine account (`ee.Initialize`) and `--project` (or
-FORESTMON_EE_PROJECT); it is the only step that does. Without it, step 03 falls
+FORESTMON_EE_PROJECT). Without it, step 03 falls
 back to the significance rule and its classes are uncalibrated.
 
 Reads `pixel_sites.parquet` (step 02b). Writes `outputs/data/hansen_pixels.parquet`

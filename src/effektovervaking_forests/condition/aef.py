@@ -11,13 +11,19 @@ UTM zone) plus a tile index (`aef_index.parquet`). Design constraints:
 3. Values are int8, nodata -128, quantised with a signed square root;
    `dequantise` inverts it.
 
-Reads go through `aef_loader_plus` (no credentials).
+Reads go through `aef_loader_plus` (no credentials). Earth Engine
+(`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) is the backup; see `_Tile`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import logging
+import os
+import threading
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +32,7 @@ import pandas as pd
 from rasterio.features import rasterize
 from rasterio.transform import Affine, xy
 
+from effektovervaking_forests import config
 from effektovervaking_forests.condition.paths import (
     AEF_INDEX,
     AEF_INDEX_URL,
@@ -34,9 +41,12 @@ from effektovervaking_forests.condition.paths import (
     CACHE,
 )
 
+log = logging.getLogger(__name__)
+
 __all__ = [
     "dequantise",
     "open_tile",
+    "ee_available",
     "ensure_index",
     "tiles_for_geometries",
     "blocks_for_geometries",
@@ -50,6 +60,13 @@ TILE_SIZE = 8192  # tile width/height, in pixels
 PIXEL_M = 10.0
 BATCH_BLOCKS = 8  # blocks fetched concurrently; 8 x 67 MB of int8
 MANIFEST_CACHE = CACHE / "aef_manifests"  # parsed COG headers, reused across runs
+# "source_coop" (default; Earth Engine backs up failed blocks) or "ee".
+AEF_SOURCE = os.environ.get("AEF_SOURCE", "source_coop")
+EE_COLLECTION = "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL"
+EE_HIGHVOLUME_URL = "https://earthengine-highvolume.googleapis.com"
+EE_CHUNK = 256  # 256 x 256 x 64 float32 = 16.8 MB per request (limit 48 MB)
+EE_WORKERS = 8
+EE_NODATA = -2.0  # outside [-1, 1], the range of the embeddings
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +190,13 @@ def open_tile(tile: dict) -> _Tile:
 
 
 class _Tile:
-    """Source Cooperative through `aef_loader_plus`."""
+    """Source Cooperative through `aef_loader_plus`, Earth Engine as backup.
+
+    A block that cannot be read from Source Cooperative is read from Earth
+    Engine when `FORESTMON_EE_PROJECT` is set; `AEF_SOURCE=ee` reads every block
+    there. Both return the same embeddings (EE float32 vs dequantised int8
+    differ by float32 rounding).
+    """
 
     def __init__(self, tile: dict):
         self.tile = tile
@@ -194,10 +217,17 @@ class _Tile:
     def read_block(self, blk: Block) -> tuple[np.ndarray, Affine]:
         west, south, _, north = blk.bounds(self.tile)
         transform = Affine(PIXEL_M, 0.0, west, 0.0, -PIXEL_M, north)
-        if blk not in self._cache:
-            self._fetch(blk)
-        raw = self._cache.pop(blk)
-        return dequantise(raw[:, ::-1, :]), transform  # bottom-up file
+        if AEF_SOURCE != "ee":
+            try:
+                if blk not in self._cache:
+                    self._fetch(blk)
+                raw = self._cache.pop(blk)
+                return dequantise(raw[:, ::-1, :]), transform  # bottom-up file
+            except Exception as e:
+                if not ee_available():
+                    raise
+                log.warning("Source Cooperative read failed (%s); using EE", e)
+        return _ee_block(self.tile, blk), transform
 
     def _open(self):
         from aef_loader import AEFTileInfo, DataSource, VirtualTiffReader
@@ -249,6 +279,67 @@ def _wgs84_bounds(crs, w, s, e, n) -> tuple[float, float, float, float]:
     tr = Transformer.from_crs(crs, 4326, always_xy=True)
     xs, ys = tr.transform([w, e, w, e], [s, s, n, n])
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def ee_available() -> bool:
+    return config.EE_PROJECT is not None and importlib.util.find_spec("ee") is not None
+
+
+_EE_LOCK = threading.Lock()
+
+
+def _ee_block(tile: dict, blk: Block) -> np.ndarray:
+    """One block from Earth Engine, (64, 1024, 1024) float32 north-up, NaN nodata.
+
+    Fetched as `EE_CHUNK`-pixel squares to stay under the computePixels payload
+    limit; only images in the tile's own CRS are used, so pixels are not
+    resampled from a neighbouring zone.
+    """
+    import ee
+
+    with _EE_LOCK:
+        if not ee.data.is_initialized():
+            ee.Initialize(project=config.EE_PROJECT, opt_url=EE_HIGHVOLUME_URL)
+    crs, year = str(tile["crs"]), int(tile["year"])
+    west, south, east, north = blk.bounds(tile)
+    img = (
+        ee.ImageCollection(EE_COLLECTION)
+        .filterDate(f"{year}-01-01", f"{year + 1}-01-01")
+        .filterBounds(ee.Geometry.Rectangle([west, south, east, north], crs, False))
+        .map(lambda i: i.set("crs", i.select(0).projection().crs()))
+        .filter(ee.Filter.eq("crs", crs))
+        .mosaic()
+        .select(list(BANDS))
+        .unmask(EE_NODATA)
+    )
+    out = np.empty((len(BANDS), BLOCK, BLOCK), dtype=np.float32)
+
+    def chunk(rc: tuple[int, int]) -> None:
+        r, c = rc
+        grid = {
+            "dimensions": {"width": EE_CHUNK, "height": EE_CHUNK},
+            "affineTransform": {
+                "scaleX": PIXEL_M,
+                "shearX": 0,
+                "translateX": west + c * PIXEL_M,
+                "shearY": 0,
+                "scaleY": -PIXEL_M,
+                "translateY": north - r * PIXEL_M,
+            },
+            "crsCode": crs,
+        }
+        a = ee.data.computePixels(
+            {"expression": img, "fileFormat": "NUMPY_NDARRAY", "grid": grid}
+        )
+        out[:, r : r + EE_CHUNK, c : c + EE_CHUNK] = np.stack([a[b] for b in BANDS])
+
+    starts = [
+        (r, c) for r in range(0, BLOCK, EE_CHUNK) for c in range(0, BLOCK, EE_CHUNK)
+    ]
+    with ThreadPoolExecutor(max_workers=EE_WORKERS) as pool:
+        list(pool.map(chunk, starts))
+    out[out == EE_NODATA] = np.nan
+    return out
 
 
 # ---------------------------------------------------------------------------
