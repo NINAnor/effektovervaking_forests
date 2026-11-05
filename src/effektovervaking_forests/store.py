@@ -136,5 +136,3 @@ def lease_holder(aoi_name: str) -> dict | None:
 
 def now_iso() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
-
-
