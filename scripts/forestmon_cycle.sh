@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # One scheduled monitoring cycle: detect, publish, push.
 #
-# This is the half of the system CI cannot do. `forestmon run` needs CDSE S3
-# credentials, the ~350 MB observation store and the S-CCD state pickle, none of
-# which belong in a public repository — so the detector runs here, on the NINA
-# machine, and GitHub Actions only builds the site around what this script
-# commits.
+# This is the half of the system CI cannot do. `forestmon run` needs the
+# observation store and the S-CCD state pickle, which do not belong in a public
+# repository, so the detector runs on a server and GitHub Actions only builds
+# the site around what this script commits. See docs/deployment.md.
 #
 # INSTALL (cron, not a systemd user timer):
 #     scripts/forestmon_cycle.sh --install-cron
@@ -137,6 +136,11 @@ case "${1:-}" in
     echo "Removed."; exit 0 ;;
   --check)
     tail -n 40 "$LOG" 2>/dev/null || echo "no log yet"; exit 0 ;;
+  "") ;;
+  *)
+    echo "usage: $0 [--install-cron [push] | --uninstall-cron | --check]" >&2
+    echo "       (no argument runs one cycle)" >&2
+    exit 2 ;;
 esac
 
 mkdir -p "$LOG_DIR"
