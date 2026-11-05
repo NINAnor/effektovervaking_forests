@@ -216,9 +216,10 @@ def load(
     out = dedupe(out)
     if clear_only and "clear" in out.columns:
         out = out[out["clear"]]
+    out = out.sort_values(KEY).reset_index(drop=True)
     if columns is not None:
         out = out[[c for c in columns if c in out.columns]]
-    return out.sort_values(KEY).reset_index(drop=True)
+    return out
 
 
 def observation_counts(aoi_name: str, pix_ids: set[str] | None = None) -> pd.Series:
