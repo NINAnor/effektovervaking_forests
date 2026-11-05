@@ -42,7 +42,7 @@ version = "0.1.0"
 # bootstrap (numpy fallback without it; pixel scores agree to ~2e-7), and
 # threadpoolctl for --workers > 1.
 fast = ["numba>=0.59", "threadpoolctl>=3"]
-# `parity check`, and the condition steps 02e (Hansen) and 09 (mirror parity).
+# `parity check`, and condition step 02e (Hansen).
 gee = ["earthengine-api>=1.0"]
 
 [project.scripts]

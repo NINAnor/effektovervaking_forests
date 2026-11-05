@@ -24,8 +24,6 @@ DATA = ROOT / "data"
 CACHE = DATA / "cache"
 OUT = ROOT / "outputs"
 OUT_DATA = OUT / "data"
-OUT_FIG = OUT / "figures"
-OUT_REPORT = OUT / "report"
 
 # ---------------------------------------------------------------------------
 # Inputs
@@ -75,7 +73,7 @@ AEF_NODATA = -128
 # The COGs store the unit-normalised float embedding quantised to int8. A single
 # global scale factor cancels out of cosine distance (the metric both the
 # trajectory axis and the DoR score use), so nothing downstream depends on the
-# exact value -- see scripts/09_check_gee_parity.py.
+# exact value.
 AEF_INT8_SCALE = 1.0 / 127.0
 
 # One COG block on the ground: 1024 px x 10 m. Both readers address blocks in
@@ -88,7 +86,7 @@ BLOCK_M = 1024 * 10.0
 #   "linear"         v = raw / 127         what this pipeline has always applied
 #   "signed_square"  v = (raw/127.5)^2 * sign(raw)    what Earth Engine returns
 #
-# `scripts/09_check_gee_parity.py` measured both against
+# A one-off comparison (2026-09) measured both against
 # GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL over 400 pixels of this AOI:
 #
 #              cosine to GEE   implied scale   ||v||     max |GEE - ours|
@@ -172,5 +170,5 @@ OUT_TIF = OUT / "tif"
 
 def ensure_dirs() -> None:
     """Create the output tree. Every step entry point calls this first."""
-    for d in (CACHE, OUT_DATA, OUT_FIG, OUT_REPORT, OUT_TIF):
+    for d in (CACHE, OUT_DATA, OUT_TIF):
         d.mkdir(parents=True, exist_ok=True)

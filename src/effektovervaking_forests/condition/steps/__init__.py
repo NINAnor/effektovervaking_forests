@@ -29,7 +29,6 @@ class Step:
     summary: str
     default_args: tuple[str, ...] = ()
     needs_ee: bool = False  # skipped by `run` unless an EE project is given
-    in_run: bool = True  # part of `run`; False = invoked only explicitly
 
 
 STEPS: tuple[Step, ...] = (
@@ -52,15 +51,6 @@ STEPS: tuple[Step, ...] = (
     Step("05", "s05_validate", "checks against the field labels"),
     Step("06", "s06_rasterize", "GeoTIFF per spatial block"),
     Step("07", "s07_package", "one GeoPackage for QGIS"),
-    Step("08", "s08_report_data", "report numbers and HTML report"),
-    # once per deployment, never in `run`
-    Step(
-        "09",
-        "s09_check_gee_parity",
-        "mirror vs Earth Engine",
-        needs_ee=True,
-        in_run=False,
-    ),
 )
 BY_ID = {s.id: s for s in STEPS}
 
@@ -86,7 +76,7 @@ def plan(
 ) -> tuple[list[tuple[Step, list[str]]], list[Step]]:
     """The steps `run` would execute, with their arguments, in order -- and the
     Earth Engine steps in that slice it has to skip (no project, or no `ee`)."""
-    ids = [s.id for s in STEPS if s.in_run]
+    ids = [s.id for s in STEPS]
     for name, val in (("--from", start), ("--to", stop)):
         if val is not None and val not in ids:
             raise ValueError(f"{name} {val!r}: not a pipeline step ({', '.join(ids)})")
