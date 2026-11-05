@@ -53,7 +53,6 @@ def run_tile(
     poly: gpd.GeoDataFrame,
     all_touched: bool,
     attempts: int = 3,
-    backend: str = "auto",
 ) -> tuple[str, int, float]:
     out = shard_path(tile)
     if out.exists():
@@ -67,7 +66,7 @@ def run_tile(
     for attempt in range(1, attempts + 1):
         try:
             df = extract_from_tile(
-                tile, poly, id_col="poly_id", all_touched=all_touched, backend=backend
+                tile, poly, id_col="poly_id", all_touched=all_touched
             )
             break
         except Exception:  # noqa: BLE001
@@ -102,20 +101,6 @@ def main(argv: list[str] | None = None) -> None:
         help="include pixels a polygon merely clips, not just those "
         "whose centre it contains (raises edge contamination)",
     )
-    ap.add_argument(
-        "--backend",
-        choices=["auto", "gdal", "loader"],
-        default="auto",
-        help="who fetches the blocks. `gdal` is rasterio over "
-        "/vsicurl, the shipped reader. `loader` is "
-        "aef_loader_plus: it caches each tile's parsed COG "
-        "header (2.3 s -> 0.07 s, so a re-run stops paying "
-        "~8 min of header parsing over the 270 shards here) "
-        "and fetches a tile's blocks concurrently rather than "
-        "one after the next (~1.15x on the transfer, which is "
-        "bandwidth-bound). Both return the same int8 -- "
-        "tests/test_aef_backend.py checks that block for block",
-    )
     ap.add_argument("--limit", type=int, help="stop after N tiles (smoke test)")
     args = ap.parse_args(argv)
 
@@ -140,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
     if todo:
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
             futs = {
-                ex.submit(run_tile, t, poly, args.all_touched, backend=args.backend): t
+                ex.submit(run_tile, t, poly, args.all_touched): t
                 for t in todo
             }
             for f in as_completed(futs):

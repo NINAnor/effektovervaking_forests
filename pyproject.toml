@@ -56,10 +56,6 @@ known_first_party = ["effektovervaking_forests"]
 earthengine-api = "ee"
 
 [tool.deptry.per_rule_ignores]
-# condition.aef_backend's optional download backend: aef_loader_plus (and the
-# dask it brings) is a project-share checkout put on sys.path from
-# AEF_LOADER_PATH, not a PyPI package; without it the GDAL path is used.
-DEP001 = ["aef_loader", "dask"]
 # Parquet engine for pandas/geopandas: used at runtime, never imported by name.
 DEP002 = ["pyarrow"]
 

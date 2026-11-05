@@ -95,7 +95,6 @@ def run_shard(
     year: int,
     sites: pd.DataFrame,
     attempts: int = 3,
-    backend: str = "auto",
 ):
     """Cut the planned pixels of one block out of one annual tile."""
     out = shard_path(shards, blk, year)
@@ -115,7 +114,7 @@ def run_shard(
     t0 = time.time()
     for attempt in range(1, attempts + 1):
         try:
-            with open_tile(blk, backend) as src:
+            with open_tile(blk) as src:
                 arr, transform = src.read_block(
                     Block(int(blk["brow"]), int(blk["bcol"]))
                 )
@@ -166,7 +165,6 @@ def resolve_uris(plan: pd.DataFrame, years: list[int]) -> pd.DataFrame:
         .df()
     )
     idx["uri"] = idx["path"].map(tile_uri)
-    # `path` is kept, not dropped: the loader backend identifies a tile by it.
     out = plan.merge(idx, on=["utm_zone", "utm_west", "utm_south"], how="left")
     missing = out["uri"].isna()
     if missing.any():
@@ -189,15 +187,6 @@ def main(argv: list[str] | None = None) -> None:
         "dropping pixels a stand overlaps still leaves a pool.",
     )
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument(
-        "--backend",
-        choices=["auto", "gdal", "loader"],
-        default="auto",
-        help="block reader; see 02_extract_embeddings.py --backend. "
-        "This step opens one dataset per (block, year) shard, "
-        "so the loader's cached COG header is worth more here "
-        "than the concurrency is",
-    )
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args(argv)
 
@@ -251,7 +240,6 @@ def main(argv: list[str] | None = None) -> None:
                     b,
                     int(b["year"]),
                     sites,
-                    backend=args.backend,
                 ): b
                 for b in todo
             }
