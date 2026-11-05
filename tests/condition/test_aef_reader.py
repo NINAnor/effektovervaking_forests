@@ -84,8 +84,7 @@ def test_block_pixels_land_where_the_returned_transform_says_they_do():
             x, y = transform * (col + 0.5, row + 0.5)
             r, c = ds.index(x, y)
             # Dequantised by the reader's own rule, so this stays a test of
-            # WHERE the block came from and never of how int8 becomes float --
-            # `tests/test_aef_backend.py` owns that.
+            # WHERE the block came from and never of how int8 becomes float.
             native = dequantise(ds.read(1, window=((r, r + 1), (c, c + 1))))[0, 0]
             mine = arr[0, row, col]
             assert (np.isnan(native) and np.isnan(mine)) or np.isclose(native, mine), (

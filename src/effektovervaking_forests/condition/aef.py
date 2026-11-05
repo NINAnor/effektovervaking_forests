@@ -264,7 +264,7 @@ def dequantise(raw: np.ndarray) -> np.ndarray:
         arr *= AEF_INT8_SCALE
         return arr
     if AEF_DEQUANT == "signed_square":
-        # A 256-entry lookup, the way aef_loader_plus does it: every int8 maps to
+        # A 256-entry lookup: every int8 maps to
         # one of 256 outcomes, so the table is built once and gathered, and the
         # nodata step folds into the same gather instead of a separate mask.
         return _DEQUANT_LUT[raw.astype(np.int16) + 128]
@@ -283,32 +283,17 @@ def _build_dequant_lut() -> np.ndarray:
 _DEQUANT_LUT = _build_dequant_lut()
 
 
-def open_tile(tile: dict, backend: str = "auto"):
-    """A tile open for block reads, through either backend.
+def open_tile(tile: dict):
+    """A tile open for block reads.
 
-    Both give `.read_block(blk) -> (float32 (64, 1024, 1024) north-up, Affine)`
-    and both are context managers, so `extract_from_tile` does not branch beyond
-    choosing one. `condition.aef_backend` documents what the choice buys.
-
-    `auto` takes `loader` when `aef_loader_plus` imports and `gdal` otherwise, so
-    a standalone checkout without the fork still runs, just slower. The two are
-    verified to return the same block in `tests/test_aef_backend.py`.
+    Gives `.read_block(blk) -> (float32 (64, 1024, 1024) north-up, Affine)` and is
+    a context manager.
     """
-    if backend == "auto":
-        from effektovervaking_forests.condition.aef_backend import loader_available
-
-        backend = "loader" if loader_available() else "gdal"
-    if backend == "gdal":
-        return _GdalTile(tile)
-    if backend == "loader":
-        from effektovervaking_forests.condition.aef_backend import LoaderTile
-
-        return LoaderTile(tile)
-    raise ValueError(f"backend must be 'auto', 'gdal' or 'loader', got {backend!r}")
+    return _GdalTile(tile)
 
 
 class _GdalTile:
-    """rasterio over /vsicurl -- the shipped reader, wrapped to match LoaderTile."""
+    """rasterio over /vsicurl -- the block reader."""
 
     def __init__(self, tile: dict):
         self.tile, self._env, self._ds = tile, None, None
@@ -325,9 +310,6 @@ class _GdalTile:
         if self._env is not None:
             self._env.__exit__(*exc)
         self._ds = self._env = None
-
-    def prefetch(self, blocks) -> None:
-        """No-op: GDAL reads a block when it is asked for one."""
 
     def read_block(self, blk: Block):
         return _read_block(self._ds, blk)
@@ -384,7 +366,6 @@ def extract_from_tile(
     id_col: str = "poly_id",
     all_touched: bool = False,
     geometry: bool = True,
-    backend: str = "auto",
 ) -> pd.DataFrame:
     """All pixels of `gdf` that fall on one (tile, year) -- the unit of work and resume.
 
@@ -406,7 +387,7 @@ def extract_from_tile(
         return empty
 
     if not geometry:
-        return _sample_points(tile, sub, id_col, empty, backend=backend)
+        return _sample_points(tile, sub, id_col, empty)
 
     # Integer codes, because rasterize() writes a numeric label raster.
     ids = sub[id_col].to_numpy()
@@ -417,10 +398,8 @@ def extract_from_tile(
     # The polygon bounds are needed once per block, so they are taken out of the
     # GeoSeries once rather than through a Python call per polygon per block.
     bounds = sub.geometry.bounds.to_numpy()
-    with open_tile(tile, backend) as src:
+    with open_tile(tile) as src:
         blocks = blocks_for_geometries(sub, tile)
-        # The loader backend fetches these concurrently; GDAL ignores it.
-        src.prefetch(blocks)
         for blk in blocks:
             bb = blk.bounds(tile)
             keep = (
@@ -504,12 +483,11 @@ def _centroid_pixels(missing, arr, transform, id_col) -> pd.DataFrame | None:
     return df
 
 
-def _sample_points(tile, sub, id_col, empty, backend: str = "auto") -> pd.DataFrame:
+def _sample_points(tile, sub, id_col, empty) -> pd.DataFrame:
     """Point sampling, block-aligned for the same reason polygons are."""
     frames = []
-    with open_tile(tile, backend) as src:
+    with open_tile(tile) as src:
         blocks = blocks_for_geometries(sub, tile)
-        src.prefetch(blocks)
         for blk in blocks:
             bb = blk.bounds(tile)
             here = sub[

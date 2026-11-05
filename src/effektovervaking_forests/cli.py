@@ -918,7 +918,7 @@ def condition_doctor():
 
     import rasterio
 
-    from .condition import aef_backend, paths
+    from .condition import paths
 
     ok = True
     gpkg = paths.KARTLEGGING_GPKG.exists()
@@ -939,11 +939,6 @@ def condition_doctor():
     ):
         have = importlib.util.find_spec(mod) is not None
         _echo(f"  {'OK ' if have else 'WARN'}  {mod}{'' if have else f' ({why})'}")
-    loader = aef_backend.loader_available()
-    _echo(
-        f"  {'OK ' if loader else 'WARN'}  aef_loader_plus "
-        f"{'' if loader else '(optional faster download backend; AEF_LOADER_PATH)'}"
-    )
     _echo(f"  AEF_DEQUANT: {paths.AEF_DEQUANT}")
     _echo(f"  root:        {paths.ROOT}")
     for name, p in (("polygons", paths.POLYGONS), ("condition", paths.CONDITION)):
