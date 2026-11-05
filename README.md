@@ -5,8 +5,10 @@ pipelines: the near-real-time S-CCD loss monitor (below) and the annual
 AlphaEarth stand-condition pipeline (`forestmon condition`, see
 [Condition pipeline](#condition-pipeline-annual)).
 
-The loss monitor reads Sentinel-2 L2A directly from the Copernicus Data Space Ecosystem
-(CDSE), keeps a per-pixel S-CCD model up to date for each AOI, and raises
+The loss monitor reads Sentinel-2 L2A from the
+[EOPF Zarr service](https://explorer.eopf.copernicus.eu) (ongoing data, no
+credentials) and, for the history before that, from the Copernicus Data Space
+Ecosystem (CDSE), keeps a per-pixel S-CCD model up to date for each AOI, and raises
 alerts when a pixel breaks. S-CCD is the one validated detector that is
 architecturally near-real-time, not the most accurate: cross-validated loss F1
 is only 0.185 against project labels. Alerts are review triggers, not verdicts.
@@ -38,8 +40,11 @@ directory (real env vars win); see `.env.example`.
 - `FORESTMON_AOI_DIR` one GeoParquet per AOI, name = file stem (default `<data>/aoi`)
 - `FORESTMON_LOG_DIR`, `FORESTMON_WEB_OUT`, `FORESTMON_GIS_OUT` (defaults under `<data>`)
 - `FORESTMON_EE_PROJECT` Earth Engine project (optional), `FORESTMON_GDAL_BIN`
+- `FORESTMON_S2_SOURCE` `eopf` (default) or `cdse`; `FORESTMON_EOPF_START` first
+  date read from EOPF (default `FORESTMON_MONITORING_START`, 2026-01-01)
 
-**CDSE S3 keys** go in `~/.config/cdse/credentials` (mode 600), not in a `.env`
+**CDSE S3 keys** are needed only to backfill scenes before `FORESTMON_EOPF_START`
+(EOPF holds data from about April 2025). They go in `~/.config/cdse/credentials` (mode 600), not in a `.env`
 on the project drive:
 
 ```
@@ -60,7 +65,7 @@ Each step is per-AOI and idempotent (AOI name = parquet file stem).
 
 ```bash
 uv run forestmon grid build <aoi>          # fixed 10 m pixel grid on the S2 UTM lattice
-uv run forestmon catalog sync <aoi>        # index CDSE scenes
+uv run forestmon catalog sync <aoi>        # index scenes (CDSE history, EOPF recent)
 uv run forestmon grid assign-tiles <aoi>   # pin pixels to MGRS tiles (after sync)
 uv run forestmon obs backfill <aoi>        # history -> store; batched, resumable
 uv run forestmon obs compact <aoi>

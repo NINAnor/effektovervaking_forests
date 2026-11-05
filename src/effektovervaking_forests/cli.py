@@ -108,15 +108,15 @@ def _tile_bounds(aoi: str) -> dict:
     if cat.empty:
         return {}
     bounds = {}
-    with _reader._gdal_env():
-        for tile in catalog.resolve_tiles(aoi):
-            sc = cat[cat["tile"] == tile]
-            if sc.empty:
-                continue
-            href = sc.iloc[-1]["assets"][config.ASSET_FOR_BAND["B02"]]
-            with rasterio.open(_reader._vsis3(href)) as ds:
-                bounds[tile] = (tuple(ds.bounds), ds.crs.to_string())
-            _echo(f"  {tile}: {bounds[tile][1]}")
+    for tile in catalog.resolve_tiles(aoi):
+        sc = cat[cat["tile"] == tile]
+        if sc.empty:
+            continue
+        href = sc.iloc[-1]["assets"][config.ASSET_FOR_BAND["B02"]]
+        with _reader._gdal_env(href), rasterio.open(_reader.gdal_path(href)) as ds:
+            crs = ds.crs.to_string() if ds.crs else _reader.tile_utm_crs(tile)
+            bounds[tile] = (tuple(ds.bounds), crs)
+        _echo(f"  {tile}: {bounds[tile][1]}")
     return bounds
 
 
@@ -258,8 +258,6 @@ def obs_backfill(
 
     Resumable: each batch commits its own part file and ledger rows.
     """
-    if not cdse_auth.have_credentials():
-        _fail("CDSE S3 credentials missing — run `forestmon doctor`")
     grid = aoi_mod.load_grid(aoi)
     todo = pipeline.pending_scenes(aoi, limit=limit, since=start)
     if end:
@@ -269,6 +267,9 @@ def obs_backfill(
     if todo.empty:
         _echo("nothing pending")
         raise typer.Exit()
+    from_cdse = todo["assets"].map(lambda a: str(a.get(config.SCL_ASSET, ""))[:5])
+    if (from_cdse == "s3://").any() and not cdse_auth.have_credentials():
+        _fail("CDSE S3 credentials missing — run `forestmon doctor`")
     _echo(
         f"{len(todo):,} scenes pending, {len(grid):,} pixels, "
         f"{workers} workers x {reader.BAND_WORKERS} bands, batches of {batch}"
@@ -708,11 +709,15 @@ def doctor():
     _echo(f"  {'OK ' if sccd_mod.HAVE_PYXCCD else 'MISSING'}  pyxccd")
     ok &= sccd_mod.HAVE_PYXCCD
     creds = cdse_auth.have_credentials()
+    # With EOPF, keys are needed only to backfill history before EOPF_START.
+    need = config.S2_SOURCE == "cdse"
     _echo(
-        f"  {'OK ' if creds else 'MISSING'}  CDSE S3 credentials "
+        f"  {'OK ' if creds else 'MISSING' if need else 'WARN'}  CDSE S3 credentials "
         f"({config.S3_KEY_ENV}/{config.S3_SECRET_ENV})"
+        f"{'' if creds or need else f' (only for scenes before {config.EOPF_START})'}"
     )
-    ok &= creds
+    _echo(f"  S2 source: {config.S2_SOURCE} (EOPF from {config.EOPF_START})")
+    ok &= creds or not need
     ogr = publish_mod._gdal("ogr2ogr")
     have_ogr = bool(shutil.which(ogr))
     _echo(

@@ -1,4 +1,4 @@
-# forestmon — near-real-time monitoring from CDSE
+# forestmon — near-real-time monitoring of Sentinel-2
 
 This package (`effektovervaking_forests`, CLI `forestmon`) is the deployable
 counterpart to an interactive inspector script from the research work. Where that inspector
@@ -130,7 +130,14 @@ nothing new it does nothing, which is what makes a frequent schedule cheap.
 
 ## Setup
 
-**CDSE S3 credentials** (required). These are *not* the account password:
+**Sources.** Scenes from `FORESTMON_EOPF_START` (default 2026-01-01) on are read
+from the [EOPF Zarr service](https://explorer.eopf.copernicus.eu): public HTTPS,
+no credentials, same product ids as CDSE, read with GDAL's Zarr driver. EOPF only
+holds data from about April 2025, so the history before that comes from CDSE.
+Both returned identical values for two scenes x 2000 pixels (2026-11-05).
+`FORESTMON_S2_SOURCE=cdse` reads everything from CDSE.
+
+**CDSE S3 credentials** (needed for the history backfill). These are *not* the account password:
 generate keys at <https://eodata-s3keysmanager.dataspace.copernicus.eu/> and put
 them in `~/.config/cdse/credentials`:
 

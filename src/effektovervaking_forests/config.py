@@ -109,9 +109,18 @@ GIS_OUT = _env_path("FORESTMON_GIS_OUT", DATA / "published")
 # OPERA DIST-ALERT points for the confidence agreement term (optional).
 OPERA_PARQUET = _env_path("FORESTMON_OPERA_PARQUET", DATA / "opera_dist_alerts.parquet")
 
-# ── CDSE ─────────────────────────────────────────────────────────────────────
+# ── Sentinel-2 sources ───────────────────────────────────────────────────────
+# History comes from CDSE (STAC search is public; band reads need S3 keys).
+# Scenes from EOPF_START on come from the EOPF Zarr service
+# (https://explorer.eopf.copernicus.eu): public HTTPS, no keys, same product ids,
+# but it only holds recent data (about April 2025 onward).
+# FORESTMON_S2_SOURCE=cdse uses CDSE throughout.
 STAC_URL = "https://stac.dataspace.copernicus.eu/v1"
-S2_L2A_COLLECTION = "sentinel-2-l2a"
+EOPF_STAC_URL = "https://stac.core.eopf.eodc.eu"
+S2_L2A_COLLECTION = "sentinel-2-l2a"  # same id on both
+S2_SOURCE = os.environ.get("FORESTMON_S2_SOURCE") or "eopf"
+if S2_SOURCE not in ("eopf", "cdse"):
+    raise ValueError(f"FORESTMON_S2_SOURCE must be eopf or cdse, not {S2_SOURCE!r}")
 
 # CDSE serves bands from its own S3 store; keys are generated per user at
 # https://eodata-s3keysmanager.dataspace.copernicus.eu/ (not the account password).
@@ -121,11 +130,10 @@ S3_ENDPOINT = (
 S3_KEY_ENV = "CDSE_S3_ACCESS_KEY"
 S3_SECRET_ENV = "CDSE_S3_SECRET_KEY"  # pragma: allowlist secret
 
-# GDAL/CURL settings for JP2 byte-range reads (GDAL_NUM_THREADS=2 measured best
+# GDAL/CURL settings for JP2 and Zarr byte-range reads (GDAL_NUM_THREADS=2 measured best
 # at the pipeline's two-scene concurrency).
 GDAL_OPTS = {
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-    "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".jp2,.xml",
     "GDAL_HTTP_MAX_RETRY": "5",
     "GDAL_HTTP_RETRY_DELAY": "2",
     "VSI_CACHE": "TRUE",
@@ -176,6 +184,9 @@ HISTORY_START = "2017-01-01"
 
 # Breaks dated before this are recorded as "historical", not new alerts.
 MONITORING_START = os.environ.get("FORESTMON_MONITORING_START") or "2026-01-01"
+
+# First acquisition date read from EOPF (with S2_SOURCE=eopf).
+EOPF_START = os.environ.get("FORESTMON_EOPF_START") or MONITORING_START
 
 # Also store rejected (cloud/shadow/snow) observations. Off by default: ~7x
 # larger store and no early-out on fully clouded scenes. Only useful if set

@@ -1,6 +1,6 @@
 # Architecture: ingestion to Parquet output
 
-How a Sentinel-2 scene on CDSE becomes a row in the alerts Parquet. Module names
+How a Sentinel-2 scene (EOPF Zarr for recent data, CDSE for history) becomes a row in the alerts Parquet. Module names
 are in `src/effektovervaking_forests/`; see [operational.md](operational.md) for
 the reasoning behind each step.
 
@@ -8,8 +8,8 @@ the reasoning behind each step.
 flowchart TD
     subgraph IN["1. Inputs"]
         AOI[("AOI polygons<br/>GeoParquet, one per AOI")]
-        STAC["CDSE STAC<br/>sentinel-2-l2a"]
-        S3[("CDSE S3 eodata<br/>JP2 band assets")]
+        STAC["EOPF + CDSE STAC<br/>sentinel-2-l2a"]
+        S3[("EOPF Zarr (HTTPS) / CDSE S3 JP2<br/>band assets")]
     end
 
     subgraph IDX["2. Index"]
