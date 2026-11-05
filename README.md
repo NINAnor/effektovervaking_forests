@@ -99,12 +99,9 @@ Details and outputs:
 [docs/condition/METHODS.md](docs/condition/METHODS.md).
 
 ## Deploy
-`scripts/forestmon_cycle.sh` runs one cycle under `flock`; install it with
-`scripts/forestmon_cycle.sh --install-cron` and configure it via environment
-variables (see the script header). `forestmon health` exits 0 healthy, 2
-unhealthy, and 1 for degraded only with `--strict`, so it can gate or page.
-Docker, compose and systemd recipes, new-AOI onboarding and backups:
-[docs/deployment.md](docs/deployment.md).
+To run the monitor on a server, follow [docs/deployment.md](docs/deployment.md). It
+covers requirements, install, taking over the existing AOIs or starting a new one,
+scheduling with `scripts/forestmon_cycle.sh`, health checks and backups.
 
 ## Test
 ```bash
