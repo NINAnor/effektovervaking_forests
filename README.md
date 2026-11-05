@@ -18,8 +18,8 @@ boundaries and known gaps.
 Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
-# On the NINA project drive (CIFS, no symlinks) keep the venv on local disk:
-export UV_PROJECT_ENVIRONMENT=$HOME/.venvs/effektovervaking_forests
+# On a network share without symlink support, keep the venv on local disk:
+export UV_PROJECT_ENVIRONMENT=/path/to/local/venv
 uv sync --dev
 uv run forestmon doctor      # checks dependencies, credentials, AOIs
 ```
@@ -49,23 +49,11 @@ CDSE_S3_SECRET_KEY=...
 
 Generate them at <https://eodata-s3keysmanager.dataspace.copernicus.eu/>.
 
-To take over the existing production deployment in place, without moving
-state, logs or the website payload, put this in `.env` (`G` = the
-`Geethen_forests` directory; write it out in full):
-
-```bash
-FORESTMON_DATA_DIR=G/data
-FORESTMON_AOI_DIR=G/data/processed
-FORESTMON_LOG_DIR=G/logs/forestmon
-FORESTMON_WEB_OUT=G/web/public/data
-FORESTMON_GDAL_BIN=~/.pixi/envs/geo/bin
-FORESTMON_EE_PROJECT=ee-gsingh
-```
-
-Setting only the first two would start a fresh log history (so `health` would
-report no previous run) and publish outside the website repository. Remove the
-old `forestmon_cycle.sh` crontab entry before installing this one, so that the
-two checkouts do not both run.
+To run against an existing deployment's data in place, point the variables
+above at it (`FORESTMON_DATA_DIR`, `FORESTMON_AOI_DIR`, `FORESTMON_LOG_DIR`,
+`FORESTMON_WEB_OUT`, ...) instead of copying it; set all of them, or `health`
+starts a fresh log history and `publish` writes somewhere new. Only one checkout
+should have the cron job installed.
 
 ## Use
 Each step is per-AOI and idempotent (AOI name = parquet file stem).
@@ -101,7 +89,7 @@ uv run forestmon condition step 04 -- --help # one step; args after -- are the s
 Config: `CONDITION_ROOT` (data + outputs, default `<FORESTMON_DATA_DIR>/condition`),
 `FORESTS_KARTLEGGING_GPKG` (stand polygons). `--extra gee` is needed for step
 02e only.
-Details, outputs and the production-takeover recipe:
+Details and outputs:
 [docs/condition/README.md](docs/condition/README.md); method and evidence:
 [docs/condition/METHODS.md](docs/condition/METHODS.md).
 
@@ -120,65 +108,10 @@ uv run pytest        # offline
 `tests/condition` has network tests (hit the AlphaEarth mirror), deselected by
 default; run them with `uv run pytest tests/condition -m network`.
 
-Two drift guards compare against the research repo and run only when
-`FORESTMON_INSPECTOR_SRC` and `FORESTMON_LABEL_TUNING_CSV` are set; otherwise
-the pinned values in `tests/test_operational.py` are the contract.
+Two drift guards compare against the inspector script and the label-tuning
+results and run only when `FORESTMON_INSPECTOR_SRC` and
+`FORESTMON_LABEL_TUNING_CSV` are set; otherwise the pinned values in
+`tests/test_operational.py` are the contract.
 
-### Update from template
-To update your project with the latest changes from the template, run:
-```bash
-uvx --with copier-template-extensions copier update --trust
-```
-
-You can keep your previous answers by using:
-```bash
-uvx --with copier-template-extensions copier update --trust --defaults
-```
-
-### (Optional) prek
-prek is a fast, Rust-based tool for managing git hooks (100% compatible with pre-commit). It helps ensure code quality by running checks every time you make a commit.
-
-First, install prek:
-```bash
-uv tool install prek
-```
-
-If you have installed the git hooks with `pre-commit` (template version 0.2.6 and older), remove them before installing the ones provided by prek:
-
-```
-pre-commit uninstall
-```
-
-Then install git hooks:
-```bash
-prek install
-```
-
-To run prek on all files:
-```bash
-prek run --all-files
-```
-
-### How to install a package
-Run `uv add <package-name>` to install a package. For example:
-```bash
-uv add requests
-```
-
-#### Visual studio code
-If you are using visual studio code install the recommended extensions
-
-
-### Tools installed
-- uv
-- prek (optional)
-
-#### What is an environment variable? and why should I use them?
-Environment variables are variables that are not populated in your code but rather in the environment
-that you are running your code. This is extremely useful mainly for two reasons:
-- security, you can share your code without sharing your passwords/credentials
-- portability, you can avoid using hard-coded values like file-system paths or folder names
-
-you can place your environment variables in a file called `.env`, the `main.py` will read from it. Remember to:
-- NEVER commit your `.env`
-- Keep a `.env.example` file updated with the variables that the software expects
+Git hooks (ruff, formatting, secret scanning) run with
+[prek](https://github.com/j178/prek): `uv tool install prek && prek install`.

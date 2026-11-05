@@ -1,8 +1,7 @@
 # forestmon — near-real-time monitoring from CDSE
 
 This package (`effektovervaking_forests`, CLI `forestmon`) is the deployable
-counterpart to the interactive inspector in the research repo
-(`Geethen_forests/scripts/c2c_ts_server.py`). Where that inspector
+counterpart to an interactive inspector script from the research work. Where that inspector
 answers *"what happened at this pixel?"* interactively off Earth Engine, this
 package answers *"what changed since the last run?"* unattended, off the
 Copernicus Data Space Ecosystem.
@@ -83,7 +82,6 @@ forestmon grid build kalklindeskog
 forestmon grid assign-tiles kalklindeskog   # after catalog sync
 forestmon catalog sync kalklindeskog
 forestmon catalog schedule kalklindeskog    # when is the next scene readable?
-forestmon parity check kalklindeskog        # CDSE == Earth Engine? (gate)
 forestmon obs backfill kalklindeskog        # history -> store; batched, resumable
 forestmon obs compact kalklindeskog         # parts -> one sorted parquet per year
 forestmon sccd bootstrap kalklindeskog      # fit initial per-pixel state
@@ -93,19 +91,18 @@ forestmon alerts list kalklindeskog
 ```
 
 Concurrency is one budget, not two knobs: band threads × scene workers is the
-number of simultaneous connections to CDSE, and measured throughput peaks at ~14
-and degrades past it. Defaults are 2 scene workers × 7 band threads
+number of simultaneous connections to CDSE; throughput peaks at about 14 and
+degrades past it. Defaults are 2 scene workers × 7 band threads
 (`config.SCENE_WORKERS`, `config.MAX_CDSE_CONNECTIONS`).
 
 Tests: `uv run pytest` (`tests/test_operational.py`) — offline failure-injection
 over the commit boundaries (interruption, duplicate invocation, product
 supersession, failed alert write), plus drift guards pinning the S-CCD
 parameters to the inspector's and the loss gate to its label-tuned argmax. The
-two guards that compare against the research repo run only when
-`FORESTMON_INSPECTOR_SRC` (path to `Geethen_forests/scripts/c2c_ts_server.py`)
-and `FORESTMON_LABEL_TUNING_CSV` (`Geethen_forests/results/label_tuning_results.csv`)
-are set; otherwise the pinned values in `tests/test_operational.py` are the
-contract.
+two guards that compare against the research inspector run only when
+`FORESTMON_INSPECTOR_SRC` (the inspector script) and `FORESTMON_LABEL_TUNING_CSV`
+(the label-tuning results CSV) are set; otherwise the pinned values in
+`tests/test_operational.py` are the contract.
 
 ## Watching it run
 
@@ -142,10 +139,9 @@ CDSE_S3_ACCESS_KEY=...
 CDSE_S3_SECRET_KEY=...
 ```
 
-Not on the project drive. `/data/P-Prosjekter2/...` is a network mount that
-forces mode 755 — `chmod 600` silently does nothing there, so a key file would
-be readable by everyone in `nina_users`. `$HOME` is ext4 and honours 600.
-Environment variables take precedence over the file, so a systemd unit or
+Keep the file on a local disk, not a network mount: network mounts typically
+force a fixed mode, so `chmod 600` silently does nothing and the key file would
+be readable by other users. Environment variables take precedence over the file, so a systemd unit or
 container can inject credentials without touching disk at all.
 
 **JP2 driver.** Sentinel-2 L2A ships as JPEG 2000. The PyPI `rasterio` wheel
@@ -155,30 +151,15 @@ bundles a GDAL with the JP2OpenJPEG driver, so nothing extra needs installing
 **`ogr2ogr`** (GDAL >= 3.8 CLI with the PMTiles driver) is a system tool needed
 only by `publish site`. It is found on `PATH` or via `FORESTMON_GDAL_BIN`.
 
-**Earth Engine** is needed only by `parity check`: install the `gee` extra
-(`uv sync --extra gee`) and optionally set `FORESTMON_EE_PROJECT`.
+**Earth Engine** is needed only by condition step 02e (Hansen loss year): install
+the `gee` extra (`uv sync --extra gee`) and set `FORESTMON_EE_PROJECT`. The
+S-CCD monitor itself does not use it.
 
 **Locations.** Nothing is tied to the code location and nothing is created on
 import. Everything lives under `FORESTMON_DATA_DIR` (default `./data`; outputs in
 `<data>/operational`); AOIs are read from `FORESTMON_AOI_DIR` (default
 `<data>/aoi`, one GeoParquet per AOI, AOI name = file stem, legacy
 `<name>_union.parquet` accepted). See `.env.example` for the full list.
-
-## The parity gate
-
-`sccd bootstrap` refuses to run until `parity check` has passed. The reason is
-specific: the labels, tuned gates and the inspector all come from Earth Engine's
-`COPERNICUS/S2_SR_HARMONIZED`, while the operational stream comes from CDSE's
-L2A archive. If the two disagree, a step change is injected at the handover
-date — and a step change in every pixel on the same day is exactly what S-CCD
-exists to report.
-
-Parity is measured on **raw per-band DN** at a specific pixel on a specific
-acquisition, joined on `(sensing time, tile)`. L2A DNs are integers, so a
-correct pipeline matches *exactly*; the verdict is PASS only at ≥99.9% exact
-agreement on every band. Three things decide whether it does, all handled
-explicitly in `reader.py`: the baseline-04.00 `BOA_ADD_OFFSET`, nearest-cell
-sampling of the 20 m SWIR bands, and never warping a scene onto our grid.
 
 ## Tile overlap
 
@@ -201,7 +182,7 @@ exact spatial prefilter (17k/20k pixels offered per scene instead of all 38k).
 
 ## UTM zones
 
-An AOI may span several UTM zones (olivinskog: 32, 33, 34, 35). Each polygon is
+An AOI may span several UTM zones (e.g. olivinskog, below: 32, 33, 34, 35). Each polygon is
 gridded in the zone Sentinel-2 tiles it in — MGRS, *with* the Norway exception
 that widens 32V to 3–12°E, so the Bergen-area stands are zone 32, not 31 — and,
 once the catalogue exists, in the zone of a tile that actually contains it
@@ -216,8 +197,9 @@ publishing writes one COG per zone.
 * **Cloud masking is looser than Earth Engine's.** The GEE recipe also requires
   s2cloudless probability < 40, and that collection is a Sentinel Hub product
   Google hosts — it is not in the CDSE SAFE archive. The operational mask is
-  SCL-only. Parity therefore compares unmasked reflectance and reports mask
-  disagreement separately (`config.CLOUD_MASK_NOTE`).
+  SCL-only. CDSE and Earth Engine L2A reflectance were verified identical once
+  (2026-08, raw DN, exact match); the mask difference is noted in
+  `config.CLOUD_MASK_NOTE`.
 * **Winter.** At 58–61°N the optical record effectively stops from November to
   February (low sun, snow — SCL 11 is rejected). S-CCD must not read the gap as
   change, and alerts raised on the first spring observation deserve their own
@@ -229,3 +211,45 @@ publishing writes one COG per zone.
 * **No confirmation logic yet.** v1 alerts on a single confirmed break above the
   gate. Multi-observation confirmation and S1/S2 agreement are what will make
   the precision acceptable at this base rate.
+
+## Example AOI: olivinskog (multi-zone)
+
+`olivinskog` runs through the same CLI as `kalklindeskog`; the AOI name is the
+GeoParquet file stem under `FORESTMON_AOI_DIR` (`olivinskog.parquet`; the legacy
+`olivinskog_union.parquet` is also accepted). Differences from a single-zone AOI:
+
+* **Size.** 104 polygons, 130,539 fixed 10 m pixels (126,610 in EPSG:32632,
+  2,628 in 32634, 1,225 in 32633, 76 in 32635), 20 home MGRS tiles, 61,276
+  catalogue scenes (2017-2026), about 117 M observation rows (1.2 GB of yearly
+  parquet, against 360 MB for kalklindeskog) and a 173 MB state pickle.
+* **One polygon, one CRS, no warping.** Each polygon is gridded whole in the zone
+  Sentinel-2 tiles it in (`aoi.polygon_crs`), so a stand is never split across
+  coordinate systems. Zone 32V is widened to 3-12 E (MGRS), so western Norway at
+  about 5 E is zone 32, not 31. North of 64 N around 12.7 E only zone-32 tiles
+  reach, so run `grid build` again after `catalog sync` (the second build assigns
+  zones from the tiles that actually contain each polygon).
+* **`pix_id` embeds the EPSG code** (`32632_<gx>_<gy>`), which keeps ids unique
+  across zones.
+* **Per-zone COGs.** `publish site` writes `alerts_olivinskog_<epsg>.tif`, one
+  sparse COG per zone (only occupied 512x512 blocks are allocated; a dense array
+  over zone 32 would need about 17 GB). Vector outputs are reprojected to WGS84.
+* **Backfill.** `obs backfill` writes immutable part files per batch
+  (`FORESTMON_INGEST_BATCH`, default 100 scenes) and is restartable;
+  `obs compact` then merges them into one sorted, deduplicated file per year.
+* **Winter.** At 58-69 N the optical record stops from November to February.
+  `confidence.py` caps the confidence of breaks in that window, or after a gap
+  of more than 60 days, at `SEASON_CAP` (0.30) and records the cause in
+  `season_flag`.
+
+Onboarding order:
+
+```bash
+forestmon grid build olivinskog
+forestmon catalog sync olivinskog
+forestmon grid build olivinskog             # again: zones from covering tiles
+forestmon grid assign-tiles olivinskog
+forestmon obs backfill olivinskog
+forestmon obs compact olivinskog
+forestmon sccd bootstrap olivinskog
+forestmon run olivinskog
+```
