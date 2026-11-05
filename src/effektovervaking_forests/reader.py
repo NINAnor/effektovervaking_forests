@@ -82,11 +82,10 @@ def _install_s3_env() -> None:
 # Remaining GDAL settings are plain config options and are safe in Env().
 # DISABLE_READDIR_ON_OPEN stops GDAL listing a whole SAFE directory to open one
 # file, which over S3 is a directory listing per band.
-def _gdal_env(**overrides) -> rasterio.Env:
-    """The GDAL config for a read. Options live in `config.GDAL_OPTS` so a
-    transport sweep needs an environment variable, not a code edit."""
+def _gdal_env() -> rasterio.Env:
+    """The GDAL config for a read (`config.GDAL_OPTS`)."""
     _install_s3_env()
-    return rasterio.Env(**{**config.gdal_opts(), **overrides})
+    return rasterio.Env(**config.GDAL_OPTS)
 
 
 def _vsis3(href: str) -> str:
@@ -202,7 +201,6 @@ def read_scene(
     pixels: pd.DataFrame,
     apply_offset: bool = True,
     scl_first: bool = True,
-    gdal_overrides: dict | None = None,
 ) -> pd.DataFrame:
     """Per-pixel reflectance + SCL for one scene.
 
@@ -228,7 +226,6 @@ def read_scene(
     quality: `parity.check` compares raw reflectance on cloudy pixels too, and
     would otherwise silently compare a truncated sample.
     """
-    gdal_overrides = gdal_overrides or {}
     crss = pixels["utm_crs"].unique()
     if len(crss) != 1:
         # A multi-zone AOI must be split before reading; `pixels_for_scene` does.
@@ -247,7 +244,7 @@ def read_scene(
 
     scl = valid_scl = None
     if scl_first:
-        with _gdal_env(**gdal_overrides):
+        with _gdal_env():
             scl, valid_scl = _read_at(_vsis3(scl_href), xs, ys, crs)
         # SCL 0 is "no data" — outside the granule footprint.
         usable = valid_scl & (scl > 0) & (~np.isin(scl, config.SCL_REJECT))
@@ -272,7 +269,7 @@ def read_scene(
         href = scene["assets"].get(asset)
         if not href:
             raise KeyError(f"{scene['id']}: missing asset {asset}")
-        with _gdal_env(**gdal_overrides):  # Env is thread-local
+        with _gdal_env():  # Env is thread-local
             vals, valid = _read_at(_vsis3(href), xs, ys, crs)
         raw_nodata = vals == config.NODATA_DN
         if apply_offset:
@@ -287,7 +284,7 @@ def read_scene(
         return band, vals, valid, raw_nodata
 
     def _read_scl():
-        with _gdal_env(**gdal_overrides):
+        with _gdal_env():
             return _read_at(_vsis3(scl_href), xs, ys, crs)
 
     with ThreadPoolExecutor(max_workers=BAND_WORKERS) as pool:
