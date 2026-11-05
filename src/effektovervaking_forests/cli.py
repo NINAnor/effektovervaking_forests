@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 
 import numpy as np
@@ -769,8 +770,9 @@ def condition_run(
     stop: str = typer.Option(None, "--to", help="Last step id (inclusive)."),
     ee_project: str = typer.Option(
         config.EE_PROJECT,
-        help="Earth Engine project for 02e (Hansen). Without it 02e is skipped, "
-        "which step 04 only allows if hansen_pixels.parquet already exists.",
+        help="Earth Engine project for 02e (Hansen) and the embedding download "
+        "backup. Without it 02e is skipped, which step 04 only allows if "
+        "hansen_pixels.parquet already exists.",
     ),
     dry_run: bool = typer.Option(False, help="Print the plan and exit."),
 ):
@@ -795,6 +797,8 @@ def condition_run(
         )
     if dry_run:
         return
+    if ee_project:  # steps 02 and 02d read it for the Earth Engine backup
+        os.environ["FORESTMON_EE_PROJECT"] = ee_project
     raise typer.Exit(code=run_pipeline(steps, log_dir, echo=_echo))
 
 
