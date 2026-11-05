@@ -764,8 +764,8 @@ def condition_run(
     stop: str = typer.Option(None, "--to", help="Last step id (inclusive)."),
     ee_project: str = typer.Option(
         config.EE_PROJECT,
-        help="Earth Engine project for 02e (Hansen). Without it 02e is skipped "
-        "and 03 falls back to the uncalibrated p-value rule.",
+        help="Earth Engine project for 02e (Hansen). Without it 02e is skipped, "
+        "which step 04 only allows if hansen_pixels.parquet already exists.",
     ),
     dry_run: bool = typer.Option(False, help="Print the plan and exit."),
 ):

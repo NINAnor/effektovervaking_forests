@@ -96,6 +96,31 @@ def test_step_order() -> None:
     assert ids.index("04") < ids.index("03")
 
 
+@pytest.fixture
+def hansen_on_disk(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Step 04 may run without 02e only when Hansen data is already there."""
+    from effektovervaking_forests.condition import paths
+
+    p = tmp_path_factory.mktemp("hansen") / "hansen_pixels.parquet"
+    p.touch()
+    monkeypatch.setattr(paths, "HANSEN_PIXELS", p)
+
+
+def test_plan_refuses_step_04_without_hansen_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from effektovervaking_forests.condition import paths
+
+    monkeypatch.setattr(paths, "HANSEN_PIXELS", tmp_path / "missing.parquet")
+    with pytest.raises(ValueError, match="02e"):
+        steps.plan("02d", "04", ee_project=None)
+    todo, _ = steps.plan("05", "07", ee_project=None)  # 04 not in the slice
+    assert [s.id for s, _ in todo] == ["05", "06", "07"]
+
+
+@pytest.mark.usefixtures("hansen_on_disk")
 def test_plan_slices_and_skips_earth_engine() -> None:
     todo, skipped = steps.plan("02d", "04", ee_project=None)
     assert [s.id for s, _ in todo] == ["02d", "04"]
@@ -121,6 +146,7 @@ def test_plan_rejects_bad_slices(start: str | None, stop: str | None) -> None:
         steps.plan(start, stop)
 
 
+@pytest.mark.usefixtures("hansen_on_disk")
 def test_run_pipeline_stops_at_first_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -147,7 +173,7 @@ def test_run_pipeline_stops_at_first_failure(
     assert logs == ["03_trajectory.log", "04_condition.log"]
 
 
-@pytest.mark.usefixtures("no_data_tree")
+@pytest.mark.usefixtures("no_data_tree", "hansen_on_disk")
 def test_cli_lists_steps_and_dry_runs() -> None:
     result = runner.invoke(app, ["condition", "steps"])
     assert result.exit_code == 0

@@ -69,7 +69,13 @@ def plan(
     ee_project: str | None = None,
 ) -> tuple[list[tuple[Step, list[str]]], list[Step]]:
     """The (step, args) pairs `run` would execute, and the Earth Engine steps
-    it must skip (no project, or no `ee`)."""
+    it must skip (no project, or no `ee`).
+
+    Raises ValueError when step 04 would run without Hansen data: it needs
+    `hansen_pixels.parquet`, which only step 02e (Earth Engine) writes.
+    """
+    from effektovervaking_forests.condition.paths import HANSEN_PIXELS
+
     ids = [s.id for s in STEPS]
     for name, val in (("--from", start), ("--to", stop)):
         if val is not None and val not in ids:
@@ -88,6 +94,12 @@ def plan(
                 continue
             args += ["--project", ee_project]
         todo.append((s, args))
+    ids_todo = {s.id for s, _ in todo}
+    if "04" in ids_todo and "02e" not in ids_todo and not HANSEN_PIXELS.exists():
+        raise ValueError(
+            f"step 04 needs {HANSEN_PIXELS} from step 02e: pass --ee-project (or "
+            "set FORESTMON_EE_PROJECT) and install the gee extra"
+        )
     return todo, skipped
 
 
