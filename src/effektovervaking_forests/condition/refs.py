@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import warnings
 import zlib
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -66,15 +65,6 @@ def survey_year(polygons: pd.DataFrame) -> pd.Series:
         d = pd.to_datetime(polygons["Kartlagtda"], errors="coerce", format="mixed")
         yr = d.dt.year.fillna(yr)
     return yr.round().astype("Int64")
-
-
-@dataclass(frozen=True)
-class Donor:
-    """One good-reference stand, pinned to the year its label was assigned."""
-
-    poly_id: str
-    anchor_year: int
-    n_pixels: int
 
 
 def anchor_donors(

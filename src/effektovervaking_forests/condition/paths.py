@@ -52,8 +52,6 @@ AEF_INDEX = CACHE / "aef_index.parquet"
 AEF_YEARS = tuple(range(2017, 2026))  # 2017-2025 inclusive
 BANDS = tuple(f"A{i:02d}" for i in range(64))
 AEF_NODATA = -128
-# One COG block on the ground: 1024 px x 10 m. Both readers address blocks in metres.
-BLOCK_M = 1024 * 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +80,6 @@ WORLDCOVER_URL = (
     "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/"
     "ESA_WorldCover_10m_2021_v200_{ns}{lat:02d}{ew}{lon:03d}_Map.tif"
 )
-WORLDCOVER_YEAR = 2021
 # Built-up and cropland only; grassland (30) and bare/sparse (60) are mostly
 # natural fjell, pasture and rock in Norway.
 TRANSFORMED_CLASSES = (40, 50)

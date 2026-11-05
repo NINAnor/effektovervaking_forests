@@ -18,10 +18,6 @@ from . import config, store
 # dropped, so re-gating does not require re-running the model.
 LOSS_GATE = 0.075
 
-# "historical" = break found by the bootstrap fit before config.MONITORING_START;
-# kept as context, not an operational alert.
-STATUSES = ("new", "historical", "below_gate", "confirmed", "verified", "rejected")
-
 # A human verdict outranks anything a re-run computes.
 REVIEWED = ("verified", "rejected")
 
