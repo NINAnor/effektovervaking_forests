@@ -29,7 +29,8 @@
 #   FORESTMON_PUSH      Whether to commit & push (1) or skip (0) (default: 1)
 #   FORESTMON_WEB_OUT   Payload directory for web alerts (default: "$FORESTMON_DATA_DIR/web")
 #   FORESTMON_S3_REMOTE rclone path that holds the data, e.g. nina:forestmon
-#                       (default: unset = local data only). See "S3" below.
+#                       (default: from $REPO/.env.s3 if present, else local
+#                       data only). See "S3" below.
 #   UV_PROJECT_ENVIRONMENT
 #                       Venv directory (default: "$HOME/.venvs/effektovervaking_forests")
 #
@@ -44,7 +45,7 @@
 #     step failed, so cron mail (or `--check`) surfaces it.
 #
 # S3
-# With FORESTMON_S3_REMOTE set, S3 is the home of the data and the local data
+# With $REPO/.env.s3 (or FORESTMON_S3_REMOTE) set, S3 is the home of the data and the local data
 # dir is a working copy. Each cycle pulls the AOI polygons and the operational
 # data the run needs, runs, then pushes them back with the outputs (web/,
 # published/, logs/). Layout under the remote: aoi/, operational/{obs,runs,
@@ -66,10 +67,12 @@ SELF="$REPO/scripts/forestmon_cycle.sh"
 # Relative paths in .env mean relative to the repo, as they do for the CLI.
 cd "$REPO" || { echo "FATAL cannot cd to $REPO" >&2; exit 1; }
 
-# Read $REPO/.env the way the CLI does: KEY=VALUE lines, blank values ignored,
-# never overriding what the environment (or the crontab line) already set.
-# CDSE keys are left to the CLI, which keeps ~/.config/cdse/credentials first.
-if [ -f .env ]; then
+# KEY=VALUE lines, blank values ignored, never overriding what the environment
+# (or the crontab line) already set. $2=export: pass to child processes;
+# otherwise the values stay in this shell (the S3 keys go only to rclone).
+load_env() {
+  [ -f "$1" ] || return 0
+  local line key value
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line#"${line%%[![:space:]]*}"}"            # strip leading space
     case "$line" in ''|\#*) continue ;; esac
@@ -81,9 +84,16 @@ if [ -f .env ]; then
     value="${value#[\"\']}"; value="${value%[\"\']}"
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
     case "$key" in CDSE_S3_ACCESS_KEY|CDSE_S3_SECRET_KEY) continue ;; esac
-    if [ -n "$value" ] && [ -z "${!key:-}" ]; then export "$key=$value"; fi
-  done < .env
-fi
+    [ -n "$value" ] && [ -z "${!key:-}" ] || continue
+    if [ "${2:-}" = export ]; then export "$key=$value"; else printf -v "$key" '%s' "$value"; fi
+  done < "$1"
+}
+# Read $REPO/.env the way the CLI does. CDSE keys are left to the CLI, which
+# keeps ~/.config/cdse/credentials first.
+load_env .env export
+# The data bucket: S3_ENDPOINT_URL, S3_BUCKET, S3_PREFIX, AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY (git-ignored; see docs/deployment.md).
+load_env .env.s3
 DATA_DIR="$(realpath -m "${FORESTMON_DATA_DIR:-$REPO/data}")"
 
 # Cron's PATH is minimal, so put $HOME/.local/bin on PATH.
@@ -101,10 +111,20 @@ WEB_OUT="$(realpath -m "${FORESTMON_WEB_OUT:-$DATA_DIR/web}")"
 AOI_DIR="$(realpath -m "${FORESTMON_AOI_DIR:-$DATA_DIR/aoi}")"
 GIS_OUT="$(realpath -m "${FORESTMON_GIS_OUT:-$DATA_DIR/published}")"
 S3="${FORESTMON_S3_REMOTE:-}"
+if [ -z "$S3" ] && [ -n "${S3_BUCKET:-}" ]; then
+  # Under the project prefix, beside the separately published alerts/ and
+  # condition/ products.
+  S3=":s3,provider=Other,env_auth=true,endpoint='${S3_ENDPOINT_URL:?S3_ENDPOINT_URL missing in .env.s3}'"
+  S3="$S3:$S3_BUCKET/${S3_PREFIX:+$S3_PREFIX/}sccd"
+fi
 S3="${S3%/}"
 OPS_DIRS="obs runs state alerts grid catalog"  # the pipeline's commit order first
 PENDING="$DATA_DIR/.s3_push_pending"
-RCLONE=(rclone --retries 5 --log-level ERROR)
+# Keys passed in rclone's environment only (not exported, not on its argv).
+rclone_() {
+  AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}" AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}" \
+    rclone --retries 5 --log-level ERROR "$@"
+}
 
 # Local disk, NOT the CIFS share. flock works on this mount when uncontended but
 # reports EPERM rather than EWOULDBLOCK when held, and a transient CIFS error is
@@ -130,13 +150,13 @@ s3_pull() {
   # Listing fails if the remote is unreachable or was never initialised
   # (--s3-push); that must abort the cycle, not look like an empty remote.
   local have d
-  have=$("${RCLONE[@]}" lsf --dirs-only "$S3/operational" 2>>"$LOG") || return 1
+  have=$(rclone_ lsf --dirs-only "$S3/operational" 2>>"$LOG") || return 1
   for d in $OPS_DIRS; do
     grep -qx "$d/" <<<"$have" || continue  # e.g. no alerts yet
-    "${RCLONE[@]}" sync "$S3/operational/$d" "$DATA_DIR/operational/$d" 2>>"$LOG" ||
+    rclone_ sync "$S3/operational/$d" "$DATA_DIR/operational/$d" 2>>"$LOG" ||
       return 1
   done
-  "${RCLONE[@]}" sync "$S3/aoi" "$AOI_DIR" 2>>"$LOG"
+  rclone_ sync "$S3/aoi" "$AOI_DIR" 2>>"$LOG"
 }
 
 s3_push() {
@@ -144,12 +164,12 @@ s3_push() {
   local d
   for d in $OPS_DIRS; do
     [ -d "$DATA_DIR/operational/$d" ] || continue
-    "${RCLONE[@]}" sync "$DATA_DIR/operational/$d" "$S3/operational/$d" 2>>"$LOG" ||
+    rclone_ sync "$DATA_DIR/operational/$d" "$S3/operational/$d" 2>>"$LOG" ||
       return 1
   done
   for d in "$AOI_DIR:aoi" "$WEB_OUT:web" "$GIS_OUT:published"; do
     [ -d "${d%%:*}" ] || continue
-    "${RCLONE[@]}" sync "${d%%:*}" "$S3/${d##*:}" 2>>"$LOG" || return 1
+    rclone_ sync "${d%%:*}" "$S3/${d##*:}" 2>>"$LOG" || return 1
   done
   rm -f "$PENDING"
 }
@@ -317,5 +337,5 @@ fi
 log "=== cycle end (rc=$rc_total) ==="
 # Logs last, so the remote copy includes this cycle's end. Copied, not synced:
 # a new server must not delete the old server's logs.
-if [ -n "$S3" ]; then "${RCLONE[@]}" copy "$LOG_DIR" "$S3/logs" 2>>"$LOG" || true; fi
+if [ -n "$S3" ]; then rclone_ copy "$LOG_DIR" "$S3/logs" 2>>"$LOG" || true; fi
 exit $rc_total
