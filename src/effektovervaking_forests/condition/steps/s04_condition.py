@@ -242,7 +242,7 @@ def main(argv: list[str] | None = None) -> None:
         "reported as threshold_se_* and in threshold.json. "
         "It is a diagnostic: research E43/E45 showed it is the "
         "label-sample half of the boundary's error only, and "
-        "that classifying with it costs 40% of the degraded "
+        "that classifying with it costs 40%% of the degraded "
         "stands found for no fall in wrong reassurance",
     )
     ap.add_argument("--seed", type=int, default=42)
