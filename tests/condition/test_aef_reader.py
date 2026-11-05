@@ -166,7 +166,8 @@ def test_a_failing_neighbour_does_not_fail_the_requested_block(monkeypatch):
     monkeypatch.setattr(dask, "compute", compute)
     src = open_tile(TILE)
     src._da = types.SimpleNamespace(
-        data=np.zeros((1, len(BANDS), 8 * BLOCK, 8 * BLOCK))
+        # a zero-copy view: the window slicing needs only the shape
+        data=np.broadcast_to(np.int8(0), (1, len(BANDS), 8 * BLOCK, 8 * BLOCK))
     )
     src.prefetch([Block(0, 0), Block(0, 1), Block(0, 2)])
     arr, _ = src.read_block(Block(0, 0))

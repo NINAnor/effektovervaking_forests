@@ -27,7 +27,7 @@ def no_data_tree(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # core.py is vendored verbatim from DegreeofRecovery paper_release; this pins
 # its SHA-256. If this fails, re-copy it, do not edit it.
-CORE_SHA256 = "6c0f5d96976c2ecb8df7dfd4c7e3d40489f109e9c9662c61b8809b7a9750a06d"
+CORE_SHA256 = "6c0f5d96976c2ecb8df7dfd4c7e3d40489f109e9c9662c61b8809b7a9750a06d"  # noqa: E501 # pragma: allowlist secret
 
 
 def test_core_is_vendored_verbatim() -> None:
