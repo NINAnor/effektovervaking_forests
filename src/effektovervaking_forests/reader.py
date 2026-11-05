@@ -120,7 +120,7 @@ def boa_offset_for(scene: pd.Series, band: str) -> int:
     if off is not None and pd.notna(off):
         return int(off)
     xml = scene["assets"].get("product_metadata")
-    if xml:
+    if xml and xml.startswith("s3://"):  # EOPF rows carry boa_offset instead
         try:
             return _boa_offsets_from_xml(xml)[_BAND_ID[band]]
         except Exception as e:  # noqa: BLE001
@@ -197,6 +197,10 @@ def read_scene(
         # Multi-zone pixels must be split first; `pixels_for_scene` does.
         raise ValueError(f"{scene['id']}: pixels span {len(crss)} CRSs {list(crss)}")
     crs = crss[0]
+    # EOPF Zarr has no CRS for `_read_at` to check, so check the tile's zone.
+    tile_crs = tile_utm_crs(scene.get("tile") or "")
+    if tile_crs and tile_crs != crs:
+        raise ValueError(f"{scene['id']}: tile is {tile_crs}, pixels are {crs}")
     xs = pixels["utm_x"].to_numpy("float64")
     ys = pixels["utm_y"].to_numpy("float64")
 

@@ -68,3 +68,14 @@ def test_catalogue_offset_wins_over_metadata_xml():
     assert reader.boa_offset_for(scene, "B02") == -1000
     scene["boa_offset"] = float("nan")  # CDSE row: falls back to the baseline rule
     assert reader.boa_offset_for(scene, "B02") == -1000
+
+
+def test_read_scene_refuses_pixels_from_another_zone():
+    import pandas as pd
+
+    px = pd.DataFrame(
+        {"pix_id": [1], "utm_x": [5.0], "utm_y": [5.0], "utm_crs": ["EPSG:32633"]}
+    )
+    scene = pd.Series({"id": "s", "tile": "32VPM", "assets": {}})
+    with pytest.raises(ValueError, match="32632"):
+        reader.read_scene(scene, px)

@@ -10,7 +10,6 @@ METHODS.md section 3.
 from __future__ import annotations
 
 import math
-import os
 
 import geopandas as gpd
 import numpy as np
@@ -54,8 +53,6 @@ _WC_ENV = {
 def wc_env(**overrides) -> rasterio.Env:
     cfg = dict(_WC_ENV)
     cfg.update(overrides)
-    for k, v in cfg.items():
-        os.environ.setdefault(k, str(v))
     return rasterio.Env(**cfg)
 
 
