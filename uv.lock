@@ -717,7 +717,6 @@ name = "effektovervaking-forests"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "affine" },
     { name = "duckdb" },
     { name = "geopandas" },
     { name = "numba" },
@@ -753,7 +752,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "affine", specifier = ">=2.4" },
     { name = "duckdb", specifier = ">=1.0" },
     { name = "earthengine-api", marker = "extra == 'gee'", specifier = ">=1.0" },
     { name = "geopandas", specifier = ">=1.0" },

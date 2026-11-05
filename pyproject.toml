@@ -13,7 +13,6 @@ authors = [
   { name = "Geethen Singh", email = "geethen.singh@nina.no" }
 ]
 dependencies = [
-  "affine>=2.4",
   "duckdb>=1.0",
   "geopandas>=1.0",
   "numba>=0.59",
