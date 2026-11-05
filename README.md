@@ -81,7 +81,7 @@ from the loss monitor; it shares only the configuration. ~30 min, ~50 GB read.
 
 ```bash
 uv run forestmon condition doctor            # stand gpkg, GDAL, ee, data root
-uv run forestmon condition steps             # the 14 steps
+uv run forestmon condition steps             # the 11 steps
 uv run forestmon condition run               # fail-fast, logged; --from/--to/--dry-run
 uv run forestmon condition step 04 -- --help # one step; args after -- are the step's own
 ```

@@ -21,7 +21,7 @@ Two results per stand and per 10 m cell, from the same 64-d annual embedding
 | AlphaEarth annual embedding, 64 bands, 10 m, 2017-2025 | Source Cooperative `tge-labs/aef` (int8 COGs; anonymous HTTPS) | the feature space |
 | Mapped stands, six layers of `skog_kartlegginger.gpkg` | `FORESTS_KARTLEGGING_GPKG` | probes and good donors |
 | ESA WorldCover v200 (2021 epoch) | AWS `esa-worldcover` | transformed (bad) pool |
-| Hansen Global Forest Change loss year | Earth Engine (step 02e, optional) | donor hygiene, trajectory calibration, validation |
+| Hansen Global Forest Change loss year | Earth Engine (step 02e; required by step 04) | donor hygiene, trajectory calibration, validation |
 
 The embedding is dequantised as `sign(raw) * (raw/127.5)^2`, giving unit-norm
 vectors. Tiles are bottom-up and nodata outside their natural UTM zone; the
@@ -73,7 +73,7 @@ class 10).
 
 | scope | pool | answers |
 |---|---|---|
-| `local` | the 32 nearest eligible `god` stands within 50 km (E44) | poor for its region? |
+| `local` | the 32 nearest eligible `god` stands within 50 km (E44); for olivinskog every donor within 20 km, at least 8 (E60) | poor for its region? |
 | `global` | every eligible `god` stand of the type | poor for its type? |
 
 * *Caps.* 60 pixels per donor, 2,000 for the global pool, stratified by donor
