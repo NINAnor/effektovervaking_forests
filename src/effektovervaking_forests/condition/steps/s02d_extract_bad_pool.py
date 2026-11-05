@@ -126,12 +126,12 @@ def run_shard(
     return out.name, len(df), time.time() - t0
 
 
-def resolve_uris(plan: pd.DataFrame, years: list[int]) -> pd.DataFrame:
-    """Attach the per-year GDAL URI to every planned block, matching tiles
+def resolve_tiles(plan: pd.DataFrame, years: list[int]) -> pd.DataFrame:
+    """Attach the per-year tile path to every planned block, matching tiles
     across years by origin (utm_zone, utm_west, utm_south), not filename."""
     import duckdb
 
-    from effektovervaking_forests.condition.aef import ensure_index, tile_uri
+    from effektovervaking_forests.condition.aef import ensure_index
     from effektovervaking_forests.condition.paths import AEF_INDEX
 
     ensure_index(AEF_INDEX)
@@ -144,9 +144,8 @@ def resolve_uris(plan: pd.DataFrame, years: list[int]) -> pd.DataFrame:
         )
         .df()
     )
-    idx["uri"] = idx["path"].map(tile_uri)
     out = plan.merge(idx, on=["utm_zone", "utm_west", "utm_south"], how="left")
-    missing = out["uri"].isna()
+    missing = out["path"].isna()
     if missing.any():
         print(
             f"  ! {int(missing.sum())} (block, year) pairs have no tile in the "
@@ -198,7 +197,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     print(f"shard cache: {shards_dir.relative_to(CACHE.parent)}")
 
-    work = resolve_uris(plan, args.years)
+    work = resolve_tiles(plan, args.years)
     todo = [
         row
         for row in work.to_dict("records")

@@ -16,13 +16,13 @@ AlphaEarth annual embeddings (2017-2025). The library is the subpackage
 | **Scale** | 168,832 cells, 2.0 M pixel-year scores, 5 UTM zones |
 | **Verified** | stand AUC 0.836 against the field labels (`local`); trajectory recall on Hansen clearing 0.33 at 2 % FPR (cell grain) |
 
-The AlphaEarth mirror was checked against Earth Engine's
-`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` once (2026-09); nothing compares them at
-run time.
+Embeddings are downloaded from the Source Cooperative mirror with
+[`aef_loader_plus`](https://github.com/Geethen/aef_loader_plus) (no account
+needed).
 
 ## Setup
 
-Python >= 3.11 and the repo's uv environment (numba is a regular dependency).
+Python >= 3.12 and the repo's uv environment (numba is a regular dependency).
 The Earth Engine client is an extra, needed only for step 02e:
 
 ```bash
@@ -32,8 +32,7 @@ uv run forestmon condition doctor
 ```
 
 `doctor` checks the stand GeoPackage, the GDAL GeoTIFF driver and
-`earthengine-api`, and shows where the pipeline will write. GDAL must have ZSTD
-and `/vsicurl` (the `rasterio` wheel has both).
+`earthengine-api`, and shows where the pipeline will write.
 
 ### Inputs
 

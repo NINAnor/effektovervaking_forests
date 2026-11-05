@@ -15,7 +15,7 @@ diagram and [docs/operational.md](docs/operational.md) for the pipeline, commit
 boundaries and known gaps.
 
 ## Install
-Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Requires Python >= 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
 # On a network share without symlink support, keep the venv on local disk:

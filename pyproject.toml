@@ -13,6 +13,8 @@ authors = [
   { name = "Geethen Singh", email = "geethen.singh@nina.no" }
 ]
 dependencies = [
+  "aef-loader-plus @ git+https://github.com/Geethen/aef_loader_plus@49d197d757af8a9f62be4e8144840e51822e3ae9",
+  "dask>=2024.1",
   "duckdb>=1.0",
   "geopandas>=1.0",
   "numba>=0.59",
@@ -34,7 +36,7 @@ description = "Forest monitoring for NINA: S-CCD loss alerts (forestmon) and Alp
 license = "GPL-3.0-or-later"
 name = "effektovervaking_forests"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 version = "0.1.0"
 
 [project.optional-dependencies]
@@ -49,6 +51,7 @@ forestmon = "effektovervaking_forests.cli:app"
 known_first_party = ["effektovervaking_forests"]
 
 [tool.deptry.package_module_name_map]
+aef-loader-plus = "aef_loader"
 earthengine-api = "ee"
 
 [tool.deptry.per_rule_ignores]

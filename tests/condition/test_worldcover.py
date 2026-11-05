@@ -86,16 +86,9 @@ def test_alphaearth_is_nodata_outside_a_tiles_natural_utm_zone():
     entire bad pool of 18 stands before the filter was added.
     """
     import duckdb
-    import rasterio
     from pyproj import Transformer
 
-    from effektovervaking_forests.condition.aef import (
-        Block,
-        _read_block,
-        ensure_index,
-        gdal_env,
-        tile_uri,
-    )
+    from effektovervaking_forests.condition.aef import Block, ensure_index, open_tile
     from effektovervaking_forests.condition.paths import AEF_INDEX
 
     ensure_index(AEF_INDEX)
@@ -103,18 +96,19 @@ def test_alphaearth_is_nodata_outside_a_tiles_natural_utm_zone():
     lon, _ = Transformer.from_crs(32631, 4326, always_xy=True).transform(x, y)
     assert int((lon + 180) // 6) + 1 == 32, "this point's natural zone is 32, not 31"
 
-    path = (
+    tile = (
         duckdb.connect()
         .execute(
-            f"""SELECT path FROM read_parquet('{AEF_INDEX}')
+            f"""SELECT * FROM read_parquet('{AEF_INDEX}')
             WHERE year=2025 AND utm_zone='31N'
               AND utm_west=581920 AND utm_south=6881280"""  # noqa: S608 - constant index path, test-only
         )
-        .df()["path"]
+        .df()
         .iloc[0]
+        .to_dict()
     )
-    with gdal_env(), rasterio.open(tile_uri(path)) as ds:
-        arr, tr = _read_block(ds, Block(0, 7))
+    with open_tile(tile) as src:
+        arr, tr = src.read_block(Block(0, 7))
     inv = ~tr
     c, r = int(np.floor(inv.a * x + inv.c)), int(np.floor(inv.e * y + inv.f))
     assert not np.isfinite(arr[0, r, c])
