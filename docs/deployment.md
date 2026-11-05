@@ -73,9 +73,16 @@ the clone, for example `/srv/forestmon/data`:
 kalklindeskog and olivinskog are already running elsewhere. Get from the current
 operator:
 
-- the `operational/` directory (about 1.8 GB), copied to `<data>/operational/`;
+- these folders of `operational/` (about 1.8 GB), copied to `<data>/operational/`:
+  `obs/`, `state/`, `runs/`, `alerts/`, `grid/` and `catalog/`. Do **not** copy
+  `locks/` (a copied lease would block the first run), nor `parity/`,
+  `*_bench.json` or `*_gdal_*.csv`, which are left over from removed
+  benchmarking tools;
 - the AOI polygons `kalklindeskog_union.parquet` and `olivinskog_union.parquet`,
   copied to `<data>/aoi/`.
+
+Copy `grid/` rather than rebuilding it: the state records a fingerprint of the
+grid and refuses a different one.
 
 Take the copy after the old machine's nightly cycle has finished. **Have the old
 machine's cron job removed before the new server's first run.** Two machines
