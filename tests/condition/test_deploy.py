@@ -66,14 +66,6 @@ def test_import_creates_no_directories(tmp_path: Path) -> None:
     assert [p.name for p in tmp_path.iterdir() if p.name != "home"] == []
 
 
-def test_report_template_ships_with_the_package() -> None:
-    """08 skips the HTML report silently when the template is missing."""
-    from effektovervaking_forests.condition.steps import s08_report_data
-
-    tpl = Path(s08_report_data.__file__).with_name("report_template.html")
-    assert "__REPORT_DATA__" in tpl.read_text(encoding="utf-8")
-
-
 def test_root_defaults_under_forestmon_data_dir(tmp_path: Path) -> None:
     code = "from effektovervaking_forests.condition import paths; print(paths.ROOT)"
     assert _python(code, tmp_path, FORESTMON_DATA_DIR=str(tmp_path / "d")) == str(
@@ -103,7 +95,6 @@ def test_step_order() -> None:
     assert len(ids) == len(set(ids))
     # 03 reads the yearly scores 04 writes.
     assert ids.index("04") < ids.index("03")
-    assert not steps.BY_ID["09"].in_run
 
 
 def test_plan_slices_and_skips_earth_engine() -> None:
@@ -111,8 +102,8 @@ def test_plan_slices_and_skips_earth_engine() -> None:
     assert [s.id for s, _ in todo] == ["02d", "04"]
     assert [s.id for s in skipped] == ["02e"]
     assert dict((s.id, a) for s, a in todo)["02d"] == ["--workers", "6"]
-    todo, skipped = steps.plan("04", "08")
-    assert [s.id for s, _ in todo] == ["04", "03", "05", "06", "07", "08"]
+    todo, skipped = steps.plan("04", "07")
+    assert [s.id for s, _ in todo] == ["04", "03", "05", "06", "07"]
     assert skipped == []
 
 

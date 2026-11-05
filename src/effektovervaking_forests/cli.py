@@ -855,7 +855,6 @@ def condition_steps():
 
     for s in STEPS:
         note = " (needs Earth Engine)" if s.needs_ee else ""
-        note += "" if s.in_run else " (not in `run`)"
         _echo(f"  {s.id:<4} {s.module:<24} {s.summary}{note}")
 
 
@@ -935,7 +934,7 @@ def condition_doctor():
     for mod, why in (
         ("numba", "step 04 runs ~3x faster; `--extra fast`"),
         ("threadpoolctl", "step 04 --workers; `--extra fast`"),
-        ("ee", "steps 02e and 09 only; `--extra gee`"),
+        ("ee", "step 02e only; `--extra gee`"),
     ):
         have = importlib.util.find_spec(mod) is not None
         _echo(f"  {'OK ' if have else 'WARN'}  {mod}{'' if have else f' ({why})'}")
