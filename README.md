@@ -100,8 +100,9 @@ Details and outputs:
 
 ## Deploy
 To run the monitor on a server, follow [docs/deployment.md](docs/deployment.md). It
-covers requirements, install, taking over the existing AOIs or starting a new one,
-scheduling with `scripts/forestmon_cycle.sh`, health checks and backups.
+covers requirements, install, keeping the data in an S3 bucket (rclone), taking
+over the existing AOIs or starting a new one, scheduling with
+`scripts/forestmon_cycle.sh`, health checks and backups.
 
 ## Test
 ```bash
