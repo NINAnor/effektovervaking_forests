@@ -1,28 +1,13 @@
 """The observation store: per-pixel reflectance, accumulated over time.
 
-S-CCD is fed observations, not images, so this is the boundary between "talking
-to CDSE" and "detecting change". Keeping it as an explicit, persisted layer
-rather than streaming scenes straight into the model buys three things:
+The persisted boundary between CDSE reads and S-CCD, so parameters can change
+without re-downloading imagery. Rows are keyed by (pix_id, datetime): a
+reprocessed scene replaces its earlier rows rather than duplicating them.
 
-* **Re-fittability.** Changing an S-CCD parameter means re-fitting from stored
-  observations, not re-downloading nine years of Sentinel-2.
-* **Idempotence.** Rows are keyed by (pix_id, acquisition), so a scene that CDSE
-  republishes after reprocessing REPLACES its earlier rows instead of entering
-  the same acquisition twice under a new product id.
-* **Auditability.** When an alert is questioned, the exact observations behind
-  it are on disk, with their SCL values and the scene they came from.
-
-**Write path: immutable parts, compacted later.** Appending used to mean reading
-the year's parquet, concatenating, and rewriting it. Over a 15k-scene backfill
-that is O(n^2) bytes — the 2026 partition would be rewritten hundreds of times,
-growing to millions of rows — and every rewrite is a window in which the
-partition can be lost. Instead each batch writes one new part file per year and
-never touches an existing one; `compact()` folds parts into the yearly file as a
-separate, restartable step. Crashing between the two leaves duplicate rows on
-disk, which the read path already removes.
-
-Partitioned by year because that suits both paths: the incremental run only ever
-writes a part in the current year, and a backfill can compact years in parallel.
+Write path: each batch writes new immutable part files per year and never
+rewrites an existing file; `compact()` folds parts into the yearly file as a
+separate, restartable step. A crash between the two leaves duplicates, which
+the read path removes via `dedupe`.
 """
 
 from __future__ import annotations
@@ -45,10 +30,8 @@ SCHEMA_COLS = [
     "proc",
 ]
 
-# Dedupe key. One pixel is imaged once per acquisition (a pixel has exactly one
-# home tile, see aoi.assign_home_tiles), so (pix_id, datetime) identifies an
-# observation independently of which PRODUCT delivered it — which is the point:
-# reprocessed products have new ids but the same sensing time.
+# Dedupe key: a pixel has one home tile, so (pix_id, datetime) identifies an
+# observation regardless of which (reprocessed) product delivered it.
 KEY = ["pix_id", "datetime"]
 
 
@@ -93,11 +76,9 @@ def years_present(aoi_name: str) -> list[int]:
 
 
 def _proc_time(scene_ids: pd.Series) -> pd.Series:
-    """The processing datetime encoded in a CDSE product id (its last field).
+    """The processing datetime in a CDSE product id (its last field).
 
-    Used to decide which version of a reprocessed acquisition wins. Products
-    whose id does not carry one sort first, so a real version always beats an
-    unparseable one.
+    Decides which reprocessed version wins; ids without one sort first.
     """
     return scene_ids.astype(str).str.rsplit("_", n=1).str[-1].fillna("")
 
@@ -105,10 +86,8 @@ def _proc_time(scene_ids: pd.Series) -> pd.Series:
 def dedupe(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (pixel, acquisition): the most recently processed product.
 
-    ESA reprocesses granules and CDSE serves every version. `catalog.dedupe_versions`
-    keeps only the newest in the *pending* list, but a version processed after we
-    already ingested the old one arrives as a new scene_id — so the store has to
-    resolve it too, or the pixel's series carries the same day twice.
+    `catalog.dedupe_versions` only covers the pending list; a version arriving
+    after the old one was ingested must be resolved here.
     """
     if df.empty:
         return df
@@ -128,11 +107,7 @@ def append(
     """Write a batch of observations as new immutable part files.
 
     Returns the number of rows written. `store_all` (default from
-    `config.STORE_ALL_OBSERVATIONS`) decides whether cloud/shadow/snow rejects
-    are kept: they are ~7x the volume of the clear rows and no model reads them,
-    but they are the only record of WHY a gap in a series exists, and they cost
-    ~1.3 GB across both AOIs. Re-reading them from CDSE later would cost ~2 TB
-    of traffic, so this is a decision to take before the backfill, not after.
+    `config.STORE_ALL_OBSERVATIONS`) keeps cloud/shadow/snow rejects too.
     """
     if df.empty:
         return 0
@@ -160,13 +135,9 @@ def compact(
 ) -> dict[int, int]:
     """Fold part files into one sorted parquet per year.
 
-    Sorted by (pix_id, datetime) so that DuckDB / pyarrow row-group statistics
-    prune to the handful of groups holding a pixel's series, which is the access
-    pattern for everything downstream.
-
-    Restartable: the compacted file is replaced atomically BEFORE its parts are
-    removed, so an interruption leaves duplicates (which `dedupe` handles on
-    read) rather than a hole.
+    Sorted by (pix_id, datetime) so row-group statistics prune to a pixel's
+    series. The compacted file is replaced atomically BEFORE its parts are
+    removed, so an interruption leaves duplicates rather than a hole.
     """
     out: dict[int, int] = {}
     for y in years if years is not None else years_present(aoi_name):
@@ -211,13 +182,8 @@ def load(
 ) -> pd.DataFrame:
     """Read the store, part files included, deduplicated and sorted.
 
-    `scene_ids` restricts to particular products — the replay path uses it to
-    re-feed the observations of scenes that reached the store but never reached
-    the model, without going back to CDSE.
-
-    `clear_only` defaults True because every consumer in this package models
-    clear-sky series; the rejects are kept (when `config.STORE_ALL_OBSERVATIONS`
-    is on) for auditing, not for modelling.
+    `scene_ids` restricts to particular products (used by the replay path).
+    `clear_only` drops stored rejects, which exist only for auditing.
     """
     files = _files(aoi_name, years)
     if not files:
@@ -227,10 +193,8 @@ def load(
     if columns is not None:
         need = sorted(set(columns) | set(KEY) | {"scene_id", "clear"})
     frames = []
-    # `pix_range` = inclusive (lo, hi) on pix_id. The store is written sorted by
-    # pixel, so the range is pushed down to the row groups and only that slice is
-    # ever read -- this is what lets a bootstrap run in chunks instead of
-    # materialising 117 M rows (olivinskog) at once.
+    # `pix_range` = inclusive (lo, hi) on pix_id, pushed down to row groups so
+    # a bootstrap can run in chunks.
     flt = (
         [("pix_id", ">=", pix_range[0]), ("pix_id", "<=", pix_range[1])]
         if pix_range
@@ -258,11 +222,10 @@ def load(
 
 
 def scene_ids_present(aoi_name: str) -> set[str]:
-    """Every scene already represented in the store.
+    """Every scene with at least one stored row.
 
-    Note this only sees scenes that contributed at least one stored row, so a
-    fully clouded scene leaves no trace here when only clear rows are stored.
-    `runs.py` is the authority on what has been processed.
+    A fully clouded scene leaves no trace here; `runs.py` is the authority on
+    what has been processed.
     """
     ids: set[str] = set()
     for p in _files(aoi_name, None):
@@ -273,10 +236,8 @@ def scene_ids_present(aoi_name: str) -> set[str]:
 def observation_counts(aoi_name: str, pix_ids: set[str] | None = None) -> pd.Series:
     """Clear observations per pixel, over the whole store.
 
-    Used to find pixels that were too sparse to fit at bootstrap and have since
-    crossed the threshold. Pass `pix_ids` — the caller normally only cares about
-    the unfitted handful, and reading four columns for those is a fraction of
-    the cost of materialising the store.
+    Used to find pixels too sparse at bootstrap that have since crossed the
+    threshold; pass `pix_ids` to avoid materialising the store.
     """
     frames = []
     for p in _files(aoi_name, None):

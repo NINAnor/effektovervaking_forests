@@ -1,10 +1,8 @@
 """Paths, constants and the processing recipe shared by every operational step.
 
-The band/masking recipe here deliberately mirrors `scripts/c2c_ts_server.py`
-(`_dense_masked_collection`, `_dense_pixel_series`) so that a pixel processed
-operationally is the same pixel the inspector shows. Where CDSE cannot
-reproduce Earth Engine exactly, the difference is named in ONE place — see
-CLOUD_MASK_NOTE below — rather than being spread through the reader.
+The band/masking recipe mirrors the Earth Engine inspector so a pixel processed
+operationally matches what the inspector shows; the one known difference is in
+CLOUD_MASK_NOTE below.
 """
 
 from __future__ import annotations
@@ -18,9 +16,8 @@ from pathlib import Path
 def read_env_file(path: Path, skip: frozenset[str] = frozenset()) -> None:
     """Load KEY=VALUE lines into os.environ without overriding what is set.
 
-    Blank values are ignored (an empty placeholder is not a setting), so a
-    copied .env.example cannot mask a value from a later source. A ` #` after
-    the value starts a comment. scripts/forestmon_cycle.sh parses the same way.
+    Blank values are ignored; a ` #` after the value starts a comment.
+    scripts/forestmon_cycle.sh parses the same way.
     """
     if not path.is_file():
         return
@@ -34,9 +31,8 @@ def read_env_file(path: Path, skip: frozenset[str] = frozenset()) -> None:
             os.environ[k] = v
 
 
-# Settings from a .env in the working directory, read here so they are in place
-# however the package is entered. The CDSE keys are left to `cdse_auth`, which
-# keeps ~/.config/cdse/credentials ahead of a .env on the project drive.
+# Read the working-directory .env at import. CDSE keys are left to `cdse_auth`
+# (home credentials file takes precedence).
 read_env_file(
     Path.cwd() / ".env",
     skip=frozenset(
@@ -46,10 +42,8 @@ read_env_file(
 
 
 # ── layout ───────────────────────────────────────────────────────────────────
-# Nothing is written next to the code. Every artefact lives under one data
-# directory, chosen per deployment (FORESTMON_DATA_DIR) and defaulting to
-# ./data relative to where the CLI is run. Directories are created on demand by
-# `ensure_dirs()`, never as a side effect of import.
+# Every artefact lives under FORESTMON_DATA_DIR (default ./data); directories
+# are created by `ensure_dirs()`, never on import.
 def _env_path(name: str, default: Path) -> Path:
     return Path(os.environ.get(name) or default).expanduser()
 
@@ -57,9 +51,8 @@ def _env_path(name: str, default: Path) -> Path:
 DATA = _env_path("FORESTMON_DATA_DIR", Path.cwd() / "data")
 OPS = DATA / "operational"  # everything this package writes
 
-# AOI polygons: one GeoParquet per AOI, named `<aoi>.parquet` (the legacy
-# `<aoi>_union.parquet` name is also accepted). The AOI name used on the
-# command line is the file stem.
+# AOI polygons: one GeoParquet per AOI, `<aoi>.parquet` (or legacy
+# `<aoi>_union.parquet`); the file stem is the AOI name.
 AOI_DIR = _env_path("FORESTMON_AOI_DIR", DATA / "aoi")
 
 
@@ -80,8 +73,7 @@ RUNS_DIR = OPS / "runs"  # run ledger
 
 
 def ensure_dirs() -> None:
-    """Create the output tree. Reads the module globals at call time, so a
-    test (or a caller) that repoints them gets its own tree."""
+    """Create the output tree (reads module globals at call time)."""
     for d in (
         OPS,
         GRID_DIR,
@@ -95,7 +87,7 @@ def ensure_dirs() -> None:
 
 
 def aoi_path(aoi_name: str) -> Path:
-    """The polygon file for an AOI, with an error that says where we looked."""
+    """The polygon file for an AOI; the error says where it looked."""
     try:
         return AOI_PARQUET[aoi_name]
     except KeyError:
@@ -106,34 +98,31 @@ def aoi_path(aoi_name: str) -> Path:
         ) from None
 
 
-# Earth Engine is used only by condition step 02e. The Cloud project is per user;
-# unset, Earth Engine falls back to the one in the user's credentials.
+# Earth Engine is used only by condition step 02e; unset falls back to the
+# project in the user's credentials.
 EE_PROJECT = os.environ.get("FORESTMON_EE_PROJECT") or None
 
 # Event logs (JSON Lines, one file per AOI) and the published products.
 LOG_DIR = _env_path("FORESTMON_LOG_DIR", DATA / "logs")
 WEB_OUT = _env_path("FORESTMON_WEB_OUT", DATA / "web")
 GIS_OUT = _env_path("FORESTMON_GIS_OUT", DATA / "published")
-# OPERA DIST-ALERT points, the independent-agreement term in alert confidence.
-# Absent, that term is simply never satisfied.
+# OPERA DIST-ALERT points for the confidence agreement term (optional).
 OPERA_PARQUET = _env_path("FORESTMON_OPERA_PARQUET", DATA / "opera_dist_alerts.parquet")
 
 # ── CDSE ─────────────────────────────────────────────────────────────────────
 STAC_URL = "https://stac.dataspace.copernicus.eu/v1"
 S2_L2A_COLLECTION = "sentinel-2-l2a"
 
-# CDSE serves band assets from its own S3-compatible store. Keys are generated
-# per user at https://eodata-s3keysmanager.dataspace.copernicus.eu/ and are NOT
-# the same thing as the account password used for the OData/zipper endpoint.
+# CDSE serves bands from its own S3 store; keys are generated per user at
+# https://eodata-s3keysmanager.dataspace.copernicus.eu/ (not the account password).
 S3_ENDPOINT = (
     os.environ.get("CDSE_S3_ENDPOINT") or "https://eodata.dataspace.copernicus.eu"
 )
 S3_KEY_ENV = "CDSE_S3_ACCESS_KEY"
 S3_SECRET_ENV = "CDSE_S3_SECRET_KEY"  # pragma: allowlist secret
 
-# GDAL/CURL settings for the JP2 byte-range reads, fixed to the values that
-# measured best (2026-08). GDAL_NUM_THREADS=2 beat both 1 and ALL_CPUS at the
-# two-scene concurrency the pipeline runs with.
+# GDAL/CURL settings for JP2 byte-range reads (GDAL_NUM_THREADS=2 measured best
+# at the pipeline's two-scene concurrency).
 GDAL_OPTS = {
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".jp2,.xml",
@@ -146,8 +135,7 @@ GDAL_OPTS = {
 
 
 # ── the processing recipe ────────────────────────────────────────────────────
-# S-CCD wants blue,green,red,nir,swir1,swir2. pyxccd is fed in exactly this
-# order; PYX_BANDS in c2c_ts_server.py is the same list in Earth Engine naming.
+# S-CCD band order: blue, green, red, nir, swir1, swir2.
 BANDS = ["B02", "B03", "B04", "B08", "B11", "B12"]
 GEE_BAND_ALIAS = {
     "B02": "B2",
@@ -158,10 +146,9 @@ GEE_BAND_ALIAS = {
     "B12": "B12",
 }
 
-# CDSE assets are per-band AND per-resolution. B11/B12 are natively 20 m; Earth
-# Engine's getRegion at scale=10 hands back the 20 m value of the containing
-# pixel (nearest neighbour), so reading the 20 m asset and locating the
-# containing cell reproduces it exactly, with no resampling of our own.
+# CDSE assets are per band and resolution. B11/B12 are natively 20 m; reading
+# the 20 m asset at the containing cell matches Earth Engine's nearest-neighbour
+# value at scale 10, with no resampling of our own.
 ASSET_FOR_BAND = {
     "B02": "B02_10m",
     "B03": "B03_10m",
@@ -175,70 +162,48 @@ SCL_ASSET = "SCL_20m"
 NATIVE_RES = {"B02": 10, "B03": 10, "B04": 10, "B08": 10, "B11": 20, "B12": 20}
 GRID_RES = 10  # the grid we carry state on
 
-# Scene Classification values we refuse, matching the GEE side exactly:
-#   3 cloud shadow, 8 cloud medium prob, 9 cloud high prob, 10 thin cirrus,
-#   11 snow/ice. Snow matters here — at 58-61 N it removes most of Nov-Feb.
+# SCL values rejected (as on the GEE side): 3 cloud shadow, 8 cloud medium,
+# 9 cloud high, 10 thin cirrus, 11 snow/ice.
 SCL_REJECT = (3, 8, 9, 10, 11)
 
-# CLOUD_MASK_NOTE ------------------------------------------------------------
-# The Earth Engine recipe ALSO requires s2cloudless probability < 40, from
-# COPERNICUS/S2_CLOUD_PROBABILITY. That collection is a Sentinel Hub product
-# hosted by Google; it is not in the CDSE SAFE archive, so the operational mask
-# is SCL-only and is therefore LOOSER than the inspector's. Consequence: the
-# operational series may retain some cloud-edge observations the inspector
-# drops. CDSE-vs-Earth-Engine agreement was verified once (2026-08) on raw
-# reflectance per (pixel, scene), which masking policy cannot bias.
+# CLOUD_MASK_NOTE: the Earth Engine recipe also requires s2cloudless probability
+# < 40, which is not in the CDSE archive. The operational mask is SCL-only and
+# so looser than the inspector's: some cloud-edge observations may be retained.
 S2CLOUDLESS_MAX_PROB = 40  # GEE-side threshold, for reference
 
-# Reflectance handling. Baseline 04.00 (2022-01-25 onward) shifted L2A DNs by
-# +1000; GEE's *_HARMONIZED collections undo that so the whole archive is on
-# one scale. We read BOA_ADD_OFFSET from each product's metadata and apply it,
-# which reproduces HARMONIZED rather than assuming a fixed baseline date.
+# Baseline 04.00 shifted L2A DNs by +1000; BOA_ADD_OFFSET is read from each
+# product's metadata and applied, which reproduces GEE's *_HARMONIZED scale.
 DN_SCALE = 10000.0  # DN -> reflectance divisor
 NODATA_DN = 0  # L2A JP2 nodata
 
-# pyxccd expects Landsat-style 0-10000 reflectance, which is what S2 L2A DNs
-# already are after the offset — so no rescaling, same as the GEE path.
+# pyxccd expects 0-10000 reflectance, which offset-corrected L2A DNs already are.
 PYX_VALID_RANGE = (0, 10000)
 
-# S-CCD parameters, carried over from the label-tuned inspector config
-# (SCCD_P_CG / SCCD_CONSE in c2c_ts_server.py). Kept here so the operational
-# run and the inspector cannot drift apart unnoticed.
+# S-CCD parameters, carried over from the label-tuned inspector config.
 SCCD_P_CG = 0.90
 SCCD_CONSE = 6
 PYX_LAM = 20
 
-# Archive start. S2A+S2B only reach useful density over Norway from 2017.
+# Archive start (S2A+S2B reach useful density over Norway from 2017).
 HISTORY_START = "2017-01-01"
 
-# When operational alerting starts. Breaks dated before this are recorded with
-# status "historical": the bootstrap fit finds every disturbance since 2017, and
-# emitting nine years of them as new alerts would bury the ones that happened
-# this week under thousands that were never actionable.
+# Breaks dated before this are recorded as "historical", not new alerts.
 MONITORING_START = os.environ.get("FORESTMON_MONITORING_START") or "2026-01-01"
 
-# Keep cloud/shadow/snow-rejected observations in the store as well as clear
-# ones. Off by default: it multiplies the store ~7x (0.21 -> 1.53 GB measured)
-# AND removes the reader's early-out on fully-clouded scenes, which is what
-# makes those scenes cheap to skip. Worth turning ON before a backfill if the
-# masking recipe is ever likely to be revisited, because re-reading the rejects
-# afterwards costs ~2 TB of CDSE traffic; worthless to turn on afterwards.
+# Also store rejected (cloud/shadow/snow) observations. Off by default: ~7x
+# larger store and no early-out on fully clouded scenes. Only useful if set
+# before a backfill.
 STORE_ALL_OBSERVATIONS = (os.environ.get("FORESTMON_STORE_ALL") or "0") == "1"
 
-# Concurrency budget. Band threads x scene workers = simultaneous connections to
-# CDSE, and measured throughput PEAKS at ~14 and degrades past it (22.9
-# scenes/min at 2 scene workers, 8.5-9.2 at 4-8). These two knobs cannot be
-# tuned independently, so the default is expressed as one budget.
+# Band threads x scene workers = simultaneous CDSE connections; throughput
+# peaks around 14 and degrades beyond it.
 MAX_CDSE_CONNECTIONS = int(os.environ.get("FORESTMON_MAX_CONNECTIONS") or "14")
 SCENE_WORKERS = 2  # 2 x 7 band threads = 14
 
-# Scenes per commit during ingest. Each batch writes its own observation part
-# file and its own ledger rows, so an interrupted backfill loses at most this
-# many scenes of work rather than the whole run.
+# Scenes per commit during ingest (bounds work lost on interruption).
 INGEST_BATCH = int(os.environ.get("FORESTMON_INGEST_BATCH") or "100")
 
 # ── provenance ───────────────────────────────────────────────────────────────
-# Bumped whenever the recipe above changes in a way that invalidates fitted
-# state. Stamped into state files and alerts so an alert is always traceable to
-# the rules that produced it.
+# Bump when the recipe changes in a way that invalidates fitted state; stamped
+# into state files and alerts.
 RECIPE_VERSION = "1"

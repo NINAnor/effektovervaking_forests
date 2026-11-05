@@ -1,34 +1,17 @@
-"""Step 2e -- the undisturbed reference the trajectory gate is calibrated on.
+"""Step 2e -- Hansen loss year per pixel, the independent disturbance reference.
 
-The condition side has field labels; the trajectory side has none, so "improving"
-and "declining" have so far been unfalsifiable. Hansen's annual loss year is the
-one label available here that is genuinely independent of AlphaEarth -- different
-sensor (Landsat), different method, different producer -- and it is annual, which
-is the grain the trend test works at.
+Samples Hansen's annual forest-loss year at every AlphaEarth pixel (snapped to
+Hansen's 30 m grid, so one query per distinct cell). It is a coarse truth
+(canopy loss only), used by step 03 to calibrate the trajectory slope gate on
+pixels not cleared, and by step 05 to report recall on cleared pixels. Absence of
+Hansen loss is not evidence of no degradation. See METHODS.md.
 
-It is a *coarse* truth and is treated as one: 30 m against 10 m, canopy loss only,
-and it misses selective removal and understorey degradation entirely. So it is used
-for two things only -- a sensitivity floor (of the pixels Hansen says were cleared,
-how many does the trend test call `declining`?) and a timing check -- never as a
-complete label. Absence of Hansen loss is NOT evidence of no degradation.
+Needs an Earth Engine account (`ee.Initialize`) and `--project` (or
+FORESTMON_EE_PROJECT); it is the only step that does. Without it, step 03 falls
+back to the significance rule and its classes are uncalibrated.
 
-Sampling: AlphaEarth pixels are 10 m and Hansen cells are 30 m on a 1/4000-degree
-grid, so the 168,832 pixel centres collapse to ~25k distinct Hansen cells. Snapping
-first turns 34 `sampleRegions` calls into 6.
-
-Two things downstream need it. `03_trajectory.py` calibrates its slope gate on
-the pixels this step says were NOT cleared, which is what fixes the
-false-positive rate of `declining` at a stated value instead of at whatever a
-p-value happens to give. And `05_validate.py` reports recall against the pixels
-it says were.
-
-Needs an Earth Engine account (`ee.Initialize`); it is the only step in the
-pipeline that does. Everything still runs without it -- `03_trajectory.py` falls
-back to the significance rule and says so -- but the trajectory classes are then
-uncalibrated.
-
-Writes `outputs/data/hansen_pixels.parquet` (pixel_id, lon, lat, loss_year,
-treecover2000, datamask).
+Reads `pixel_sites.parquet` (step 02b). Writes `outputs/data/hansen_pixels.parquet`
+(pixel_id, lon, lat, loss_year, treecover2000, datamask).
 
 Run:  forestmon condition step 02e
 """

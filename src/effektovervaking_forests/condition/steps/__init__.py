@@ -1,14 +1,9 @@
 """The condition pipeline's steps, in run order, and the runner behind
 `forestmon condition run`.
 
-Each step is a module with `main(argv)` and its own argparse interface, ported
-unchanged from the deployed `condition/deploy/scripts/NN_*.py`; the step id is
-the old script's number, so the research notes and METHODS.md still point at
-the right code. `run_pipeline` replaces `run_all.sh`: each step runs in its own
-interpreter (as the shell script ran them, so memory is returned between the
-long steps and 04's spawned workers import a clean module), its output is teed
-to `<FORESTMON_LOG_DIR>/condition/`, and the first failure stops the run,
-because every later step consumes the previous one's table.
+Each step is a module with `main(argv)` and its own argparse interface. Steps
+run in separate interpreters, output is teed to `<FORESTMON_LOG_DIR>/condition/`,
+and the first failure stops the run (each step consumes the previous one's table).
 """
 
 from __future__ import annotations
@@ -73,8 +68,8 @@ def plan(
     stop: str | None = None,
     ee_project: str | None = None,
 ) -> tuple[list[tuple[Step, list[str]]], list[Step]]:
-    """The steps `run` would execute, with their arguments, in order -- and the
-    Earth Engine steps in that slice it has to skip (no project, or no `ee`)."""
+    """The (step, args) pairs `run` would execute, and the Earth Engine steps
+    it must skip (no project, or no `ee`)."""
     ids = [s.id for s in STEPS]
     for name, val in (("--from", start), ("--to", stop)):
         if val is not None and val not in ids:
@@ -108,8 +103,7 @@ def run_pipeline(
     for step, args in steps:
         log = log_dir / f"{stamp}_{step.id}_{step.module.split('_', 1)[1]}.log"
         echo(f"\n=== {step.id} {step.module} {' '.join(args)}".rstrip())
-        # -u: the step's prints reach the log as they happen, and survive an
-        # OOM kill of a long step.
+        # -u: unbuffered, so the log survives an OOM kill.
         cmd = [sys.executable, "-u", "-m", __name__, step.id, *args]
         with (
             log.open("w", encoding="utf-8", buffering=1) as fh,

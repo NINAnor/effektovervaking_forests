@@ -1,30 +1,10 @@
 """ESA WorldCover as the "transformed" end of the condition axis.
 
-The DegreeofRecovery paper anchored its bad pool on WorldCover, and this project
-originally rejected that: an intact kalklindeskog and a spruce plantation on top
-of one are both WorldCover class 10, so WorldCover cannot see *degradation*.
-That objection still stands and is why the good pool comes from the surveyors'
-`tilstand` labels. What WorldCover is used for here is the other end of the
-axis, where it is not blind at all -- it can say with confidence where the
-forest has been replaced outright.
-
-Only **cropland (40) and built-up (50)** count. Grassland (30) is the tempting
-one and is left out on purpose: in Norway it absorbs natural fjell vegetation
-and semi-natural pasture as readily as it absorbs a clearcut, so including it
-would put genuinely natural ground into the pool that defines "transformed".
-Bare/sparse (60) is excluded for the same reason -- Norwegian bare ground is
-overwhelmingly rock and scree.
-
-Pixels are drawn from a 3-8 km **annulus** around each stand. The inner radius
-keeps the stand's own edge and its immediate surroundings out of the pool; the
-outer one keeps the reference in the same region, terrain and acquisition
-history as the stand it is scoring. A national pool would let a Trøndelag
-industrial estate define what "transformed" means for a Nordland stand, in an
-embedding space that encodes climate and phenology as readily as land cover.
-
-The tiles are 3x3 degree, 10 m, EPSG:4326 COGs served anonymously over HTTPS,
-so this needs no credentials -- the same property that makes the AlphaEarth
-Source Cooperative mirror usable without Earth Engine.
+Supplies the bad reference pool: cropland (40) and built-up (50) pixels drawn
+from a 3-8 km annulus around each stand, so the pool shares the stand's region,
+terrain and acquisition history. The good pool comes from surveyor labels, not
+WorldCover. Tiles are 3x3 degree 10 m EPSG:4326 COGs read anonymously over HTTPS.
+METHODS.md section 3.
 """
 
 from __future__ import annotations
@@ -112,10 +92,8 @@ def read_classes(
 ) -> tuple[np.ndarray, object]:
     """Read the WorldCover class raster over a lon/lat box.
 
-    Mosaics across tile seams, since a 10 km block near a 3-degree boundary is
-    split over two files. Pixels outside any tile come back as 0, WorldCover's
-    own no-data, which is never a transformed class and so is simply never
-    selected.
+    Mosaics across tile seams; pixels outside any tile are 0 (WorldCover
+    no-data), which is never a transformed class.
     """
     minx, miny, maxx, maxy = bounds
     tiles = tiles_for_bounds(bounds)
@@ -126,10 +104,8 @@ def read_classes(
             try:
                 with rasterio.open("/vsicurl/" + tile_url(lat, lon)) as ds:
                     if out is None:
-                        # Snap the mosaic to the first tile's grid; all WorldCover
-                        # tiles share one global 1/12000-degree grid, so a window
-                        # cut from any of them aligns with a window cut from
-                        # another.
+                        # Snap the mosaic to the first tile's grid (all tiles
+                        # share one global grid, so windows align).
                         win = from_bounds(minx, miny, maxx, maxy, ds.transform)
                         win = win.round_offsets().round_lengths()
                         transform = ds.window_transform(win)
@@ -153,12 +129,9 @@ def annuli(
 ) -> gpd.GeoDataFrame:
     """The reference ring around each stand, in the polygons' own (metric) CRS.
 
-    `outer_scale` optionally gives a per-polygon outer radius, which is how a
-    stand with no transformed land within 8 km gets its search widened rather
-    than left with an empty bad pool -- an olivinskog stand on an outer-coast
-    peninsula can have literally no cropland or built-up within the default
-    ring. The inner radius is never widened: its job is to exclude the stand's
-    own surroundings, and that job does not change with the outer radius.
+    `outer_scale` optionally gives a per-polygon outer radius, so a stand with
+    no transformed land within the default ring can have its search widened.
+    The inner radius is never widened.
     """
     g = polygons[["poly_id", "forest_type", "geometry"]].reset_index(drop=True)
     outer = (
@@ -187,19 +160,11 @@ def transformed_in_block(
 ) -> pd.DataFrame:
     """Transformed AlphaEarth pixels inside one AEF block, and which stands they serve.
 
-    Works on the **AlphaEarth** 10 m grid, not WorldCover's: the block's own
-    pixel centres are generated, filtered to the annuli, reprojected to lon/lat
-    and looked up in WorldCover by nearest neighbour. Going this way round means
-    the coordinates that come out are exactly the pixels the extractor will
-    later read, with no grid-snapping step to get wrong -- the two rasters are
-    both 10 m but on different projections and do not share a grid.
-
-    The annulus filter runs first because it is the cheap one and it typically
-    removes most of a 1024x1024 block, leaving far fewer points to reproject.
-
-    Returns long rows `x, y, poly_id, wc_class` -- many-to-many, since annuli of
-    neighbouring stands overlap heavily and one industrial estate can legitimately
-    serve a dozen stands.
+    Works on the AlphaEarth 10 m grid (so output coordinates are exactly the
+    pixels the extractor reads): block pixel centres are filtered to the annuli
+    first (cheap), reprojected to lon/lat and looked up in WorldCover by nearest
+    neighbour. Returns long rows `x, y, poly_id, wc_class`, many-to-many since
+    neighbouring annuli overlap.
     """
     rng = rng or np.random.default_rng(0)
     w, s, e, n = block_bounds
@@ -225,7 +190,7 @@ def transformed_in_block(
     if local.empty:
         return pd.DataFrame(columns=["x", "y", "poly_id", "wc_class"])
 
-    # A boolean "inside some annulus" mask over the block, via one rasterise.
+    # Boolean "inside some annulus" mask over the block, via one rasterise.
     from rasterio.transform import Affine
 
     tr = Affine(10.0, 0.0, w, 0.0, -10.0, n)
@@ -250,14 +215,9 @@ def transformed_in_block(
     to_ll = Transformer.from_crs(utm_epsg, 4326, always_xy=True)
     lon, lat = to_ll.transform(xs, ys)
 
-    # AlphaEarth populates a piece of ground only in its NATURAL UTM zone. The
-    # tiles carry valid coordinates well past their zone -- a 31N tile addresses
-    # easting 662,000, which is 6.1 E, in zone 32 -- but every band there is
-    # nodata. Measured: the 31N tile is 31% finite at that block while the 32N
-    # tile covering the same ground is 100% finite. Candidates outside the
-    # block's own zone are therefore silently unreadable, and dropping them here
-    # is what makes the set-cover choose the tile that actually holds the data
-    # instead of one that merely spans the coordinates.
+    # AlphaEarth holds data for a piece of ground only in its NATURAL UTM zone:
+    # tiles address coordinates past their zone but every band there is nodata.
+    # Dropping out-of-zone candidates makes the set-cover pick the tile with data.
     zone = utm_epsg - (32600 if utm_epsg < 32700 else 32700)
     natural = np.floor((lon + 180.0) / 6.0).astype(int) + 1
     in_zone = natural == zone
@@ -277,9 +237,8 @@ def transformed_in_block(
     if not keep.any():
         return pd.DataFrame(columns=["x", "y", "poly_id", "wc_class"])
     xs, ys, cls = xs[keep], ys[keep], cls[keep]
-    # A block over a town holds hundreds of thousands of built-up pixels, far
-    # more than any pool needs. Thin here, before the per-stand join, so the
-    # join stays small; the per-stand cap is applied later by the sampler.
+    # Thin before the per-stand join (a town block has hundreds of thousands of
+    # built-up pixels); the per-stand cap is applied later by the sampler.
     if len(xs) > max_points:
         pick = rng.choice(len(xs), size=max_points, replace=False)
         xs, ys, cls = xs[pick], ys[pick], cls[pick]

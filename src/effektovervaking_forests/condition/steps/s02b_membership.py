@@ -1,11 +1,9 @@
-"""Step 2b -- rebuild the pixel model so overlapping polygons stop eating each other.
+"""Step 2b -- overlap-safe pixel <-> stand membership.
 
-`02_extract_embeddings.py` rasterises all polygons into one label raster, so
-where two layers map the same stand the last one drawn takes the pixel and the
-other loses it. This step repairs that from the data already on disk: it
-deduplicates the pixel table to one embedding per piece of ground, then
-recomputes polygon membership as a many-to-many point-in-polygon join. See
-`condition/membership.py` for why no re-download is required.
+Deduplicates the step 02 pixel table to one embedding per piece of ground and
+recomputes polygon membership as a many-to-many point-in-polygon join (see
+`condition/membership.py`). No re-download is needed. Reads the step 02 pixel
+table and the step 00 polygons.
 
 Outputs
     pixels.parquet           pixel_id, year, A00..A63   (one row per ground-year)
@@ -72,11 +70,8 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     mem = build_membership(sites, poly)
-    # How far each pixel centre sits inside the stand that claims it. The
-    # bad-labelled stands are systematically smaller than the good ones (median
-    # 0.28 ha against 0.53), so "degraded" and "mostly edge" are confounded, and
-    # the baseline per-pixel score loses 0.04 AUC on interior pixels only
-    # (research E10). Nothing published per pixel should omit this column.
+    # Distance inside the claiming stand; bad stands are smaller, so edge and
+    # degraded are confounded (METHODS.md, E10). Keep this column in per-pixel output.
     mem["edge_m"] = edge_distance(mem, sites, poly)
     mem.to_parquet(PIXEL_POLYGONS, index=False, compression="zstd")
     per_poly = mem.groupby("poly_id").size()
@@ -96,7 +91,6 @@ def main(argv: list[str] | None = None) -> None:
         "and can only ever be scored on mixed ones"
     )
 
-    # What the repair actually recovered, per polygon.
     old = px[px.year == px.year.max()].groupby("poly_id").size().rename("old")
     cmp_ = polygons[["poly_id", "ref_role", "approx_pixels"]].set_index("poly_id")
     cmp_ = cmp_.join(old).join(per_poly.rename("new")).fillna(0)

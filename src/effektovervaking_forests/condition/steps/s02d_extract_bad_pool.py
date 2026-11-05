@@ -1,19 +1,15 @@
 """Step 2d -- download the AlphaEarth embeddings of the transformed bad pool.
 
-Reads only the blocks `02c_plan_bad_pool.py` selected (54, not the 329 the rings
-touch) and cuts the planned pixels out of each. The unit of work and of resume
+Reads only the blocks step 2c planned (`bad_pool_plan.parquet`,
+`bad_candidates.parquet`) and cuts the planned pixels out of each. Resume unit
 is one (block, year) shard, as in step 2.
 
-The pixels are thinned per stand first: a stand whose ring contains 40,000
-built-up pixels does not need 40,000 references, and the ones it does need
-should be spread over the ring rather than concentrated wherever the town is
-densest. `--max-per-stand` draws that sample once, reproducibly, and the union
-of the retained pixels is what gets read. Thinning does not reduce the download
--- the cost is the block, not the pixel -- but it keeps the reference table and
-every distance matrix built from it an order of magnitude smaller.
+Pixels are first thinned to `--max-per-stand` per stand (random, reproducible).
+Thinning does not reduce the download, only the size of the reference table.
 
-Output: `bad_pixels.parquet` (pixel_id, year, A00..A63 -- same schema as the
-stand pixels) and `bad_membership.parquet` (which stands each pixel may serve).
+Output: `bad_pixels.parquet` (pixel_id, year, A00..A63, same schema as the
+stand pixels), `bad_membership.parquet` (which stands each pixel may serve) and
+`bad_sites.parquet`.
 
 Run:  forestmon condition step 02d
 """
@@ -50,28 +46,18 @@ SHARD_ROOT = CACHE / "bad_pixels"
 
 
 def fingerprint(sites: pd.DataFrame) -> str:
-    """Short digest of the exact pixel set a run asks for.
+    """Short digest of the requested pixel set, used to key the shard cache.
 
-    The shards are keyed by (block, year) but hold `pixel_id`, a surrogate
-    assigned per run. Re-running with a different --max-per-stand or --seed
-    therefore asks for a different pixel set while the shard-exists check
-    happily reuses the old one, silently pairing this run's ids with the last
-    run's embeddings. Keying the cache directory on the pixel set makes that
-    impossible: a changed request is a different directory and is simply
-    re-read.
+    Shards hold per-run surrogate `pixel_id`s, so a changed pixel set (other
+    --max-per-stand or --seed) must not reuse old shards.
     """
     key = sites[["utm_zone", "x", "y"]].to_csv(index=False).encode()
     return hashlib.blake2b(key, digest_size=6).hexdigest()
 
 
 def thin(cand: pd.DataFrame, max_per_stand: int, seed: int) -> pd.DataFrame:
-    """Draw at most `max_per_stand` reference pixels per stand, at random.
-
-    Random rather than nearest-first on purpose: the bad pool should describe
-    "transformed land in this region", and taking the closest pixels would
-    describe "the nearest edge of the nearest town", which is a much narrower
-    claim and one already partly captured by the inner radius.
-    """
+    """Draw at most `max_per_stand` reference pixels per stand, at random
+    (not nearest-first, so the pool describes the region, not the nearest town)."""
     rng = np.random.default_rng(seed)
     keep = []
     for _, grp in cand.groupby("poly_id", sort=False):
@@ -124,9 +110,7 @@ def run_shard(
                 raise
             time.sleep(5 * 2 ** (attempt - 1))
 
-    # `_read_block` returns a north-up affine for the block, so the pixel
-    # lookup is plain index arithmetic against it -- no resampling, and the
-    # coordinates are the same ones step 2c chose.
+    # The block transform is north-up, so lookup is plain index arithmetic.
     inv = ~transform
     c = np.floor(inv.a * here.x.to_numpy() + inv.c).astype(int)
     r = np.floor(inv.e * here.y.to_numpy() + inv.f).astype(int)
@@ -143,12 +127,8 @@ def run_shard(
 
 
 def resolve_uris(plan: pd.DataFrame, years: list[int]) -> pd.DataFrame:
-    """Attach the per-year GDAL URI to every planned block.
-
-    The mirror re-hashes each tile's filename every year, so a tile is
-    identified across years by (utm_zone, utm_west, utm_south) -- its origin --
-    and never by the filename step 2c happened to see.
-    """
+    """Attach the per-year GDAL URI to every planned block, matching tiles
+    across years by origin (utm_zone, utm_west, utm_south), not filename."""
     import duckdb
 
     from effektovervaking_forests.condition.aef import ensure_index, tile_uri
@@ -195,9 +175,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"{len(plan)} blocks, {len(cand):,} candidate (pixel, stand) pairs")
 
     cand = thin(cand, args.max_per_stand, args.seed)
-    # Sorted, so the id a pixel gets depends only on which pixels were selected
-    # and not on row order; negative, so a bad reference can never be confused
-    # with a stand pixel if the two tables are ever concatenated by mistake.
+    # Sorted so ids don't depend on row order; negative so they can't be
+    # confused with stand pixel ids.
     sites = (
         cand[["utm_zone", "x", "y"]]
         .drop_duplicates()
@@ -248,7 +227,7 @@ def main(argv: list[str] | None = None) -> None:
                 try:
                     name, n, dt = f.result()
                 except Exception as exc:  # noqa: BLE001 - a lost block is a
-                    # hole in one region's bad pool, not a reason to lose the run
+                    # hole in one region's pool, not a reason to lose the run
                     print(
                         f"  ! {b['year']} {b['utm_zone']} {b['brow']},{b['bcol']}: "
                         f"{type(exc).__name__}: {exc}"

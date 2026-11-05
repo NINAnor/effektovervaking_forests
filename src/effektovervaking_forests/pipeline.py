@@ -1,27 +1,21 @@
 """The steps that tie catalogue, reader, store and model together.
 
-Kept separate from the CLI so the same code path runs whether a person types the
-command or a systemd timer fires it, and so each step can be tested without
-Typer in the way.
+Kept separate from the CLI so a person and a timer run the same code path.
 
-**Why this file is mostly about commit boundaries.** Three artefacts have to
-agree — the observation store, the run ledger, and the S-CCD state pickle — and
-no filesystem will let us update all three atomically. So each is written in an
-order chosen so that any crash leaves work to redo, never work silently lost:
+Commit order matters: the observation store, the run ledger and the S-CCD state
+cannot be updated atomically, so they are written so a crash leaves work to
+redo, never work silently lost:
 
-    1. observations   -> a new immutable part file       (idempotent by key)
-    2. ledger         -> stage = observations_committed  (scene won't be re-read)
-    3. state          -> pickle replaced atomically
-    4. ledger         -> stage = state_applied           (scene is fully done)
-    5. alerts         -> written, then meta.alerts_dirty cleared
+    1. observations -> new immutable part file       (idempotent by key)
+    2. ledger       -> stage = observations_committed (scene won't be re-read)
+    3. state        -> pickle replaced atomically
+    4. ledger       -> stage = state_applied          (scene is fully done)
+    5. alerts       -> written, then meta.alerts_dirty cleared
 
-A crash before (2) re-reads the scene: harmless, the store dedupes. Between (2)
-and (4) the observations are on disk but unseen by the model, and the next run
-replays them FROM DISK rather than from CDSE. After (4) but before (5), state
-holds breaks the alert table is missing, and `alerts_dirty` makes the next run
-rebuild the table from state. The one thing never allowed is applying the same
-observation to the recursive model twice, which is why the ledger advances to
-`state_applied` only after the pickle is on disk.
+Between (2) and (4) the next run replays observations from disk; after (4) but
+before (5), `alerts_dirty` makes the next run rebuild alerts from state. An
+observation must never be applied to the recursive model twice, hence the ledger
+advances to `state_applied` only after the pickle is on disk.
 """
 
 from __future__ import annotations
@@ -84,20 +78,11 @@ def ingest(
 ) -> dict:
     """Read scenes into the observation store, committing every `batch_size`.
 
-    Threaded because the work is entirely network latency — GDAL's range reads
-    against S3 release the GIL, so threads (not processes) are the right tool.
-    Note `workers` multiplies with `reader.BAND_WORKERS`: measured throughput
-    peaks at ~14 concurrent connections and degrades past it, so 2 x 7 is the
-    default rather than a number that looks braver.
+    Threaded (network-bound; GDAL releases the GIL). `workers` multiplies with
+    `reader.BAND_WORKERS` to give the connection count (see config).
 
-    Bounded batches are what make a 15,000-scene backfill survivable. Holding
-    every scene's DataFrame until the end would be tens of gigabytes of RAM and
-    would make an interruption at hour ten cost all ten hours; committing a part
-    file plus its ledger rows per batch caps the loss at one batch.
-
-    Every scene gets a ledger row whatever happens, including failures, so a
-    scene CDSE cannot serve is retried on the next run rather than being
-    silently forgotten or silently retried forever.
+    Each batch commits a part file plus its ledger rows, bounding memory and the
+    work lost on interruption. Every scene gets a ledger row, failures included.
     """
     scenes = scenes.reset_index(drop=True)
     n = len(scenes)
@@ -129,9 +114,7 @@ def ingest(
                     frames.append(df)
                 done += 1
                 if log and row["status"] != "ok":
-                    # Every failed read is logged individually: a run that quietly
-                    # skips 300 scenes and reports "ok" is the failure mode this
-                    # whole ledger exists to prevent.
+                    # Log every failed read individually; never skip quietly.
                     log.error(
                         "scene_read_failed",
                         stage="ingest",
@@ -141,9 +124,7 @@ def ingest(
                 if progress:
                     progress(done, n, row)
 
-        # (1) observations, then (2) the ledger. Never the other way round: a
-        # ledger entry without its observations would mark a scene done that
-        # nothing has ever read.
+        # (1) observations, then (2) the ledger, never the reverse.
         if frames:
             batch_df = pd.concat(frames, ignore_index=True)
             obs.append(aoi_name, batch_df)
@@ -158,14 +139,8 @@ def ingest(
         total["scene_ids"].extend(r["scene_id"] for r in rows if r["status"] == "ok")
 
         if log:
-            # Throughput is reported per-batch AND split by whether a scene had
-            # pixels to read, because the cumulative rate alone is not comparable
-            # between runs — or even between batches of one run. Early years are
-            # dominated by granules whose bbox contains our pixels but whose swath
-            # does not, and those cost ~0 s. A run working through them looks 40%
-            # "faster" than one reading real data, which makes the number useless
-            # for judging a transport change. `substantive_scene_s` is the median
-            # over scenes that actually read something, and is the one to compare.
+            # `substantive_scene_s` is the median over scenes that read pixels;
+            # compare it, not the overall rate (empty granules cost ~0 s).
             secs = pd.Series([r["seconds"] for r in rows], dtype="float64")
             has_px = pd.Series([r["n_pixels_read"] > 0 for r in rows])
             batch_s = time.time() - t_batch
@@ -201,10 +176,8 @@ def pending_scenes(
 ) -> pd.DataFrame:
     """Catalogued scenes with no ledger entry at all, oldest first.
 
-    A scene at `observations_committed` is NOT pending: its observations are
-    already stored, and re-reading them would spend a CDSE round trip to
-    reproduce rows the store already holds. What is outstanding for it is model
-    application, which `apply_pending_observations` does from disk.
+    A scene at `observations_committed` is not pending: only model application
+    is outstanding, which `apply_pending_observations` does from disk.
     """
     df = catalog.pending(aoi_name, runs.processed_ids(aoi_name))
     if since:
@@ -236,21 +209,13 @@ def apply_pending_observations(
 ) -> dict:
     """Fold every stored-but-unapplied observation into S-CCD state.
 
-    This is the step that closes the gap between the store and the model, and it
-    reads only from disk. It runs on every cycle, so a run interrupted after its
-    observations were committed is repaired by the next one without touching
-    CDSE.
+    Reads only from disk, so an interrupted run is repaired without CDSE.
+    Three pixel populations:
 
-    Three populations of pixel are handled, not one:
-
-    * **In state, observations after the watermark** — the normal path,
-      `sccd_update`.
-    * **In state, observations BEFORE the watermark** — a reprocessed product
-      carrying an old sensing date. Feeding these forward would corrupt a
-      recursive model, so the affected pixels are refit from full history.
-    * **Not in state** — too sparse to fit at bootstrap. Refit once the store
-      says they have crossed MIN_OBS, instead of being counted as unknown
-      forever.
+    * In state, observations after the watermark: `sccd_update`.
+    * In state, observations BEFORE the watermark (reprocessed product): refit
+      from full history, since feeding them forward would corrupt the model.
+    * Not in state (too sparse at bootstrap): fit once past MIN_OBS.
     """
     fingerprint = aoi_mod.grid_fingerprint(grid)
     unapplied = runs.unapplied_scene_ids(aoi_name)
@@ -292,9 +257,8 @@ def apply_pending_observations(
             watermark=str(watermark),
         )
     if len(late):
-        # Superseded/reprocessed history: refit rather than update. Their breaks
-        # are re-derived wholesale, so they go through the alert table by id and
-        # any human verdict on them survives.
+        # Refit rather than update; breaks pass through the alert table by id,
+        # so human verdicts survive.
         late_pix = set(late["pix_id"].unique())
         states, refit_breaks, n_refit = _fit_from_store(
             aoi_name, late_pix, states, progress=progress
@@ -328,8 +292,7 @@ def apply_pending_observations(
     meta["applied_scenes"] = int(meta.get("applied_scenes", 0)) + len(unapplied)
     meta["state_saved_at"] = store.now_iso()
 
-    # (3) state, then (4) the ledger. If the ledger were advanced first, a crash
-    # here would leave scenes marked applied that the model never absorbed.
+    # (3) state, then (4) the ledger, never the reverse.
     state_mod.save(aoi_name, states, meta)
     if log:
         log.event(
@@ -340,8 +303,7 @@ def apply_pending_observations(
         )
     runs.mark_applied(aoi_name, unapplied)
 
-    # (5) alerts. Recomputed from state, not only from this run's delta, so a
-    # previously failed alert write is repaired rather than lost forever.
+    # (5) alerts, reconciled against state so a failed earlier write is repaired.
     result.update(reconcile_alerts(aoi_name, states, grid, fresh=fresh, meta=meta))
     if log:
         log.event(
@@ -364,11 +326,9 @@ def reconcile_alerts(
 ) -> dict:
     """Bring the alert table in line with the breaks S-CCD is holding.
 
-    Normally this writes exactly the fresh breaks. When `meta['alerts_dirty']`
-    survived from a previous run — meaning state was saved but the alert write
-    did not complete — it enumerates every break in state and inserts the ones
-    the table is missing. Alert ids are deterministic (`aoi:pix_id:ordinal`), so
-    the repair cannot mint duplicates for breaks a human has already reviewed.
+    Normally writes the fresh breaks. If `meta['alerts_dirty']` survived a
+    previous run, also inserts every break in state that the table lacks (ids
+    are deterministic, so no duplicates).
     """
     fresh = list(fresh or [])
     known = alerts_mod.known_ids(aoi_name)
@@ -404,12 +364,8 @@ def run_update(
 ) -> dict:
     """One operational cycle: catch up the catalogue, ingest, advance S-CCD.
 
-    This is the function a timer calls. It is safe to run when nothing is new —
-    it exits having done nothing rather than re-processing, which is what makes
-    a frequent schedule cheap. It holds the AOI's write lease for the duration,
-    so a scheduler that fires twice (Kubernetes Jobs are explicitly at-least-once,
-    and an operator with a terminal is faster than any scheduler) gets one
-    worker, not two racing on the same ledger.
+    The function a timer calls; does nothing when nothing is new. Holds the
+    AOI's write lease, so a double-fired scheduler gets one worker.
     """
     t0 = time.time()
     result = {

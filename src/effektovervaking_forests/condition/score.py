@@ -1,55 +1,17 @@
 """Scoring: the vendored DoR maths, applied per pixel rather than per stand.
 
-`condition.core` holds the published per-site primitives, untouched. This module
-is the part specific to this project: how a stand's pixels become probes, how
-they are kept out of their own reference pools, and how the score is computed
-for 1.5 M pixel-years without spending a week on it.
+`condition.core` holds the published per-site primitives, untouched; this module
+turns a stand's pixels into probes, keeps them out of their own reference pools
+and scores 1.5 M pixel-years. METHODS.md sections 4-6.
 
-**Per pixel, not per polygon.** A stand is not in one condition. A
-kalklindeskog with a spruce plantation over its northern half averages to
-something that describes neither half, and the polygon mean was hiding exactly
-the sub-stand degradation this project exists to find. So the probe is the
-pixel; the polygon summary is then a distribution over its pixels -- median,
-IQR, and the fraction below the threshold -- which says more than the mean
-embedding's single score ever did.
-
-**The score has to be a matmul.** `cosine_dists_to_set` walks one probe against
-one pool. Called per pixel-year that is ~1.5 M x 2 scopes x a 500-row pool of
-Python-level calls. Cosine distance to a set is
-`1 - normalise(X) @ normalise(P).T`, so a whole stand-year scores against a
-whole pool in a single BLAS call, and the k smallest come from `np.partition`
-along the row (`knn_mean_unit`).
-
-**The bootstrap resamples donors, not reference pixels.** The published
-`bootstrap_ci` resamples the distance vector row by row. That is right when the
-pool is 150 independent reference points and wrong here, where the pool is 2,000
-pixels drawn from about 115 donor stands: sixty pixels of one stand are one
-stand seen sixty times, and treating them as sixty references produces an
-interval roughly a third too narrow. Measured on this AOI, switching to a
-bootstrap over whole donor stands (and whole 500 m localities on the transformed
-side) moves the share of stands whose interval straddles the threshold from 20%
-to 32% -- so about one stand in eight was carrying a condition class the
-reference sampling never supported (`condition/research/`, experiment E09).
-
-**No per-pixel bootstrap, on purpose.** The paper's CI resamples the reference
-pool, so it measures *reference-pool sampling error*. Every pixel of a stand
-shares one pool, so that error is shared too: it is a property of the stand's
-reference set, not of the pixel, and putting it on each pixel would dress a
-common-mode uncertainty up as independent per-pixel precision. The bootstrap is
-therefore run once per stand-year -- 737 x 9 calls, affordable -- and reported
-as the stand's CI, while the genuine per-pixel spread is reported as the
-quantiles of the pixel scores. Both are in the output; they mean different
-things.
-
-**The stand score is the median of its cell scores.** Until 2026-10 it was the
-score of the stand's mean embedding; the two separate god from poor stands
-equally well (stand AUC 0.836 against 0.829 at survey year, difference inside
-its block-bootstrap interval) and the median is the number a reader can check
-against the cell map. Its interval is `median_cluster_ci`: one cluster draw is
-shared by every cell of the stand-year -- the pool error is common-mode, so
-drawing per cell would shrink the interval by about 1/sqrt(n) -- each cell is
-rescored under that draw, and the draw's stand value is the median over cells.
-The mean-embedding score is still written, as `dor_<scope>_probe`.
+* The probe is the pixel; the stand summary is a distribution over its pixels.
+* Cosine distance to a pool is one matmul, `1 - unit(X) @ unit(P).T`, with the k
+  smallest taken by partition (`knn_mean_unit`).
+* The bootstrap resamples donor stands (and 500 m localities on the transformed
+  side), not reference pixels, and runs once per stand-year, not per pixel: the
+  pool error is common to all pixels of a stand.
+* The stand score is the median of its cell scores (`median_cluster_ci`); the
+  mean-embedding score is still written as `dor_<scope>_probe`.
 """
 
 from __future__ import annotations
@@ -77,9 +39,8 @@ __all__ = [
 
 EPS = 1e-12
 
-# The vendored `classify` names its outcomes for the recovery paper. For forest
-# condition the same three outcomes mean something else, so they are renamed at
-# the boundary rather than by editing the vendored file.
+# Rename the vendored `classify` outcomes (recovery vocabulary) at the boundary
+# instead of editing the vendored file.
 CONDITION_CLASS = {
     "regenerating": "good_condition",
     "degraded": "poor_condition",
@@ -96,11 +57,7 @@ def unit_rows(x: np.ndarray) -> np.ndarray:
 
 
 def knn_mean(d: np.ndarray, k: int) -> np.ndarray:
-    """Mean of the k smallest distances in each row.
-
-    `np.partition` rather than a sort: only the k-element boundary matters, and
-    at 500-column rows partitioning is roughly twice as fast as sorting.
-    """
+    """Mean of the k smallest distances in each row (NaN rows if fewer than k)."""
     if d.shape[1] < k:
         return np.full(d.shape[0], np.nan, dtype=np.float32)
     return np.partition(d, k - 1, axis=1)[:, :k].mean(axis=1)
@@ -116,14 +73,10 @@ def knn_mean_unit(
 ) -> np.ndarray:
     """`knn_mean` of cosine distances, for rows already through `unit_rows`.
 
-    Row chunks keep the similarity block in cache instead of materialising the
-    full (n_probes, n_pool) distance matrix. The k values are summed in float64,
-    so this agrees with the float32 numpy mean to ~1e-7, not bit for bit.
-
-    `pool_t` is `np.ascontiguousarray(pool_u.T)`, already computed -- pass it
-    when the same pool is scored against many probe batches (e.g. a stand's
-    good pool, reused across its nine years) so the transpose isn't redone on
-    every call. Left as None, it is computed here exactly as before.
+    Row chunks keep the similarity block in cache. The k values are summed in
+    float64, so this agrees with the float32 numpy mean to ~1e-7, not bit for bit.
+    `pool_t` is an optional precomputed `np.ascontiguousarray(pool_u.T)` to reuse
+    when one pool is scored against many probe batches.
     """
     n = len(probes_u)
     if len(pool_u) < k:
@@ -138,9 +91,7 @@ def knn_mean_unit(
 def stand_probe(probes: np.ndarray, transform=None) -> np.ndarray:
     """The stand's probe vector, in the metric the distances are taken in.
 
-    The probe is averaged in the RAW embedding and mapped afterwards, so the
-    stand's probe is the same piece of ground whichever metric is in use; only
-    the ruler changes.
+    Averaged in the RAW embedding, then mapped, so only the ruler changes.
     """
     x = np.asarray(probes, dtype=float).mean(axis=0)
     if transform is not None:
@@ -149,12 +100,11 @@ def stand_probe(probes: np.ndarray, transform=None) -> np.ndarray:
 
 
 # Distances carried per cell into the bootstrap walk. A cell whose draw runs
-# off the end of this prefix is redone on its full sorted row, so this is a
-# speed knob and never an approximation (tests/test_score.py pins it at T = k).
+# off the end is redone on its full row, so this is a speed knob, not an
+# approximation.
 _CELL_PREFIX = 256
-# Stand-years with more cells than this get their INTERVAL from this many cells
-# picked at evenly spaced ranks of their point scores; the point value always
-# uses every cell. Odd, so the picked set's median is the stand's median cell.
+# Stand-years with more cells get their INTERVAL from this many cells at evenly
+# spaced ranks (odd, so the median cell is included); the point uses all cells.
 MEDIAN_MAX_CELLS = 2001
 
 
@@ -182,8 +132,7 @@ def _cluster_draws(
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """(codes, mult, n_clusters): clusters drawn with replacement at their own count.
 
-    `mult[b, c]` is how often cluster `c` was drawn in resample `b`, the same
-    resample of whole clusters, as counts rather than indices.
+    `mult[b, c]` is how often cluster `c` was drawn in resample `b`.
     """
     u, codes = np.unique(cluster, return_inverse=True)
     c = len(u)
@@ -254,21 +203,18 @@ def median_cluster_ci(
 ) -> dict:
     """{scope: (point, lo, hi)} -- the stand's median cell score and its interval.
 
-    `probes_u` are the stand-year's cells through the metric and `unit_rows`;
-    `cell_scores[scope]` their point scores; `good[scope]` is
-    `(pool_t, owner)` -- the scope's good pool as unit rows transposed, and the
-    donor stand of each row -- and `bad` the same for the transformed pool,
-    with the 500 m locality of each row.
+    `probes_u`: the stand-year's cells through the metric and `unit_rows`.
+    `cell_scores[scope]`: their point scores. `good[scope]` is `(pool_t, owner)`
+    (unit rows transposed, donor stand per row); `bad` is the same for the
+    transformed pool with the 500 m locality per row.
 
-    One draw of donor stands and one of 500 m localities is shared by every cell
-    in the resample: the pool error is common to the stand, and drawing it per
-    cell would understate it by about 1/sqrt(n). The transformed side is drawn
-    once and shared by both scopes, so it is walked once.
+    One draw of donor stands and of localities is shared by every cell of the
+    resample (the pool error is common to the stand). The transformed side is
+    drawn once and shared by both scopes.
 
     Above `max_cells` cells the interval is computed on `max_cells` of them at
-    evenly spaced ranks of the point scores and shifted by the gap between their
-    point median and the stand's, which is zero to the cell nearest the median;
-    the point value always uses every cell.
+    evenly spaced ranks of the point scores, shifted by the gap between their
+    median and the stand's; the point value always uses every cell.
     """
     points = {
         s: float(np.nanmedian(v)) if np.isfinite(v).any() else np.nan
@@ -319,18 +265,13 @@ def summarise_pixels(
 ) -> pd.DataFrame:
     """Collapse per-pixel scores to a per-(stand, year) distribution.
 
-    The median and IQR, not the mean: a stand with a clearcut in one corner has
-    a bimodal pixel distribution, and the mean sits in the empty middle of it.
-    `frac_poor` -- the share of the stand's pixels below the threshold -- is the
-    number that actually answers "how much of this stand is degraded".
+    Median and IQR, not the mean (a stand with one clearcut corner is bimodal);
+    `frac_poor` is the share of the stand's pixels below the threshold.
     """
-    # `agg` with a lambda per quantile runs that lambda once per group -- 6,600
-    # groups x three quantiles of Python-level work over two million rows. The
-    # grouped `quantile` is the same computation done once in pandas.
     g = pix.groupby(["poly_id", "year"], sort=False)[col]
-    # The grouped `quantile` returns float64 where the per-group lambda returned
-    # the column's own dtype, so it is cast back: these land in a parquet column
-    # and the score is carried as float32 everywhere else.
+    # Grouped `quantile` instead of `agg` with a lambda per quantile (far
+    # faster at millions of rows). It returns float64, so cast back to the
+    # column dtype (float32 in the parquet).
     dt = pix[col].dtype
     out = pd.DataFrame(
         {
@@ -357,21 +298,10 @@ def calibrate_threshold(
 ) -> dict:
     """Pick the DoR threshold that best separates labelled good from labelled bad.
 
-    The RECOVER paper carried per-class thresholds calibrated on its own
-    land-cover classes; those are meaningless here, because the pools mean
-    something else. Instead we calibrate on the surveyors' own labels, using
-    Youden's J (sensitivity + specificity - 1) over a grid.
-
-    `scores` and `labels` must be aligned, with labels in {"good", "bad"}. The
-    scores must come from the leave-one-out scoring -- a threshold fitted to
-    self-inclusive scores is fitted to an artefact -- and both sides must be
-    scored in the year their label was assigned, or the threshold is fitted to
-    stale labels.
-
-    Returns the threshold plus the J statistic and the two rates at it, so a
-    caller can see whether the separation is worth thresholding at all: a J near
-    0 means the pools do not separate and every site should be reported as
-    `indistinguishable` rather than forced into a class.
+    Maximises Youden's J over a grid. `scores` and `labels` must be aligned, with
+    labels in {"good", "bad"}, scored leave-one-out and in the year the label was
+    assigned. Returns the threshold plus J and the two rates at it; J near 0
+    means the pools do not separate and everything should be `indistinguishable`.
     """
     m = labels.isin(["good", "bad"]) & np.isfinite(scores)
     s, y = scores[m].to_numpy(), (labels[m] == "good").to_numpy()
@@ -380,14 +310,10 @@ def calibrate_threshold(
     if grid is None:
         grid = np.linspace(np.nanmin(s), np.nanmax(s), 401)
 
-    # One pass over the sorted scores rather than a pass over the labels per grid
-    # point. `threshold_interval_blocked` calls this ~24,000 times -- 40 blocks x
-    # 300 resamples x 2 scopes -- so the 401-step Python loop was a minute of the
-    # run on its own. Counting `pred & y` for every t at once is the same
-    # arithmetic in the same order: `lo` is how many scores fall strictly below
-    # t, so `n_good - cum_good[lo]` is exactly `(s >= t) & y`, and ties are
-    # broken the same way because `argmax` takes the first maximum just as
-    # `j > best` kept the first.
+    # One pass over the sorted scores instead of one per grid point: this runs
+    # ~24,000 times in `threshold_interval_blocked`. Same arithmetic in the same
+    # order: `lo` counts scores strictly below t, so `n_good - cum_good[lo]` is
+    # `(s >= t) & y`, and `argmax` keeps the first maximum on ties.
     order = np.argsort(s, kind="stable")
     s_sorted, y_sorted = s[order], y[order]
     cum_good = np.concatenate(([0], np.cumsum(y_sorted)))
@@ -415,12 +341,7 @@ def calibrate_threshold_blocked(
 ) -> dict:
     """A threshold per spatial block, each fitted on the stands OUTSIDE that block.
 
-    The shipped threshold was fitted by Youden's J to every labelled stand and
-    then applied to those same stands, which is a fit reported as a validation.
-    With 36 bad stands that is worth a couple of points of J -- measured here,
-    pooled J falls from 0.411 to 0.331 once the leakage is removed
-    (`condition/research/`, experiment E01/E09).
-
+    Avoids reporting a fit on the labelled stands as a validation on them.
     Returns the pooled threshold (for stands whose block holds no labels, and
     for reporting) plus `by_block`, which is what the classification should use.
     """
@@ -459,24 +380,11 @@ def threshold_interval_blocked(
 ) -> dict:
     """A block-bootstrap interval on each block's leave-block-out threshold.
 
-    `classify_condition` compares a stand's interval with a threshold treated as
-    known. It is not known: it is a Youden cut fitted on 36 degraded stands in
-    six localities, and research E39 measured its error bar at about the width
-    of the stand's own -- here it comes out slightly WIDER (median se 0.014
-    against the stand's 0.018 at the deployed pool). Resampling whole spatial
-    blocks of the training set is the same unit the threshold is held out by.
-
-    **This is the label-sample half of the threshold's error, and only that.**
-    The block resample runs at FIXED scores, so it misses the part that comes
-    from which reference pixels were drawn. Research E43 measured both halves
-    jointly and put the total at sd 0.0216 against this estimator's ~0.0165, and
-    E45 showed that combining this understated term with the stand interval in
-    quadrature reproduces only 83.5% of the joint bootstrap's verdicts -- almost
-    always by deciding a stand the joint rule abstains on. So this is reported
-    as a diagnostic, and nothing in the pipeline classifies with it.
-
-    Returns `by_block` -> {lo, hi, se}, plus the pooled fallback for blocks that
-    hold no labels.
+    The label-sample half of the threshold's error only: the resample runs at
+    FIXED scores, so it misses the part from which reference pixels were drawn.
+    Reported as a diagnostic; nothing in the pipeline classifies with it
+    (METHODS.md section 7). Returns `by_block` -> {lo, hi, se}, plus the pooled
+    fallback for blocks that hold no labels.
     """
     m = labels.isin(["good", "bad"]) & np.isfinite(scores)
     s, y, b = scores[m], labels[m], blocks[m]

@@ -1,32 +1,13 @@
 """Step 7 -- pack the whole result set into ONE GeoPackage for QGIS.
 
-Step 6 writes 66 GeoTIFFs, one per spatial block, on exactly the AlphaEarth grid.
-That is the analysis-grade product and it stays. It is not, however, something
-you hand to someone who wants to look at the results: 66 files in five different
-UTM zones need five separate mosaics and no single QGIS layer can show them all.
+Writes `condition_results.gpkg` next to the GeoTIFFs:
+  condition_pixels  one square per scored 10 m cell, with the step 6 bands as
+                    attribute columns (built via step 6's `build_table`)
+  condition_stands  the mapped stands with verdict, interval and yearly series
+  readme            a column dictionary; QGIS styles are stored in layer_styles
 
-This step writes one file instead:
-
-    condition_results.gpkg
-      condition_pixels   168,832 ten-metre cells, the same 20 bands as the
-                         GeoTIFFs, one band per attribute column
-      condition_stands   737 mapped stands, the stand-level verdict, its
-                         interval, and the nine-year condition series
-
-**Why vector rather than one big raster.** The stands are scattered over most of
-Norway in five UTM zones. A single raster has to pick one projection, and moving
-a 10 m grid between zones means resampling -- the value in the cell would no
-longer be the value that was scored. Reprojecting a *polygon* does not resample
-anything: the cell becomes a slightly rotated quadrilateral covering the same
-ground, carrying the same number. So every cell here is in ETRS89 / UTM 33N
-(EPSG:25833, the Norwegian national grid) and every value is untouched.
-
-It is also the more useful form for the questions people actually ask of this
-layer -- "show me the declining stands", "show me cells below their own
-threshold" are attribute queries, which a 20-band raster cannot answer.
-
-The pixel table is built by importing step 6's own `build_table`, so the columns
-here are the shipped bands by construction and cannot drift from them.
+Everything is in EPSG:25833; reprojecting the cell polygons resamples nothing,
+so values are unchanged. Reads the outputs of steps 03, 04 and 06's inputs.
 
 Run:  forestmon condition step 07
 """
@@ -55,10 +36,7 @@ from effektovervaking_forests.condition.steps import s06_rasterize as step6
 OUT_CRS = 25833  # ETRS89 / UTM 33N -- the Norwegian national grid
 RES = 10.0
 
-# How many decimals each column keeps. Rounding is not cosmetic: SQLite stores
-# every REAL in 8 bytes whatever its value, but the GeoPackage compresses far
-# better without seventeen digits of float noise, and no number here is
-# meaningful past its fourth decimal anyway.
+# Decimals kept per column-name prefix (smaller file; no more is meaningful).
 ROUND = {"dor": 4, "m_": 5, "threshold": 5, "sen_slope": 5, "mk_p": 4, "edge_m": 1}
 INT_COLS = ["trajectory", "stand_condition", "forest_type_code", "n_polygons"]
 
@@ -90,7 +68,7 @@ def pixel_layer(year: int) -> gpd.GeoDataFrame:
     for zone, g in t.groupby("utm_zone", sort=True):
         x = g["x"].to_numpy()
         y = g["y"].to_numpy()
-        # (x, y) is the cell CENTRE, so the square runs half a cell either way
+        # (x, y) is the cell centre
         cells = shapely.box(x - RES / 2, y - RES / 2, x + RES / 2, y + RES / 2)
         epsg = 32600 + int(str(zone)[:-1])
         parts.append(
@@ -100,8 +78,7 @@ def pixel_layer(year: int) -> gpd.GeoDataFrame:
         )
     out = pd.concat(parts, ignore_index=True)
 
-    # Readable names beside the codes: QGIS shows the attribute table to people,
-    # not to a lookup table in a README.
+    # Readable names beside the codes.
     out["trajectory_class"] = out["trajectory"].map(TRAJ_NAME)
     out["stand_condition_class"] = out["stand_condition"].map(COND_NAME)
     out["forest_type"] = out["forest_type_code"].map(FTYPE_NAME)
@@ -175,7 +152,7 @@ def stand_layer(year: int) -> gpd.GeoDataFrame:
     for c in ("ci_lo_global", "ci_hi_global", "ci_lo_local", "ci_hi_local"):
         out[c] = out[c].round(4)
     out["ci_width_global"] = (out["ci_hi_global"] - out["ci_lo_global"]).round(4)
-    # the priority quadrant, precomputed so it is one filter in QGIS
+    # good today but declining, as a single filter column
     out["priority"] = (
         (out["condition_global"] == "good_condition")
         & (out["trajectory"] == "declining")
@@ -185,11 +162,7 @@ def stand_layer(year: int) -> gpd.GeoDataFrame:
 
 
 def readme_table(year: int) -> pd.DataFrame:
-    """A plain-language column dictionary, carried inside the file itself.
-
-    A GeoPackage travels; a README does not. QGIS lists non-spatial tables in
-    the browser, so this opens in the same window as the data.
-    """
+    """A plain-language column dictionary, stored inside the GeoPackage."""
     rows = [
         (
             "_about",
@@ -272,11 +245,7 @@ def readme_table(year: int) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["item", "units", "meaning"])
 
 
-# --------------------------------------------------------------------------
-# QGIS styles, stored in the GeoPackage so the file opens already rendered.
-# QGIS reads a `layer_styles` table if one is present; any QGIS that does not
-# simply ignores it and the data still loads.
-# --------------------------------------------------------------------------
+# QGIS styles, stored in a `layer_styles` table so the file opens rendered.
 def _fill(rgb: str) -> str:
     return (
         f'<layer class="SimpleFill" enabled="1" locked="0" pass="0">'
@@ -380,9 +349,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.out.exists():
         args.out.unlink()
 
-    # A GeoPackage is a SQLite database, and SQLite cannot take the locks it
-    # needs on the network share this project lives on ("failed to start
-    # transaction"). Build it on local disk, then copy the finished file over.
+    # SQLite cannot lock on network shares: build on local disk, then copy.
     tmp_dir = Path(tempfile.mkdtemp(prefix="condition_gpkg_"))
     tmp = tmp_dir / args.out.name
 

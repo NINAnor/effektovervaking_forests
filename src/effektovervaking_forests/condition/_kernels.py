@@ -1,8 +1,7 @@
-"""Compiled inner loops for `condition.score` (numba).
+"""Compiled (numba) inner loops for `condition.score`.
 
-Compiled per process (no on-disk cache: it needs a writable source tree). Each
-kernel reproduces the numpy expression it replaces operation for operation;
-`tests/condition/test_score.py` checks them against numpy references.
+Each kernel reproduces the numpy expression it replaces operation for operation;
+tests/condition/test_score.py checks them against numpy references.
 """
 
 import numpy as np

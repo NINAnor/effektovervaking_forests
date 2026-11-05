@@ -1,22 +1,13 @@
 """AOI polygons -> the fixed pixel grid that carries S-CCD state.
 
-Every downstream artefact (observations, state, alerts) is keyed on `pix_id`
-from this grid, so the grid must be reproducible and must never move. Two rules
-make that true:
+Everything downstream is keyed on `pix_id`, so the grid must never move:
 
-1. The grid is the SENTINEL-2 GRID, not a grid of our own. S2 L2A tiles are
-   laid out on UTM eastings/northings that are exact multiples of 10 m, so
-   snapping to `floor(coord / 10) * 10` lands on real pixel edges. We therefore
-   never resample or reproject imagery — we read the pixel that already exists.
-2. One POLYGON, one CRS. Each polygon is gridded in the UTM zone Sentinel-2
-   tiles it in, so an AOI may carry several zone sub-grids side by side
-   (kalklindeskog: zone 32 only; olivinskog: 32, 33, 34, 35). Scenes are read
-   only for pixels in their own CRS, never warped onto another zone's grid,
-   since warping is exactly the kind of silent resampling rule 1 exists to
-   avoid. `pix_id` embeds the EPSG code, so ids stay unique across zones.
+1. The grid is the Sentinel-2 10 m lattice (coordinates snapped to multiples of
+   10 m), so imagery is never resampled or reprojected.
+2. One polygon, one CRS: each polygon is gridded in its own UTM zone and scenes
+   are read only for pixels in their CRS. `pix_id` embeds the EPSG code.
 
-Pixel centres are stored in both UTM and lon/lat: UTM for reading imagery,
-lon/lat for joining to the label/inspector work, which is all WGS84.
+Pixel centres are stored in UTM (reading imagery) and lon/lat (WGS84 joins).
 """
 
 from __future__ import annotations
@@ -33,13 +24,10 @@ from . import config
 
 
 def mgrs_utm_zone(lon: float, lat: float) -> int:
-    """UTM zone as the MGRS / Sentinel-2 tiling grid assigns it.
+    """UTM zone as the MGRS / Sentinel-2 tiling assigns it.
 
-    NOT plain `floor((lon + 180) / 6) + 1`: MGRS widens zone 32V to 3-12 E
-    between 56 and 64 N, and Sentinel-2 follows it. Western Norway at ~5 E is
-    therefore tiled as 32VKL/32VKN — there are no 31V tiles over it, so gridding
-    those stands in zone 31 would leave them with no scene in their CRS at all.
-    (The Svalbard exceptions, 72-84 N, are outside this tool's range.)
+    Differs from the plain formula: MGRS widens zone 32V to 3-12 E between
+    56 and 64 N (Svalbard exceptions are out of range).
     """
     if not 55 <= lat <= 72:  # sanity: this is a Norway tool
         raise ValueError(f"latitude {lat:.2f}N is outside the expected range")
@@ -49,16 +37,12 @@ def mgrs_utm_zone(lon: float, lat: float) -> int:
 
 
 def polygon_crs(gdf: gpd.GeoDataFrame, tile_bounds: dict | None = None) -> pd.Series:
-    """The UTM CRS each polygon is gridded in.
+    """The UTM CRS each polygon is gridded in (per polygon, never split).
 
-    Per polygon rather than per pixel so a stand is never split across two
-    lattices. The default is the MGRS zone of its representative point, but MGRS
-    is not the whole story: north of 64 N, Sentinel-2 has no zone-33 tile at
-    12.6-12.9 E — two olivinskog stands (24.6k px) there are imaged ONLY by the
-    overhang of 32WPS/32WPT. So when `tile_bounds` ({tile: (utm bounds, crs)},
-    as `grid assign-tiles` reads them) is given, a polygon keeps its MGRS zone
-    only if some tile in that zone contains it, and otherwise takes the zone of
-    the tile in which it sits most interior.
+    Defaults to the MGRS zone of the representative point. With `tile_bounds`
+    ({tile: (utm bounds, crs)}), a polygon keeps that zone only if some tile in
+    it contains the polygon; otherwise it takes the zone of the tile where it
+    sits most interior (some stands are imaged only by a neighbour zone's tile).
     """
     ll = gdf.to_crs(4326)
     rp = ll.geometry.representative_point()
@@ -100,9 +84,7 @@ def _grid_zone(gdf: gpd.GeoDataFrame, idx: np.ndarray, crs: str) -> pd.DataFrame
     height = int(round((maxy - miny) / res))
     tf = rtransform.from_origin(minx, maxy, res, res)
 
-    # Burn polygon index+1 so 0 stays "outside"; keeps the pixel -> polygon link
-    # that per-polygon reporting will need. The index is the AOI-wide position,
-    # not the position within this zone.
+    # Burn AOI-wide polygon index+1 so 0 stays "outside".
     shapes = ((geom, int(i) + 1) for i, geom in zip(idx, g.geometry))
     burned = features.rasterize(
         shapes,
@@ -126,9 +108,7 @@ def _grid_zone(gdf: gpd.GeoDataFrame, idx: np.ndarray, crs: str) -> pd.DataFrame
             "utm_y": y.astype("float64"),
         }
     )
-    # pix_id from the snapped integer grid coordinate: stable across rebuilds,
-    # independent of the AOI bounding box, and directly comparable between AOIs
-    # in the same zone.
+    # pix_id from the snapped integer coordinate: independent of the AOI bbox.
     gx = np.floor(df["utm_x"] / res).astype("int64")
     gy = np.floor(df["utm_y"] / res).astype("int64")
     df["pix_id"] = [f"{crs.split(':')[1]}_{a}_{b}" for a, b in zip(gx, gy)]
@@ -144,16 +124,12 @@ def _grid_zone(gdf: gpd.GeoDataFrame, idx: np.ndarray, crs: str) -> pd.DataFrame
 def build_grid(aoi_name: str, tile_bounds: dict | None = None) -> pd.DataFrame:
     """Rasterise the AOI onto the S2 10 m lattice; one row per pixel centre.
 
-    A pixel belongs to the AOI when its CENTRE falls inside a polygon
-    (`all_touched=False`), which is the same convention Earth Engine's
-    `reduceRegions`/`getRegion` use — so pixel membership matches the
-    exploratory work rather than dilating it by a ring of edge pixels.
+    A pixel belongs to the AOI when its centre falls inside a polygon.
     """
     path = config.aoi_path(aoi_name)
     gdf = gpd.read_parquet(path).reset_index(drop=True)
     poly_crs = polygon_crs(gdf, tile_bounds)
-    # One sub-grid per zone, each on its own zone's S2 lattice. For a single-zone
-    # AOI this is exactly the old one-CRS build (same bbox, same pixels, same ids).
+    # One sub-grid per zone, each on its own S2 lattice.
     df = pd.concat(
         [
             _grid_zone(gdf, np.flatnonzero(poly_crs.to_numpy() == crs), crs)
@@ -165,8 +141,7 @@ def build_grid(aoi_name: str, tile_bounds: dict | None = None) -> pd.DataFrame:
     if df.empty:
         raise ValueError(f"{aoi_name}: no pixel centres fell inside any polygon")
 
-    # Carry whatever identifier the source polygons have, so alerts can be
-    # reported per polygon without re-joining geometry later.
+    # Carry the source polygon identifier for per-polygon reporting.
     for cand in ("poly_id", "id", "OBJECTID", "lokalitetid"):
         if cand in gdf.columns:
             df["poly_id"] = gdf[cand].to_numpy()[df.poly_idx.to_numpy()]
@@ -210,23 +185,10 @@ def grid_fingerprint(df: pd.DataFrame) -> str:
 
 
 # ── tile assignment ──────────────────────────────────────────────────────────
-# Sentinel-2 MGRS tiles overlap by ~9.8 km, so a pixel near a seam is imaged by
-# two tiles on the same acquisition. Those two granules do NOT agree: Sen2Cor
-# runs its atmospheric correction per tile, so BOA reflectance in the overlap
-# differs (measured on the 32VNL/32VNM seam: ~99% of band values differ, up to
-# 2041 DN, while SCL agrees exactly — so it is radiometry, not geolocation).
-#
-# In NBR the difference largely cancels (max 0.0185, none above the 0.075 loss
-# gate), so it will not fire an alert on its own. The reason to fix it anyway is
-# that the bias is TILE-DEPENDENT, not random: a pixel whose series is fed
-# mostly by one tile and later mostly by the other sees a systematic step, which
-# is precisely the signal S-CCD exists to detect. Pinning each pixel to a single
-# home tile removes the whole class of problem and costs nothing — both tiles
-# see the same acquisitions, so no observation is lost.
-#
-# The home tile is the one in which the pixel sits FURTHEST FROM THE TILE EDGE.
-# Tile edges are where resampling and swath-boundary effects are worst, so the
-# most interior view is the better observation as well as a deterministic one.
+# Overlapping MGRS tiles disagree radiometrically (Sen2Cor runs per tile), and
+# the bias is tile-dependent, so a pixel fed by different tiles over time sees
+# a spurious step. Each pixel is pinned to one home tile: the one in which it
+# sits furthest from the tile edge. No observations are lost.
 
 
 def assign_home_tiles(aoi_name: str, tile_bounds: dict[str, tuple]) -> pd.DataFrame:
@@ -240,8 +202,7 @@ def assign_home_tiles(aoi_name: str, tile_bounds: dict[str, tuple]) -> pd.DataFr
     best_margin = np.full(len(df), -np.inf)
 
     for tile, (bounds, tile_crs) in tile_bounds.items():
-        # Only pixels gridded in the tile's own CRS: a tile can overhang into the
-        # next zone, but its coordinates mean nothing on that zone's lattice.
+        # Only pixels gridded in the tile's own CRS (tiles overhang into zones).
         same = pix_crs == tile_crs
         if not same.any():
             continue

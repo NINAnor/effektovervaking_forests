@@ -1,86 +1,17 @@
 """Reference pools: what "good" and "bad" mean for these two forest types, when.
 
-The DegreeofRecovery paper scored restoration sites for *land-cover reversion*,
-so its pools came from WorldCover: good = natural/semi-natural, bad = built-up
-or cropland, sampled in a 3-8 km annulus around each site.
+* Good pool: `god`-labelled stands of the same forest type, as local (nearest
+  donors) and global (all donors) scopes. Never the scored stand, anything
+  overlapping it, or any donor within `EXCLUDE_KM_DEFAULT` of its centroid (the
+  transformed annulus's inner radius; one rule for both pools).
+* A `tilstand` label describes the survey date, so a donor contributes only its
+  survey-year pixels (`anchor_year`); every scored row carries `label_age`.
+* Bad pool: WorldCover transformed pixels (`condition.worldcover`).
+* The unit is the pixel, which belongs to a set of polygons, so pools are built
+  and excluded by `pixel_id` (`condition.membership`); `conflict` pixels enter
+  no pool.
 
-Half of that transfers. Olivinskog and kalklindeskog are not reverting from
-built-up land, and both an intact kalklindeskog and a spruce plantation on top
-of one are WorldCover class 10 -- so WorldCover cannot supply the GOOD pool, and
-the surveyors' `tilstand` field label does it instead. WorldCover is still the
-right source for the BAD pool, where it is not blind at all: it can say where
-the forest has been replaced outright. See `condition.worldcover`.
-
-Three properties of the pools built here are worth stating up front, because
-each one exists to close a specific way the naive version is circular or wrong.
-
-**1. A reference for a forest comes from that forest type, and only from
-stands, never from the score's own subject.**
-
-Two scopes are built for every stand, and both are reported, because they
-answer different questions:
-
-    good_local    the god-labelled stands of the SAME forest type nearest the
-                  probe -- every one within `donor_km`, or the nearest
-                  `n_donors` where that radius is empty or unset. Region,
-                  terrain, phenology and acquisition history are approximately
-                  matched, so a low score is about this stand rather than about
-                  Nordland.
-    good_global   every god-labelled stand of the same forest type. A common
-                  yardstick, so scores are comparable across the whole AOI.
-
-Neither pool ever contains the scored stand, and neither contains a stand that
-touches it (`polygon_overlap`): with layers overlapping as heavily as these do,
-a neighbour is partly the same ground.
-
-Nor -- and this is the part the first version of this pipeline got wrong -- does
-the good pool contain a donor **within `exclude_km` of the probe's centroid**,
-3 km by default. The six layers map the same localities repeatedly and `god`
-stands cluster, so excluding only the overlapping neighbours leaves a donor a
-few hundred metres away on the same hillside -- often, given 2,237 ha of polygon
-on 1,694 ha of ground, partly the same stand.
-
-3 km is not a new number: it is the inner edge of the annulus the TRANSFORMED
-pool has always used (`condition.worldcover`), so both pools now obey one rule.
-It replaces the leave-spatial-block-out pool exclusion this pipeline shipped
-first. That was measured against it at the shipped estimator over five seeds
-(`condition/research/`, experiment E20) and lost on every axis that matters:
-
-    scope   pool rule    stand AUC   pixel AUC   olivinskog px   Youden J  donors
-    global  3 km            0.760       0.735        0.706         0.422     159
-    global  whole block     0.705       0.716        0.687         0.382     115
-    local   3 km            0.789       0.769        0.761         0.488       8
-    local   whole block     0.750       0.697        0.660         0.403       8
-
-Seed sd is 0.002-0.011, so those gaps are real. Excluding a whole locality
-removes contamination and regional matching together, and `local` exists to do
-regional matching -- it also left six more stands unscoreable. What blocks are
-still for is the part no radius can do: holding out localities when the
-threshold is fitted, and resampling them for every interval. Both of those are
-unchanged and live in `condition.score`, not here. See `condition.blocks`.
-
-**2. `tilstand` is a statement about a date, not about the record.**
-
-A surveyor who wrote `god` in 2017 said the stand was in good condition *in
-2017*. It is not evidence about 2025, and this AOI makes that concrete: the
-labelled stands were surveyed from 2015 to 2025, so some labels are eight years
-older than the embeddings being scored, and a stand cut in 2020 still carries
-its 2017 `god`.
-
-So a donor contributes only its **survey-year** pixels -- `anchor_year` -- and a
-donor surveyed before AlphaEarth begins (2017) cannot contribute at all. The
-reference cloud is therefore "stands a surveyor called god, as they looked when
-that was checked", and a probe from any year is measured against it. Every
-scored row carries `label_age` so a reader can see how far the anchor is from
-the year being scored.
-
-**3. A pixel, not a polygon, is the unit -- and it belongs to a set of polygons.**
-
-The layers overlap on 24% of their combined area, so excluding the probe by
-`poly_id` does not work: the probe's own ground comes back into the pool wearing
-a neighbour's id. Pools are built and excluded by `pixel_id`
-(`condition.membership`), which cannot leak that way. Pixels that two layers
-label contradictorily are `conflict` and enter no pool.
+See METHODS.md section 3.
 """
 
 from __future__ import annotations
@@ -94,10 +25,8 @@ import pandas as pd
 
 from effektovervaking_forests.condition.paths import ANNULUS_INNER_M, BANDS
 
-# The good pool's inner radius IS the transformed pool's annulus inner edge --
-# one rule for both pools, and deliberately not a second tunable. Research E20
-# measured 0/1/2/3/5 km and a whole-block exclusion at the shipped estimator;
-# 3 km won, and it is the radius that was already justified on the other side.
+# Inner radius of the good-pool exclusion: the same 3 km as the transformed
+# pool's annulus (METHODS.md, E20).
 EXCLUDE_KM_DEFAULT = ANNULUS_INNER_M / 1000.0
 
 __all__ = [
@@ -129,11 +58,8 @@ def assign_roles(polygons: pd.DataFrame) -> pd.Series:
 def survey_year(polygons: pd.DataFrame) -> pd.Series:
     """When each stand was actually visited -- the only year its label describes.
 
-    Prefers the full `Kartlagtda` date where a layer carries one and falls back
-    to the `year` column, which the six layers type inconsistently (text in MI,
-    float-as-text in NiN5k) and which therefore has to be coerced rather than
-    cast. Returns a nullable Int64: a stand with no usable date cannot be a
-    donor, and saying so with NA is better than guessing a year.
+    Prefers the `Kartlagtda` date, else the `year` column (typed inconsistently
+    across layers, so coerced). Nullable Int64; NA means the stand cannot be a donor.
     """
     yr = pd.to_numeric(polygons.get("year"), errors="coerce")
     if "Kartlagtda" in polygons.columns:
@@ -160,18 +86,10 @@ def anchor_donors(
 ) -> pd.DataFrame:
     """The god-labelled stands eligible to be references, and in which year.
 
-    A stand qualifies only if all four hold, and the count lost at each step is
-    what the caller should report:
-
-      * `tilstand` = god;
-      * its survey year falls inside the AlphaEarth record, so the label can be
-        anchored to an embedding at all;
-      * it still owns at least `min_pixels` pixels whose role is unambiguously
-        `good` -- a pixel another layer calls `dårlig` is a `conflict` and
-        counts for nobody;
-      * those pixels exist in the anchor year.
-
-    Returns `poly_id, anchor_year, n_good_pixels`.
+    A stand qualifies if its survey year is inside the AlphaEarth record, and it
+    still owns at least `min_pixels` unambiguously `good` pixels (a `conflict`
+    pixel counts for nobody) that exist in the anchor year.
+    Returns `poly_id, forest_type, anchor_year, n_good_pixels`.
     """
     good_px = pixel_roles.loc[pixel_roles["role"] == "good", ["pixel_id"]]
     owned = membership.merge(good_px, on="pixel_id")
@@ -189,22 +107,12 @@ def anchor_donors(
 
 
 class PoolBuilder:
-    """Builds the three reference matrices a probe needs, with the leaks closed.
+    """Builds the reference matrices a probe needs, with the leaks closed.
 
-    Holds the embedding tables as dense float32 arrays indexed by pixel, because
-    the alternative -- filtering a 1.5 M-row long frame once per stand per pool
-    -- is 700+ full scans and dominates the run. Row lookup is then an integer
-    take, and building a pool is `arr[rows]`.
-
-    Everything the pools need is decided once in `__init__`:
-
-      * `_good_rows[(poly_id)]` -- the pixel rows a donor contributes, already
-        restricted to that donor's anchor year;
-      * `_bad_rows[(poly_id, year)]` -- the transformed pixels of a stand's own
-        annulus in the probe year;
-      * `_neighbours[poly_id]` -- stands too close to be that stand's reference.
-
-    so `good_pool` and `bad_pool` are dictionary lookups and one concatenate.
+    Embeddings are held as dense float32 arrays indexed by pixel, so a lookup is
+    an integer take. `__init__` decides once the pixel rows each donor
+    contributes (at its anchor year), each stand's transformed pixels, and the
+    stands too close to be its reference.
     """
 
     def __init__(
@@ -235,16 +143,14 @@ class PoolBuilder:
     ):
         self.n_donors, self.max_km = n_donors, max_km
         self.donor_km = float(donor_km)
-        # {forest_type: (n_donors, donor_km)}. A type named here uses its own
-        # rule; every other type uses the two fields above. See `pool_rule`.
+        # {forest_type: (n_donors, donor_km)}; types not named use the fields above.
         self.pool_by_type = {
             str(t): (int(n), float(km)) for t, (n, km) in (pool_by_type or {}).items()
         }
         self.pooled_bad, self.max_type_bad = bool(pooled_bad), int(max_type_bad)
         self._loss_year = loss_year or {}
         self._type_bad_cache: dict[tuple[str, int], np.ndarray] = {}
-        # poly_id -> spatial block. Without it `exclude_block` cannot be honoured,
-        # and silently scoring with leakage would be worse than refusing to.
+        # Refuse rather than silently score with leakage.
         if blocks is None and exclude_block:
             raise ValueError(
                 "exclude_block=True needs `blocks` (poly_id -> block id); build "
@@ -280,15 +186,8 @@ class PoolBuilder:
                 continue
             anchor = int(row["anchor_year"])
             if self._loss_year:
-                # A `god` label describes the day the surveyor stood there, but
-                # nothing stops ground that Hansen records as cleared BEFORE
-                # that day from sitting inside the polygon -- and a clearcut in
-                # the good pool flatters exactly the probes that look like
-                # clearings. Research E25 found 1,072 such pixels across 35
-                # donors; removing them costs nothing measurable (stand AUC
-                # 0.8051 -> 0.8056 pooled, inside seed noise) and it is the
-                # state E26's independent Hansen-label corroboration was run in,
-                # so it is on rather than merely available.
+                # Drop donor pixels Hansen records as cleared before the survey date
+                # (METHODS.md, E25).
                 keep = np.array(
                     [not (0 < self._loss_year.get(int(p), 0) <= anchor) for p in pid],
                     dtype=bool,
@@ -310,9 +209,7 @@ class PoolBuilder:
             bad_membership.groupby("poly_id")["pixel_id"].apply(np.asarray).to_dict()
         )
 
-        # Every transformed pixel serving any stand of a forest type, for the
-        # naturalness axis -- which is fitted once per type and then held fixed,
-        # so unlike a probe's bad pool it is not per stand and not per year.
+        # All transformed pixels serving any stand of a type (fitted once per type).
         self._bad_by_type: dict[str, np.ndarray] = {}
         if poly_type is not None:
             bt = bad_membership.assign(
@@ -326,20 +223,14 @@ class PoolBuilder:
         )
         self._centroids = centroids.set_index("poly_id")
         self._donor_order: dict[str, list[str]] = {}
-        # Flat arrays so the radius test is one vectorised pass per probe rather
-        # than a DataFrame lookup per candidate donor; the result is cached
-        # because `good_pool` asks for the same exclusion set once per year.
+        # Flat arrays for a vectorised radius test; results cached per stand.
         self._cent_ids = self._centroids.index.to_numpy()
         self._cx = self._centroids["cx"].to_numpy(dtype=float)
         self._cy = self._centroids["cy"].to_numpy(dtype=float)
         self._near_cache: dict[str, set] = {}
 
-        # The global pool is the SAME cloud for every stand of a forest type,
-        # give or take the handful of donors a given stand must not see. So it
-        # is drawn once, capped, and each stand masks its own exclusions out of
-        # it -- rebuilding it per stand would concatenate the same 11,000 rows
-        # 589 times and then throw 99% of that work away. The cap is applied
-        # per donor, so one large stand cannot dominate the yardstick.
+        # The global pool is the same cloud for every stand of a type: draw it once,
+        # capped per donor, and let each stand mask out its own exclusions.
         self._global: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for ftype, grp in self.donors.groupby("forest_type"):
             ids = [d for d in grp.index if d in self._good_rows]
@@ -359,21 +250,8 @@ class PoolBuilder:
     def pool_rule(self, forest_type: str) -> tuple[int, float]:
         """(n_donors, donor_km) for this forest type.
 
-        The two forest types want opposite pools and the reason is donor
-        density, not ecology. Over the 263 god-labelled donors, with the 3 km
-        inner exclusion, a kalklindeskog stand has a MEDIAN of 54 eligible
-        donors within 3-20 km; an olivinskog stand has six. So a single
-        nearest-32 rule hands an olivinskog probe its 9th to 32nd reference
-        from 20-50 km away, in other localities and other bedrock, while a
-        single 20 km radius roughly doubles kalklindeskog's pool for no gain.
-        Research E60 measures both halves of that: the radius takes olivinskog
-        from 4.3 to 8.2 of its 12 field-degraded stands found and from 4.0 to
-        0.9 wrongly called good, while it costs kalklindeskog 1.2 -> 3.0
-        wrongly called good.
-
-        Naming the split makes each type's rule inspectable instead of an
-        emergent property of one radius, and it is why v2 ships
-        `{"olivinskog": (8, 20.0)}` with kalklindeskog left on the v1 count.
+        Olivinskog and kalklindeskog differ in donor density, so each type may
+        have its own rule (`pool_by_type`; METHODS.md, E60).
         """
         if forest_type in self.pool_by_type:
             return self.pool_by_type[forest_type]
@@ -394,11 +272,8 @@ class PoolBuilder:
     def excluded_for(self, poly_id: str) -> set:
         """Every stand that must not be a reference for `poly_id`.
 
-        Itself, anything overlapping or within the neighbour buffer of it, and
-        anything whose centroid is within `exclude_km` -- the same inner radius
-        the transformed pool's annulus uses. `exclude_block=True` swaps that
-        radius for the probe's whole spatial block, which is what this pipeline
-        shipped first and what research E20 measured against it.
+        Itself, overlapping or buffer-near stands, and any whose centroid is
+        within `exclude_km`; `exclude_block=True` adds the probe's whole block.
         """
         out = set(self._neighbours.get(poly_id, ())) | {poly_id}
         out |= self._within_km(poly_id)
@@ -417,18 +292,8 @@ class PoolBuilder:
     def nearest_donors(self, poly_id: str, forest_type: str) -> list[str]:
         """The eligible donors closest to this stand, within `max_km`.
 
-        With `donor_km = 0` this is the nearest `n_donors`, which is what the
-        pipeline shipped until research E44/E59. With `donor_km > 0` it is every
-        eligible donor inside that radius, and `n_donors` becomes a FLOOR: a
-        probe in a donor-rich locality gets more independent support, while one
-        in a sparse locality falls back to its nearest `n_donors` rather than
-        being handed references from the other end of the AOI.
-
-        The two rules are not a knob on the same quantity. A count reaches for
-        its Nth-nearest donor whatever the distance -- for olivinskog, whose
-        median stand has six eligible donors within 3-20 km, donors 9 to 32 of
-        the deployed n=32 pool sit 20-50 km away in other localities -- while a
-        radius matches each probe to its own locality's donor density.
+        With `donor_km = 0`: the nearest `n_donors`. With `donor_km > 0`: every
+        eligible donor inside that radius, with `n_donors` as a floor.
         """
         if poly_id in self._donor_order:
             return self._donor_order[poly_id]
@@ -443,7 +308,7 @@ class PoolBuilder:
         within = d <= self.max_km * 1000.0
         order = np.argsort(d[within], kind="stable")
         if donor_km > 0:
-            # radius first, count as the floor: whichever admits more donors
+            # radius first, count as the floor
             n_in = int((d[within][order] <= donor_km * 1000.0).sum())
             order = order[: max(n_in, n_donors)]
         else:
@@ -457,16 +322,10 @@ class PoolBuilder:
     ):
         """(pixels x 64, n_donor_stands) for scope in {"local", "global"}.
 
-        With `with_owners=True` the donor id of every row is returned as well,
-        as `(pixels, owners, n_donor_stands)`. The stand-level bootstrap needs
-        it: resampling the pool's *rows* treats sixty pixels of one donor as
-        sixty independent references and produces an interval about a third too
-        narrow, so the resampling unit has to be the donor stand.
-
-        Note there is no `year` argument. Donors are pinned to their own anchor
-        years, so a stand's good pool is the same cloud whichever probe year is
-        being scored -- which is the point: the yardstick must not move with the
-        thing being measured.
+        With `with_owners=True` returns `(pixels, owners, n_donor_stands)`, the
+        donor id of each row, which the donor-level bootstrap needs. There is no
+        `year` argument: donors are pinned to their anchor years, so the pool
+        does not move with the probe year.
         """
         if scope not in ("local", "global"):
             raise ValueError(f"scope must be 'local' or 'global', got {scope!r}")
@@ -499,26 +358,9 @@ class PoolBuilder:
     def type_bad_rows(self, forest_type: str, year: int) -> np.ndarray:
         """Every transformed pixel serving any stand of `forest_type`, that year.
 
-        The per-stand annulus asks each probe a slightly different question: its
-        transformed end-member is the cropland and built-up land that happens to
-        surround it, so two stands in different landscapes are scored against
-        different definitions of "transformed" and part of the ratio is
-        geography rather than condition. Pooling the annuli per forest type
-        makes it one definition per type.
-
-        Measured, at the deployed local scope with three seeds, against the
-        per-stand annulus (research E38): degraded recall 0.533 -> 0.581,
-        degraded stands wrongly called good 0.105 -> 0.038, decided 0.558 ->
-        0.616, stand AUC 0.789 -> 0.804, within-locality AUC 0.635 -> 0.689.
-        Corroborated on E26's independent Hansen-cleared labels. Note that the
-        stand-AUC half of that gain does not replicate on a redraw of the same
-        land cover (E24: +0.001 on the v3 draw against +0.023 on the shipped
-        one) while the within-locality half does, so it is the error-side
-        numbers above that justify this, not the AUC.
-
-        Drawn once per (type, year) and capped, seeded from the type and year
-        rather than a shared generator, so re-scoring a subset of stands sees
-        the same cloud -- the rule `bad_pool_rows` follows for the same reason.
+        Pooling the per-stand annuli per type gives one definition of
+        "transformed" per type (METHODS.md, E38). Drawn once per (type, year),
+        capped, and seeded from the type and year so subsets reproduce.
         """
         key = (str(forest_type), int(year))
         if key in self._type_bad_cache:
@@ -549,12 +391,8 @@ class PoolBuilder:
             return np.empty(0, dtype=np.int64)
         rows = _rows_for(self._bad_index, pid, year)
         if len(rows) > self.max_bad:
-            # Seeded from the stand and year rather than from a shared generator:
-            # a shared one would make each stand's pool depend on how many stands
-            # were drawn before it, so re-scoring a subset would not reproduce the
-            # scores of the full run. crc32, not hash(): Python randomises string
-            # hashing per process, so hash() would not reproduce across runs
-            # either -- which is the whole point of passing a seed.
+            # Seeded from stand and year (crc32, not hash(), which is randomised per
+            # process) so re-scoring a subset reproduces the full run.
             rng = np.random.default_rng((self.seed, zlib.crc32(poly_id.encode()), year))
             rows = rng.choice(rows, self.max_bad, replace=False)
         return rows
@@ -564,13 +402,9 @@ class PoolBuilder:
     ) -> np.ndarray:
         """The probe's transformed reference cloud, in the probe year.
 
-        Its own 3-8 km annulus, or -- when `pooled_bad` is set, which is the
-        deployed default -- every annulus of its forest type pooled together.
-
-        The bad pool IS taken contemporaneously, unlike the good pool. It can
-        be: cropland and built-up are what they are in every year of the record,
-        so there is no label to go stale, and a same-year reference absorbs the
-        year-to-year shift of the embedding space itself.
+        Its own annulus, or all annuli of its forest type when `pooled_bad` is
+        set (the deployed default). Taken in the probe year, unlike the good pool:
+        transformed land has no label to go stale.
         """
         return self.bad_mat[self.bad_pool_rows(poly_id, year, forest_type)]
 
@@ -602,7 +436,7 @@ class PoolBuilder:
 def _index_embeddings(
     px: pd.DataFrame,
 ) -> tuple[np.ndarray, dict[int, tuple[np.ndarray, np.ndarray]]]:
-    """(matrix, {year -> (sorted pixel_ids, their rows)}) -- the lookup every pool build uses."""
+    """(matrix, {year -> (sorted pixel_ids, their rows)}) for pool lookups."""
     mat = np.ascontiguousarray(px[list(BANDS)].to_numpy(dtype=np.float32))
     pid = px["pixel_id"].to_numpy().astype(np.int64)
     yr = px["year"].to_numpy().astype(np.int64)
@@ -617,10 +451,9 @@ def _index_embeddings(
 
 
 def _rows_for(index: dict, pixel_ids: np.ndarray, year: int) -> np.ndarray:
-    """Rows for these pixels in one year, silently skipping ones with no observation.
+    """Rows for these pixels in one year, skipping ones with no observation.
 
-    A duplicated (pixel_id, year) resolves to its LAST row, as the dict this
-    replaced did.
+    A duplicated (pixel_id, year) resolves to its LAST row.
     """
     ent = index.get(int(year))
     q = np.asarray(pixel_ids).astype(np.int64, copy=False)

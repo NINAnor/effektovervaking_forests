@@ -1,27 +1,10 @@
-"""Persistence for per-pixel S-CCD state.
+"""Persistence for per-pixel S-CCD state, which must survive between runs.
 
-This is what makes the pipeline near-real-time rather than a batch job wearing a
-cron hat. `sccd_detect` refits an entire history every time; `sccd_update` takes
-the model state from last run and advances it with only the new observations.
-That state — an `SccdOutput` namedtuple of numpy structured arrays per pixel —
-has to survive between runs, so it lives here.
-
-Stored as one pickle per AOI rather than a file per pixel: 38k tiny files would
-be slower to read and a nuisance to back up, and the whole state for
-kalklindeskog is comfortably in-memory.
-
-What is pickled is the FIELDS of each `SccdOutput`, not the object. pyxccd's
-namedtuple reports its `__module__` as `_frozen_importlib`, so pickling the
-object itself raises `Can't pickle <class '_frozen_importlib.SccdOutput'>`. Its
-fields are plain numpy (structured) arrays and pickle without complaint, so we
-store `{pix_id: {field: array}}` and rebuild the namedtuple on load. Writes are
-atomic (temp file + rename) because a run interrupted mid-write must not leave
-truncated state — the model cannot be reconstructed from a partial
-file, only refitted from scratch.
-
-The sidecar metadata records the grid fingerprint and recipe version the state
-was fitted under. Pairing state with a changed grid or a changed masking recipe
-is silently wrong rather than loudly broken, so it is checked on load.
+One pickle per AOI, plus a JSON sidecar recording the grid fingerprint and
+recipe version the state was fitted under (checked on load, since a mismatch
+would be silently wrong). The pickle holds the FIELDS of each `SccdOutput`
+(`{pix_id: {field: array}}`), because pyxccd's namedtuple cannot be pickled
+directly. Writes are atomic (temp file + rename).
 """
 
 from __future__ import annotations
@@ -89,21 +72,11 @@ def load_meta(aoi_name: str) -> dict:
 
 
 def save_meta(aoi_name: str, meta: dict) -> None:
-    """Update the sidecar without rewriting the (much larger) state pickle.
+    """Update the sidecar without rewriting the state pickle.
 
-    Used to clear the `alerts_dirty` flag once alerts have been written: the
-    model has already consumed the observations at that point, so re-pickling
-    500 MB of unchanged state to record one boolean would be all risk and no
-    benefit.
-
-    THIS MERGES; it must never replace. `save()` stamps the provenance fields
-    (`recipe_version`, `sccd_params`, `n_pixels`, `saved_at`) onto a *copy* of
-    the caller's dict, so the caller's own dict never gains them. A blind
-    overwrite here therefore silently deleted `recipe_version` from disk on the
-    first `alerts_dirty` clear after a bootstrap -- and `load()` refuses to run
-    without it. The result was an operational loop that bootstrapped fine and
-    then failed on every subsequent cycle with "fitted under recipe None",
-    pointing at a re-bootstrap that was not actually needed.
+    This MERGES, never replaces: `save()` stamps provenance fields (e.g.
+    `recipe_version`) onto a copy of the caller's dict, and `load()` refuses
+    state without them.
     """
     mp = meta_path(aoi_name)
     merged = load_meta(aoi_name)

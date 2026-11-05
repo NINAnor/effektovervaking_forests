@@ -1,37 +1,12 @@
-"""Spatial blocks and edge distance: the two things that made the numbers honest.
+"""Spatial blocks and edge distance (METHODS.md sections 2-3).
 
-**Blocks.** The six mapped layers cover the same localities repeatedly and `god`
-stands cluster, so a probe's nearest eligible donor is routinely a few hundred
-metres away -- same hillside, same orbit, same acquisition date. Excluding only
-the probe and the stands that overlap it leaves that in, and it is worth about a
-third of the reported stand-grain separation: measured on this AOI, pooled
-stand AUC falls 0.761 -> 0.695 and Youden J 0.411 -> 0.331 once a probe cannot
-see its own 5 km locality (`condition/research/`, experiment E01).
+Blocks: single-linkage clusters of stand centroids (default 5 km). Single
+linkage because the *chain* of near-duplicate stands must be broken, not cut
+into pieces. Intersecting stands are then merged, so one piece of ground always
+has one set of exclusions.
 
-Clustering is **single linkage**, not k-means, and the reason matters: what has
-to be broken is the *chain* of near-duplicate stands. A line of stands each 1 km
-from the next is one locality; k-means would cut it into several and let the
-probe's own neighbourhood back into its reference pool. The result is stable
-between 3 and 10 km (experiment E08), and 5 km is the default.
-
-The clustering runs on centroids, which on its own is not quite enough: a 211 ha
-olivinskog stand and a 0.3 ha stand drawn on top of it can have centroids more
-than 5 km apart and land in different blocks, and then the same piece of ground
-is scored against two different reference pools. So intersecting stands are
-merged into one block afterwards. That can only make blocks larger, i.e. the
-exclusion stricter, and it guarantees the invariant the pixel model rests on:
-one piece of ground, one set of exclusions.
-
-**Edge distance.** The bad-labelled stands are systematically smaller than the
-good ones (median 0.28 ha against 0.53 ha), and stand area alone separates the
-field labels at AUC 0.652 -- 0.736 on kalklindeskog. A small stand is mostly
-edge and an edge pixel is a mixture of the stand and whatever is next to it, so
-"degraded" and "small" are confounded through the sensor as well as through the
-surveyor. On pixels at least 20 m inside their own stand the baseline score
-loses 0.04 AUC (0.645 -> 0.604) while the whitened one does not, so part of what
-the shipped per-pixel map reported as degradation was edge mixture (experiment
-E10). Every pixel therefore carries its distance to its stand's boundary, and
-anything published per pixel should say which side of that line it is on.
+Edge distance: every pixel carries its distance to its stand boundary, because
+edge pixels mix stand and surroundings and small stands are mostly edge.
 """
 
 from __future__ import annotations

@@ -1,23 +1,10 @@
 """CDSE STAC scene index, and the acquisition schedule derived from it.
 
-Two jobs.
-
-**Index.** `sync` pulls every S2 L2A item intersecting an AOI into a parquet
-table, upserting by item id so re-running is cheap and safe. This table is the
-only thing that decides what work exists: `update` processes scenes that are in
-the index and not yet in the run ledger.
-
-**Schedule.** Sentinel-2 is not a stream that has to be polled blindly. Each
-satellite repeats a given relative orbit every 10 days to the second, and each
-STAC item carries `published` — the moment the product actually became
-downloadable. So from the index alone we can say, per AOI, when the next
-acquisition happens and when it is likely to be readable. `schedule` reports
-that, and the CLI uses it so a scheduled run that fires early can exit quietly
-instead of hammering the catalogue.
-
-Note `published` is genuinely observed, not assumed: L2A latency varies with
-reprocessing campaigns and ESA's own queue, so the lag is reported as a measured
-distribution rather than the nominal PT24H timeliness in the item properties.
+`sync` upserts every S2 L2A item intersecting an AOI into a parquet table keyed
+by item id. This index alone decides what work exists: `update` processes
+scenes that are indexed and not yet in the run ledger. `schedule` predicts the
+next acquisitions (10-day orbit repeat) and when they should be readable, using
+the observed `published` lag.
 """
 
 from __future__ import annotations
@@ -34,17 +21,11 @@ from shapely.geometry import shape
 from . import aoi as aoi_mod
 from . import config, store
 
-# Sentinel-2 orbital repeat: one satellite revisits the same relative orbit
-# every 10 days exactly. With two operating satellites on the same orbit the
-# effective revisit at the AOI is 5 days.
+# One satellite revisits a relative orbit every 10 days exactly.
 REPEAT_DAYS = 10
 
-# How far back an incremental sync re-queries. A one-day overlap assumes every
-# product is published within a day of acquisition; the measured lag
-# distribution has a tail well past that, and reprocessed products appear
-# arbitrarily late. Anything published outside this window is invisible to a
-# sync-by-acquisition-date forever, so the window is a week and `reconcile()`
-# exists for the rest.
+# Incremental sync re-queries this far back; products published later than
+# that are caught by `reconcile()`.
 SYNC_OVERLAP_DAYS = 7
 
 _FIELDS = [
@@ -74,8 +55,7 @@ _TRANSIENT = (
     "504 Gateway",
     "Gateway Time-out",
     "timed out",
-    # CDSE STAC is Postgres on a hot standby; a long read can be
-    # cancelled by replication ("conflict with recovery").
+    # Postgres hot standby: long reads can be cancelled by replication.
     "SerializationError",
     "conflict with recovery",
     "ConnectionDoesNotExistError",
@@ -83,22 +63,16 @@ _TRANSIENT = (
 
 
 def _retry(fn, tries: int = 6, base: float = 5.0):
-    """CDSE fronts its STAC with a WAF that returns 429 under modest load.
+    """Call `fn`, retrying transient errors (429, 5xx) with exponential backoff.
 
-    That is a throttle, not a failure, so back off exponentially rather than
-    letting an unattended run die on it. Gateway errors (502/503/504) are the
-    same kind of thing — a full-history search of one tile is ~25 pages, and
-    olivinskog's first sync died on a 504 mid-pagination. Anything else is
-    re-raised immediately — a 404 or a schema error should be loud.
+    Anything else is re-raised immediately.
     """
     for i in range(tries):
         try:
             return fn()
         except Exception as e:  # noqa: BLE001 - re-raised below
             msg = str(e)
-            # pystac-client's APIError carries the HTTP status; any 5xx is the
-            # server's problem (CDSE has produced 504s, Postgres replication
-            # cancels and dropped DB connections), not a reason to die.
+            # pystac-client's APIError carries the HTTP status; any 5xx retries.
             status = getattr(e, "status_code", None) or 0
             if status < 500 and not any(t in msg for t in _TRANSIENT):
                 raise
@@ -112,12 +86,9 @@ def tiles_path(aoi_name: str):
 
 
 def resolve_tiles(aoi_name: str, refresh: bool = False) -> list[str]:
-    """The MGRS tiles that actually overlap the AOI polygons.
+    """The MGRS tiles that overlap the AOI polygons (not just its bbox), cached.
 
-    Worth doing precisely: kalklindeskog's bounding box spans 12 tiles but its
-    polygons touch only 4, so searching by bbox would triple the catalogue and
-    the download volume for nothing. One 10-day window is enough to enumerate
-    every tile/orbit combination, since that is a full orbital repeat.
+    One 10-day window covers every tile/orbit combination (a full repeat).
     """
     p = tiles_path(aoi_name)
     if p.exists() and not refresh:
@@ -211,14 +182,10 @@ def _item_row(item) -> dict:
         "cloud_cover": p.get("eo:cloud_cover"),
         "snow_cover": p.get("eo:snow_cover"),
         "baseline": p.get("processing:version"),
-        # Granule footprint bbox: lets the reader skip a tile that holds none of
-        # our pixels without opening anything over the network.
+        # Granule footprint: lets the reader skip tiles without any network I/O.
         "bbox": list(item.bbox) if item.bbox else None,
-        # Keep the per-band hrefs: they encode the granule path, which is not
-        # otherwise derivable from the item id, and saves a STAC round trip at
-        # read time.
-        # Keep product_metadata too: BOA_ADD_OFFSET lives there, and it is what
-        # reproduces Earth Engine's *_HARMONIZED scaling (see reader.boa_offsets).
+        # Band hrefs (granule path is not derivable from the id) and
+        # product_metadata, which holds BOA_ADD_OFFSET (see reader.boa_offsets).
         "assets": {
             k: item.assets[k].href
             for k in (
@@ -242,9 +209,8 @@ def sync(
     if end is None:
         end = (dt.datetime.now(dt.UTC) + dt.timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Resume point PER TILE. With one AOI-wide watermark, an interrupted first
-    # sync (some tiles done, some not) would restart from the newest scene of the
-    # finished tiles and never fetch the others' history.
+    # Resume point per tile: an AOI-wide watermark would skip the history of
+    # tiles left unfinished by an interrupted first sync.
     newest = {}
     if len(existing):
         newest = (
@@ -266,8 +232,7 @@ def sync(
         else:
             t0 = config.HISTORY_START
         rows = []
-        # Yearly windows: a short request is cheap to retry, a nine-year
-        # paginated one is not.
+        # Yearly windows keep each retryable request short.
         for w0, w1 in _windows(t0, end):
             page = _retry(
                 lambda t=tile, a=w0, b=w1: list(
@@ -314,17 +279,10 @@ def _windows(start: str, end: str) -> list[tuple[str, str]]:
 
 
 def reconcile(aoi_name: str, days: int = 30, progress=None) -> dict:
-    """Re-query by PUBLICATION time, not acquisition time.
+    """Re-query by publication time to catch late-published or reprocessed scenes.
 
-    `sync` walks forward from the newest acquisition it already holds, so it can
-    only ever find products whose sensing date is recent. Two real cases escape
-    it: a scene published very late, and a granule REPROCESSED under a new
-    baseline — the latter has an old sensing date by definition and would never
-    be looked for again.
-
-    This is the periodic sweep that catches both. Run it weekly; it is one
-    filtered STAC query per tile, and anything it finds is a scene the ingest
-    path then picks up as pending in the normal way.
+    `sync` only looks forward from the newest acquisition, so it misses both;
+    run this periodically. Found scenes are then picked up as pending.
     """
     since = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
     client = _client()
@@ -383,20 +341,15 @@ def reconcile(aoi_name: str, days: int = 30, progress=None) -> dict:
 def publication_lag(df: pd.DataFrame, recent_days: int = 90) -> pd.Series:
     """Observed acquisition -> availability lag, in hours, over recent scenes.
 
-    Restricted to recent acquisitions on purpose. `published` is when the
-    product entered the CDSE archive, and ESA reprocesses the back catalogue in
-    campaigns — so a 2017 scene reprocessed under a new baseline in 2024 carries
-    a "lag" of seven years. Including those puts the median around 19,000 hours
-    and makes the number worse than useless for scheduling. Over the last
-    quarter, no reprocessing has had time to happen, so `published` means what
-    we want it to mean: when the scene actually became readable.
+    Restricted to recent acquisitions because reprocessed back-catalogue scenes
+    carry a `published` date years after acquisition.
     """
     d = df.dropna(subset=["published"]).copy()
     acq = pd.to_datetime(d["datetime"], utc=True)
     if recent_days:
         cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=recent_days)
         keep = acq >= cutoff
-        if keep.sum() >= 20:  # enough to be a real estimate
+        if keep.sum() >= 20:  # enough for a real estimate
             d, acq = d[keep], acq[keep]
     lag = (pd.to_datetime(d["published"], utc=True) - acq).dt.total_seconds() / 3600.0
     # A negative lag is a metadata artefact, not a time machine.
@@ -406,9 +359,8 @@ def publication_lag(df: pd.DataFrame, recent_days: int = 90) -> pd.Series:
 def schedule(aoi_name: str, horizon_days: int = 14) -> pd.DataFrame:
     """Predict upcoming acquisitions per (tile, relative orbit, platform).
 
-    Each such track repeats every 10 days, so the next acquisitions follow from
-    the most recent one by simple arithmetic. `expected_available` adds the
-    median observed publication lag for that AOI.
+    Each track repeats every 10 days; `expected_available` adds the median
+    observed publication lag.
     """
     df = load(aoi_name)
     if df.empty:
@@ -422,8 +374,7 @@ def schedule(aoi_name: str, horizon_days: int = 14) -> pd.DataFrame:
     out = []
     for (tile, orbit, plat), g in df.groupby(["tile", "rel_orbit", "platform"]):
         last = g["datetime"].max()
-        # Has this track gone quiet? A satellite retired or an orbit changed
-        # shows up as a track whose last acquisition is many repeats old.
+        # Skip tracks gone quiet (retired satellite, changed orbit).
         if (now - last) > pd.Timedelta(days=3 * REPEAT_DAYS):
             continue
         nxt = last
@@ -459,21 +410,12 @@ def next_availability(aoi_name: str) -> pd.Timestamp | None:
 
 
 def dedupe_versions(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep one product per (sensing time, tile) — the most recently processed.
+    """Keep one product per (sensing time, tile): the most recently processed.
 
-    ESA reprocesses granules, and CDSE serves every version: the same
-    acquisition over the same tile appears as several products differing only in
-    baseline and processing timestamp (e.g. ..._20260809T190509 and
-    ..._20260809T170612). Ingesting both would enter one acquisition into the
-    observation store twice under different scene_ids, which the (pix_id,
-    scene_id) key cannot deduplicate. S-CCD would then see a doubled
-    observation density and, where the two versions differ, contradictory
-    values on the same day.
-
-    The last field of a CDSE product id is its processing datetime, so sorting
-    on (baseline, processing time) and keeping the last gives the newest
-    version. Found when both versions matched a single Earth Engine
-    observation.
+    CDSE serves every reprocessed version of a granule under a different
+    scene_id, which the (pix_id, scene_id) key cannot deduplicate. The last
+    field of a product id is its processing datetime, so sort on (baseline,
+    processing time) and keep the last.
     """
     if df.empty:
         return df
@@ -493,10 +435,8 @@ def pending(
 ) -> pd.DataFrame:
     """Indexed scenes not yet processed, oldest first.
 
-    `max_cloud` filters on the scene-level cloud percentage. That is a coarse
-    screen over a whole 110 km tile and says little about our few hundred
-    hectares, so it defaults to off: the per-pixel SCL mask is the real filter,
-    and a 97%-cloudy tile can still be clear over Vestfold.
+    `max_cloud` (scene-level %) defaults to off: the per-pixel SCL mask is the
+    real filter.
     """
     df = dedupe_versions(load(aoi_name))
     if df.empty:
