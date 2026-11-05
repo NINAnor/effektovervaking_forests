@@ -5,18 +5,17 @@ Three supported ways to run an AOI unattended. All end in the same command,
 nothing new. Configuration is described in the README ("Configure") and
 `.env.example`.
 
-Nothing here has been run end to end on a machine other than the NINA one; the
+Nothing here has been run end to end on a machine other than the development one; the
 Dockerfile and unit files are untested examples (see "Not verified" at the end).
 
 ## Credentials
 
 CDSE S3 keys are read from the environment first, then `~/.config/cdse/credentials`
-(`cdse_auth.py`). Never put them in an image, a unit file in git, or the project
-drive.
+(`cdse_auth.py`). Never put them in an image, a unit file in git, or on a network share.
 
 | Method | Injection |
 |---|---|
-| cron | `~/.config/cdse/credentials`, mode 600 on a local disk |
+| cron | `~/.config/cdse/credentials`, mode 600 on a local disk (network mounts often ignore chmod) |
 | docker | `--env-file` / `-e CDSE_S3_ACCESS_KEY -e CDSE_S3_SECRET_KEY`, or compose `env_file` |
 | systemd | `EnvironmentFile=/etc/forestmon/cdse.env`, mode 600, root-owned |
 
@@ -100,8 +99,8 @@ WantedBy=timers.target
 sudo systemctl enable --now forestmon@kalklindeskog.timer
 ```
 
-Unlike the NINA account's `systemd --user` (no lingering, see the cycle script),
-system units run regardless of login.
+Unlike `systemd --user` units (which need lingering enabled), system units run
+regardless of login.
 
 ## Onboarding a new AOI
 
@@ -113,17 +112,13 @@ forestmon grid build <aoi>
 forestmon catalog sync <aoi>
 forestmon grid build <aoi>             # multi-zone AOIs only: re-run after sync, BEFORE assign-tiles
 forestmon grid assign-tiles <aoi>      # after sync
-forestmon parity check <aoi>           # needs the gee extra and Earth Engine auth
 forestmon obs backfill <aoi>           # long; batched, safe to re-run after an interruption
 forestmon obs compact <aoi>
-forestmon sccd bootstrap <aoi>         # refuses until parity has passed
+forestmon sccd bootstrap <aoi>
 forestmon run <aoi>                    # now schedule this
 ```
 
-`parity check` needs `uv sync --extra gee`, which the stock image does not
-include. Run the onboarding steps on a machine with it (or a derived image)
-and copy the data volume over, or set `FORESTMON_EE_PROJECT` and authenticate
-there. With docker, prefix each line with
+With docker, prefix each line with
 `docker run --rm --env-file .env -v "$PWD/data:/data" forestmon`.
 
 ## Monitoring
@@ -181,7 +176,7 @@ A holder on another host is assumed alive, and inside containers the hostname is
 the container id, so after a hard-killed container the lease can persist up to
 24 h; clear it with `--force-lock` once you are sure nothing is running. Never
 run two containers/hosts on the same data volume for one AOI, and keep the
-volume on a local (non-CIFS) filesystem.
+volume on a local (non-network) filesystem.
 
 ## Not verified
 

@@ -80,8 +80,7 @@ A scene stuck at `observations_committed` is replayed from disk on the next run,
 not re-read from CDSE. An observation is never applied to the recursive model
 twice.
 
-## One-off gates before the cycle runs
+## Before the cycle runs
 
-`parity check` (CDSE equals Earth Engine on raw DN) must pass before
-`sccd bootstrap` fits the initial per-pixel state. After that, `forestmon run
-<aoi>` is the only command a timer needs.
+`sccd bootstrap` fits the initial per-pixel state from the observation store.
+After that, `forestmon run <aoi>` is the only command a timer needs.
