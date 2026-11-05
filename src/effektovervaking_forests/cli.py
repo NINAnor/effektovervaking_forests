@@ -701,12 +701,14 @@ def doctor():
 
     ok = True
     with rasterio.Env() as e:
-        jp2 = "JP2OpenJPEG" in e.drivers()
-    _echo(
-        f"  {'OK ' if jp2 else 'MISSING'}  GDAL JP2OpenJPEG driver "
-        f"{'' if jp2 else '(the PyPI rasterio wheel bundles it)'}"
-    )
-    ok &= jp2
+        drivers = e.drivers()
+    for drv, use in [("JP2OpenJPEG", "CDSE scenes"), ("Zarr", "EOPF scenes")]:
+        have = drv in drivers
+        _echo(
+            f"  {'OK ' if have else 'MISSING'}  GDAL {drv} driver ({use}"
+            f"{'' if have else '; the PyPI rasterio wheel bundles it'})"
+        )
+        ok &= have
     _echo(f"  {'OK ' if sccd_mod.HAVE_PYXCCD else 'MISSING'}  pyxccd")
     ok &= sccd_mod.HAVE_PYXCCD
     creds = cdse_auth.have_credentials()
