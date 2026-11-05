@@ -48,8 +48,6 @@ def lonlat(sites: pd.DataFrame) -> pd.DataFrame:
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
-    import ee
-
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--project",
@@ -60,6 +58,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--asset", default=ASSET)
     args = ap.parse_args(argv)
+    import ee  # after parsing, so --help works without the gee extra
+
     ee.Initialize(project=args.project)
 
     sites = pd.read_parquet(OUT_DATA / "pixel_sites.parquet").reset_index(drop=True)
