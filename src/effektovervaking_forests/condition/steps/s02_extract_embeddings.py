@@ -1,6 +1,6 @@
 """Step 2 -- download the AlphaEarth embeddings for every polygon pixel, 2017-2025.
 
-Reads from the Source Cooperative mirror (no Earth Engine account needed); see
+Reads from the Source Cooperative mirror, with Earth Engine as backup; see
 `condition.aef`. The unit of work and of resume is one (tile, year): each writes a
 parquet shard under `data/cache/pixels/`, and a re-run skips existing shards.
 Tiles run concurrently in threads (network-bound).

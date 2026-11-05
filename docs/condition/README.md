@@ -18,12 +18,15 @@ AlphaEarth annual embeddings (2017-2025). The library is the subpackage
 
 Embeddings are downloaded from the Source Cooperative mirror with
 [`aef_loader_plus`](https://github.com/Geethen/aef_loader_plus) (no account
-needed).
+needed). Earth Engine's `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` is the backup:
+when `FORESTMON_EE_PROJECT` is set, a block that cannot be read from Source
+Cooperative is read from Earth Engine instead, and `AEF_SOURCE=ee` reads every
+block there. The two agree to float32 rounding (checked 2026-09).
 
 ## Setup
 
 Python >= 3.12 and the repo's uv environment (numba is a regular dependency).
-The Earth Engine client is an extra, needed only for step 02e:
+The Earth Engine client is an extra, needed for step 02e and the download backup:
 
 ```bash
 uv sync                 # base install
@@ -52,7 +55,8 @@ win; see `.env.example`).
 |---|---|---|
 | `CONDITION_ROOT` | `<FORESTMON_DATA_DIR>/condition` | data root: `data/cache/` and `outputs/` |
 | `FORESTS_KARTLEGGING_GPKG` | `<CONDITION_ROOT>/data/skog_kartlegginger.gpkg` | stand polygons |
-| `FORESTMON_EE_PROJECT` | none | Earth Engine project; default for `condition run --ee-project` |
+| `FORESTMON_EE_PROJECT` | none | Earth Engine project: step 02e, `condition run --ee-project`, and the embedding download backup |
+| `AEF_SOURCE` | `source_coop` | `ee` reads all embeddings from Earth Engine |
 | `FORESTMON_LOG_DIR` | `<FORESTMON_DATA_DIR>/logs` | `condition run` logs to `<FORESTMON_LOG_DIR>/condition/` |
 
 Directories are created when a step starts, never at import. Allow about 50 GB
