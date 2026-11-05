@@ -149,3 +149,26 @@ def test_without_an_ee_project_the_read_error_propagates(monkeypatch):
     monkeypatch.setattr(config, "EE_PROJECT", None)
     with open_tile(TILE) as src, pytest.raises(OSError):
         src.read_block(Block(0, 0))
+
+
+def test_a_failing_neighbour_does_not_fail_the_requested_block(monkeypatch):
+    """A batch error is retried for the requested block alone."""
+    import dask
+
+    calls = []
+
+    def compute(*wins, **_):
+        calls.append(len(wins))
+        if len(wins) > 1:
+            raise OSError("520 on a neighbour")
+        return (np.zeros((len(BANDS), BLOCK, BLOCK), dtype=np.int8),)
+
+    monkeypatch.setattr(dask, "compute", compute)
+    src = open_tile(TILE)
+    src._da = types.SimpleNamespace(
+        data=np.zeros((1, len(BANDS), 8 * BLOCK, 8 * BLOCK))
+    )
+    src.prefetch([Block(0, 0), Block(0, 1), Block(0, 2)])
+    arr, _ = src.read_block(Block(0, 0))
+    assert calls == [3, 1] and arr.shape == (len(BANDS), BLOCK, BLOCK)
+    assert src._plan == [Block(0, 1), Block(0, 2)], "neighbours stay planned"

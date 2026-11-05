@@ -61,7 +61,9 @@ PIXEL_M = 10.0
 BATCH_BLOCKS = 8  # blocks fetched concurrently; 8 x 67 MB of int8
 MANIFEST_CACHE = CACHE / "aef_manifests"  # parsed COG headers, reused across runs
 # "source_coop" (default; Earth Engine backs up failed blocks) or "ee".
-AEF_SOURCE = os.environ.get("AEF_SOURCE", "source_coop")
+AEF_SOURCE = os.environ.get("AEF_SOURCE") or "source_coop"
+if AEF_SOURCE not in ("source_coop", "ee"):
+    raise ValueError(f"AEF_SOURCE must be source_coop or ee, not {AEF_SOURCE!r}")
 EE_COLLECTION = "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL"
 EE_HIGHVOLUME_URL = "https://earthengine-highvolume.googleapis.com"
 EE_CHUNK = 256  # 256 x 256 x 64 float32 = 16.8 MB per request (limit 48 MB)
@@ -256,21 +258,34 @@ class _Tile:
         return asyncio.run(_go())[t["utm_zone"]].ds["embeddings"]
 
     def _fetch(self, blk: Block) -> None:
+        """Fetch `blk` with up to BATCH_BLOCKS - 1 planned blocks alongside it.
+
+        If the batch fails, `blk` is retried alone, so a failing neighbour
+        cannot send a readable block to the backup.
+        """
         import dask
 
         if self._da is None:
             self._da = self._open()
-        todo = [blk] + [b for b in self._plan if b != blk and b not in self._cache]
-        batch = todo[:BATCH_BLOCKS]
-        self._plan = [b for b in self._plan if b not in batch]
-        half = PIXEL_M / 2
-        wins = []
-        for b in batch:
-            w, s, e, n = b.bounds(self.tile)
-            sel = self._da.sel(x=slice(w + half, e - half), y=slice(s + half, n - half))
-            wins.append(sel.data)
-        for b, arr in zip(batch, dask.compute(*wins, scheduler="threads")):
-            self._cache[b] = np.asarray(arr).squeeze(axis=0)
+        others = [b for b in self._plan if b != blk and b not in self._cache]
+        batch = [blk, *others[: BATCH_BLOCKS - 1]]
+
+        def window(b: Block):
+            # (time, band, y, x) with y ascending: row 0 is the SOUTH edge.
+            r, c = b.brow * BLOCK, b.bcol * BLOCK
+            return self._da.data[0, :, r : r + BLOCK, c : c + BLOCK]
+
+        try:
+            got = dask.compute(*map(window, batch), scheduler="threads")
+        except Exception:
+            if len(batch) == 1:
+                raise
+            batch, got = [blk], dask.compute(window(blk), scheduler="threads")
+        for b, arr in zip(batch, got):
+            if arr.shape != (len(BANDS), BLOCK, BLOCK):
+                raise ValueError(f"block {b} read as {arr.shape}")
+            self._cache[b] = np.asarray(arr)
+        self._plan = [b for b in self._plan if b not in self._cache]
 
 
 def _wgs84_bounds(crs, w, s, e, n) -> tuple[float, float, float, float]:
