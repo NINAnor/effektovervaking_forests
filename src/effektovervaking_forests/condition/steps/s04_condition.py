@@ -185,7 +185,6 @@ def main(argv: list[str] | None = None) -> None:
         "not outvote thirty small ones",
     )
     ap.add_argument("--max-global", type=int, default=2000)
-    ap.add_argument("--max-bad", type=int, default=300)
     ap.add_argument(
         "--n-boot",
         type=int,
@@ -290,7 +289,6 @@ def main(argv: list[str] | None = None) -> None:
         max_km=args.max_km,
         max_per_donor=args.max_per_donor,
         max_global=args.max_global,
-        max_bad=args.max_bad,
         seed=args.seed,
         pooled_bad=True,
         max_type_bad=args.max_type_bad,
