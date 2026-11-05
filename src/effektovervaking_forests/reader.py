@@ -223,8 +223,7 @@ def read_scene(
     case cheap in the operational path, where one scene is the whole run.
 
     Turn it off for anything that needs the full pixel set regardless of
-    quality: `parity.check` compares raw reflectance on cloudy pixels too, and
-    would otherwise silently compare a truncated sample.
+    quality (e.g. comparing raw reflectance on cloudy pixels).
     """
     crss = pixels["utm_crs"].unique()
     if len(crss) != 1:

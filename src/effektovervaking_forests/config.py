@@ -76,7 +76,6 @@ CATALOG_DIR = OPS / "catalog"  # per-AOI STAC scene indexes
 STATE_DIR = OPS / "state"  # per-AOI S-CCD state
 OBS_DIR = OPS / "obs"  # per-AOI observation store
 ALERTS_DIR = OPS / "alerts"  # per-AOI break/alert tables
-PARITY_DIR = OPS / "parity"  # CDSE-vs-GEE reports
 RUNS_DIR = OPS / "runs"  # run ledger
 
 
@@ -90,7 +89,6 @@ def ensure_dirs() -> None:
         STATE_DIR,
         OBS_DIR,
         ALERTS_DIR,
-        PARITY_DIR,
         RUNS_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
@@ -108,7 +106,7 @@ def aoi_path(aoi_name: str) -> Path:
         ) from None
 
 
-# Earth Engine is used only by `parity check`. The Cloud project is per user;
+# Earth Engine is used only by condition step 02e. The Cloud project is per user;
 # unset, Earth Engine falls back to the one in the user's credentials.
 EE_PROJECT = os.environ.get("FORESTMON_EE_PROJECT") or None
 
@@ -188,9 +186,8 @@ SCL_REJECT = (3, 8, 9, 10, 11)
 # hosted by Google; it is not in the CDSE SAFE archive, so the operational mask
 # is SCL-only and is therefore LOOSER than the inspector's. Consequence: the
 # operational series may retain some cloud-edge observations the inspector
-# drops. Parity is therefore checked on RAW REFLECTANCE per (pixel, scene) —
-# a comparison masking policy cannot bias — and the mask difference is reported
-# separately by `parity check` rather than being silently averaged in.
+# drops. CDSE-vs-Earth-Engine agreement was verified once (2026-08) on raw
+# reflectance per (pixel, scene), which masking policy cannot bias.
 S2CLOUDLESS_MAX_PROB = 40  # GEE-side threshold, for reference
 
 # Reflectance handling. Baseline 04.00 (2022-01-25 onward) shifted L2A DNs by
