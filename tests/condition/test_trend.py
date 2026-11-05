@@ -1,10 +1,12 @@
 """The trajectory step must give the right answer on series whose answer is known."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from effektovervaking_forests.condition.trend import (
     MIN_VALID_YEARS,
+    annual_matrix,
     classify_trend,
     theil_sen_mann_kendall,
     zscore_by_group,
@@ -77,3 +79,18 @@ def test_zscore_is_per_group():
     z = zscore_by_group(vals, np.array(["a", "a", "b", "b"]))
     # each group is centred on its own mean, so the two groups' z-scores match
     assert np.allclose(z[:2], z[2:], atol=1e-5)
+
+
+def test_annual_matrix_leaves_missing_years_as_nan():
+    df = pd.DataFrame(
+        {
+            "poly_id": ["A", "A", "B"],
+            "forest_type": ["o"] * 3,
+            "year": [2017, 2019, 2017],
+            "c": [0.1, 0.3, 0.2],
+        }
+    )
+    keys, mat = annual_matrix(df, "c", [2017, 2018, 2019], ["poly_id", "forest_type"])
+    assert list(keys.poly_id) == ["A", "B"]
+    assert np.isnan(mat[0, 1]) and np.isnan(mat[1, 1]) and np.isnan(mat[1, 2])
+    assert mat[0, 0] == 0.1 and mat[0, 2] == 0.3

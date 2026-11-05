@@ -32,10 +32,7 @@ measured, not assumed; `scripts/09_bench_reads.py` reproduces the numbers.
    against the `.vrt` pixel for pixel.
 
 3. **Values are int8, nodata -128,** the unit-normalised float embedding
-   quantised by one global scale factor. `AEF_INT8_SCALE` (1/127) is applied on
-   read for interpretability, but nothing downstream depends on its exact value:
-   the trajectory axis and the DoR score are both cosine-based, and cosine
-   distance is invariant to a global scale.
+   quantised with a signed square root; `dequantise` inverts it.
 
 Anonymous access needs `AWS_NO_SIGN_REQUEST=YES` for `/vsis3`; the default here
 is `/vsicurl` against `data.source.coop`, which needs no credentials at all and
@@ -56,10 +53,8 @@ from rasterio.features import rasterize
 from rasterio.transform import Affine, xy
 
 from effektovervaking_forests.condition.paths import (
-    AEF_DEQUANT,
     AEF_INDEX,
     AEF_INDEX_URL,
-    AEF_INT8_SCALE,
     AEF_NODATA,
     BANDS,
 )
@@ -229,48 +224,14 @@ def blocks_for_geometries(gdf_utm, tile: dict) -> list[Block]:
 
 
 def dequantise(raw: np.ndarray) -> np.ndarray:
-    """Stored int8 (nodata -128) -> float32 embedding, by `paths.AEF_DEQUANT`.
+    """Stored int8 (nodata -128) -> float32 embedding: v = (raw / 127.5)^2 * sign(raw).
 
-    The two rules are NOT a scale apart, which is the whole point of having this
-    in one place:
-
-        linear         v = raw / 127
-        signed_square  v = (raw / 127.5)^2 * sign(raw)
-
-    `scripts/09_check_gee_parity.py` compares both against
-    `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` at the same coordinates. Over 400
-    pixels of this AOI in 2024, `signed_square` reproduces Earth Engine exactly
-    -- cosine 1.000000, implied scale 1.0000, max |difference| 0.011, which is
-    the int8 granularity -- while `linear` gives cosine 0.9617 and an implied
-    scale of 0.380. AlphaEarth embeddings are unit-norm; `signed_square` returns
-    ||v|| = 1.000 and `linear` returns 2.531.
-
-    So the mirror is quantised with a signed square root and the linear read is
-    wrong. It is wrong in *direction*, not in scale, and the argument in
-    `docs/METHODS.md` and `condition/axis.py` that "nothing downstream depends on
-    AEF_INT8_SCALE because cosine distance is invariant to a global factor" is
-    sound reasoning from a false premise: the map is not a global factor. Two
-    pixels that Earth Engine puts at cosine distance d are put at a different
-    distance by the linear read.
-
-    `linear` remains the default so that the shipped outputs and the report stay
-    reproducible from the shipped code. Setting `AEF_DEQUANT=signed_square` and
-    re-running from step 2 moves everything onto the Earth Engine embedding.
+    The mirror is quantised with a signed square root. Checked against
+    `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` over 400 pixels (2024): cosine 1.000000
+    and unit norm, where a linear raw / 127 read is off in direction (cosine
+    0.96), not just in scale. A 256-entry lookup table, with nodata -> NaN.
     """
-    raw = np.asarray(raw)
-    if AEF_DEQUANT == "linear":
-        arr = raw.astype(np.float32)
-        arr[arr == AEF_NODATA] = np.nan
-        arr *= AEF_INT8_SCALE
-        return arr
-    if AEF_DEQUANT == "signed_square":
-        # A 256-entry lookup: every int8 maps to
-        # one of 256 outcomes, so the table is built once and gathered, and the
-        # nodata step folds into the same gather instead of a separate mask.
-        return _DEQUANT_LUT[raw.astype(np.int16) + 128]
-    raise ValueError(
-        f"AEF_DEQUANT must be 'linear' or 'signed_square', got {AEF_DEQUANT!r}"
-    )
+    return _DEQUANT_LUT[np.asarray(raw).astype(np.int16) + 128]
 
 
 def _build_dequant_lut() -> np.ndarray:

@@ -845,7 +845,6 @@ def condition_doctor():
     have_ee = importlib.util.find_spec("ee") is not None
     note = "" if have_ee else " (step 02e only; `--extra gee`)"
     _echo(f"  {'OK ' if have_ee else 'WARN'}  ee{note}")
-    _echo(f"  AEF_DEQUANT: {paths.AEF_DEQUANT}")
     _echo(f"  root:        {paths.ROOT}")
     for name, p in (("polygons", paths.POLYGONS), ("condition", paths.CONDITION)):
         _echo(f"  {'OK ' if p.exists() else '-  '}  {name}: {p}")
