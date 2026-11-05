@@ -501,7 +501,7 @@ def test_unapplied_observations_are_replayed_from_disk_not_re_read(monkeypatch):
 
 
 # ── the inspector and the operational run must not drift apart ───────────────
-# The inspector (Geethen_forests/scripts/c2c_ts_server.py) and the label-tuning
+# The inspector script (c2c_ts_server.py) and the label-tuning
 # results live outside this repository. Point these at them to cross-check;
 # otherwise the pinned values below are the contract.
 INSPECTOR_SRC = os.environ.get("FORESTMON_INSPECTOR_SRC")
