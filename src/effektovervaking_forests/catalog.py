@@ -1,4 +1,7 @@
-"""CDSE STAC scene index, and the acquisition schedule derived from it.
+"""Sentinel-2 STAC scene index, and the acquisition schedule derived from it.
+
+Scenes before `config.EOPF_START` are indexed from CDSE, later ones from EOPF
+(see `config.S2_SOURCE`); each row's asset hrefs say where to read it.
 
 `sync` upserts every S2 L2A item intersecting an AOI into a parquet table keyed
 by item id. This index alone decides what work exists: `update` processes
@@ -10,6 +13,7 @@ the observed `published` lag.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import time
 
@@ -43,8 +47,24 @@ _FIELDS = [
 ]
 
 
-def _client() -> Client:
-    return Client.open(config.STAC_URL)
+@functools.cache
+def _client(url: str = config.STAC_URL) -> Client:
+    return Client.open(url)
+
+
+def _recent_url() -> str:
+    """The STAC holding current acquisitions."""
+    return config.EOPF_STAC_URL if config.S2_SOURCE == "eopf" else config.STAC_URL
+
+
+def _spans(start: str, end: str) -> list[tuple[str, str, str]]:
+    """[start, end] split into (STAC URL, start, end) by source."""
+    cut = config.EOPF_START
+    if config.S2_SOURCE == "cdse" or end <= cut:
+        return [(config.STAC_URL, start, end)]
+    if start >= cut:
+        return [(config.EOPF_STAC_URL, start, end)]
+    return [(config.STAC_URL, start, cut), (config.EOPF_STAC_URL, cut, end)]
 
 
 _TRANSIENT = (
@@ -99,7 +119,7 @@ def resolve_tiles(aoi_name: str, refresh: bool = False) -> list[str]:
     start = end - dt.timedelta(days=REPEAT_DAYS + 1)
     items = _retry(
         lambda: list(
-            _client()
+            _client(_recent_url())
             .search(
                 collections=[config.S2_L2A_COLLECTION],
                 bbox=bbox,
@@ -182,6 +202,8 @@ def _item_row(item) -> dict:
         "cloud_cover": p.get("eo:cloud_cover"),
         "snow_cover": p.get("eo:snow_cover"),
         "baseline": p.get("processing:version"),
+        # EOPF gives the BOA offset per asset; CDSE rows read it from the XML.
+        "boa_offset": _boa_offset(item),
         # Granule footprint: lets the reader skip tiles without any network I/O.
         "bbox": list(item.bbox) if item.bbox else None,
         # Band hrefs (granule path is not derivable from the id) and
@@ -195,6 +217,18 @@ def _item_row(item) -> dict:
             if k in item.assets
         },
     }
+
+
+def _boa_offset(item) -> int | None:
+    """DN offset from an EOPF B02 asset's raster:offset/scale, else None (CDSE
+    rows keep reading it from the product XML)."""
+    a = item.assets.get(config.ASSET_FOR_BAND["B02"])
+    if a is None or a.href.startswith("s3://"):
+        return None
+    f = a.extra_fields
+    if f.get("raster:offset") is None or not f.get("raster:scale"):
+        return None
+    return round(f["raster:offset"] / f["raster:scale"])
 
 
 def sync(
@@ -220,7 +254,6 @@ def sync(
             .to_dict()
         )
 
-    client = _client()
     combined = existing
     for tile in resolve_tiles(aoi_name):
         if start is not None:
@@ -233,10 +266,13 @@ def sync(
             t0 = config.HISTORY_START
         rows = []
         # Yearly windows keep each retryable request short.
-        for w0, w1 in _windows(t0, end):
+        for url, w0, w1 in (
+            (u, w0, w1) for u, a, b in _spans(t0, end) for w0, w1 in _windows(a, b)
+        ):
             page = _retry(
-                lambda t=tile, a=w0, b=w1: list(
-                    client.search(
+                lambda t=tile, a=w0, b=w1, u=url: list(
+                    _client(u)
+                    .search(
                         collections=[config.S2_L2A_COLLECTION],
                         filter={
                             "op": "=",
@@ -244,7 +280,8 @@ def sync(
                         },
                         datetime=f"{a}/{b}",
                         limit=100,
-                    ).items()
+                    )
+                    .items()
                 )
             )
             rows.extend(_item_row(i) for i in page)
@@ -285,7 +322,7 @@ def reconcile(aoi_name: str, days: int = 30, progress=None) -> dict:
     run this periodically. Found scenes are then picked up as pending.
     """
     since = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
-    client = _client()
+    client = _client(_recent_url())
     rows = []
     for tile in resolve_tiles(aoi_name):
         page = _retry(

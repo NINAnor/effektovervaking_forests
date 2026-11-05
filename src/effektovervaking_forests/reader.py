@@ -1,7 +1,8 @@
-"""Read per-pixel Sentinel-2 L2A reflectance out of CDSE's S3 archive.
+"""Read per-pixel Sentinel-2 L2A reflectance from CDSE (JP2 on S3) or EOPF (Zarr).
 
-Our pixels are a tiny scattered fraction of a 110 km tile, so only the JP2
-internal blocks they fall in are read, via GDAL /vsis3 byte-range support.
+Our pixels are a tiny scattered fraction of a 110 km tile, so only the
+internal blocks they fall in are read, via GDAL byte-range reads: /vsis3 with
+CDSE keys, or the Zarr driver over public HTTPS for EOPF.
 Three details keep values matching Earth Engine:
 
 * BOA_ADD_OFFSET is read from each product's metadata (not a fixed baseline
@@ -56,14 +57,21 @@ def _install_s3_env() -> None:
     )
 
 
-def _gdal_env() -> rasterio.Env:
-    """The GDAL config for a read (`config.GDAL_OPTS`)."""
-    _install_s3_env()
+def _gdal_env(href: str) -> rasterio.Env:
+    """The GDAL config for reading `href`; CDSE keys only for s3:// hrefs."""
+    if href.startswith("s3://"):
+        _install_s3_env()
     return rasterio.Env(**config.GDAL_OPTS)
 
 
-def _vsis3(href: str) -> str:
-    return href.replace("s3://", "/vsis3/")
+def gdal_path(href: str) -> str:
+    """Asset href -> GDAL path: /vsis3 for CDSE, the Zarr driver for EOPF."""
+    if href.startswith("s3://"):
+        return href.replace("s3://", "/vsis3/")
+    root, sep, array = href.partition(".zarr/")
+    if sep:
+        return f'ZARR:"/vsicurl/{root}.zarr":/{array}'
+    return f"/vsicurl/{href}"
 
 
 @functools.lru_cache(maxsize=4096)
@@ -108,6 +116,9 @@ def boa_offset_for(scene: pd.Series, band: str) -> int:
     unreadable it falls back to the baseline rule with a warning: a wrong offset
     is a 0.1-reflectance step that S-CCD would report as a disturbance.
     """
+    off = scene.get("boa_offset")
+    if off is not None and pd.notna(off):
+        return int(off)
     xml = scene["assets"].get("product_metadata")
     if xml:
         try:
@@ -132,7 +143,9 @@ def _read_at(
     internal blocks are read, not per-point windows (far fewer range requests).
     """
     with rasterio.open(path) as ds:
-        if ds.crs is None or ds.crs.to_string() != expect_crs:
+        # EOPF Zarr carries no CRS GDAL can see; its zone is the tile's
+        # (`pixels_for_scene` already filtered on that).
+        if ds.crs is not None and ds.crs.to_string() != expect_crs:
             raise ValueError(f"CRS mismatch: {ds.crs} != {expect_crs}")
 
         rows, cols = rowcol(ds.transform, xs, ys)  # floor -> containing cell
@@ -197,8 +210,8 @@ def read_scene(
 
     scl = valid_scl = None
     if scl_first:
-        with _gdal_env():
-            scl, valid_scl = _read_at(_vsis3(scl_href), xs, ys, crs)
+        with _gdal_env(scl_href):
+            scl, valid_scl = _read_at(gdal_path(scl_href), xs, ys, crs)
         # SCL 0 is "no data" — outside the granule footprint.
         usable = valid_scl & (scl > 0) & (~np.isin(scl, config.SCL_REJECT))
         if not usable.any():
@@ -222,8 +235,8 @@ def read_scene(
         href = scene["assets"].get(asset)
         if not href:
             raise KeyError(f"{scene['id']}: missing asset {asset}")
-        with _gdal_env():  # Env is thread-local
-            vals, valid = _read_at(_vsis3(href), xs, ys, crs)
+        with _gdal_env(href):  # Env is thread-local
+            vals, valid = _read_at(gdal_path(href), xs, ys, crs)
         raw_nodata = vals == config.NODATA_DN
         if apply_offset:
             off = offsets[band]
@@ -233,8 +246,8 @@ def read_scene(
         return band, vals, valid, raw_nodata
 
     def _read_scl():
-        with _gdal_env():
-            return _read_at(_vsis3(scl_href), xs, ys, crs)
+        with _gdal_env(scl_href):
+            return _read_at(gdal_path(scl_href), xs, ys, crs)
 
     with ThreadPoolExecutor(max_workers=BAND_WORKERS) as pool:
         futures = [pool.submit(_one_band, b) for b in config.BANDS]

@@ -158,7 +158,7 @@ def test_dark_pixel_is_clamped_to_zero_but_is_not_nodata(monkeypatch):
     Engine, and is still a real observation (nodata means raw DN 0)."""
     import contextlib
 
-    monkeypatch.setattr(reader, "_gdal_env", lambda **k: contextlib.nullcontext())
+    monkeypatch.setattr(reader, "_gdal_env", lambda *a: contextlib.nullcontext())
     monkeypatch.setattr(
         reader, "boa_offsets_for_scene", lambda sc: {b: -1000 for b in config.BANDS}
     )

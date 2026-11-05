@@ -10,7 +10,9 @@ Dockerfile and unit files are untested examples (see "Not verified" at the end).
 
 ## Credentials
 
-CDSE S3 keys are read from the environment first, then `~/.config/cdse/credentials`
+CDSE S3 keys are needed only to read scenes before `FORESTMON_EOPF_START`
+(the history backfill); ongoing updates read EOPF without credentials. They are
+read from the environment first, then `~/.config/cdse/credentials`
 (`cdse_auth.py`). Never put them in an image, a unit file in git, or on a network share.
 
 | Method | Injection |
