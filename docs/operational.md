@@ -198,12 +198,7 @@ publishing writes one COG per zone.
   s2cloudless probability < 40, and that collection is a Sentinel Hub product
   Google hosts — it is not in the CDSE SAFE archive. The operational mask is
   SCL-only. CDSE and Earth Engine L2A reflectance were verified identical once
-  (2026-08, raw DN, exact match); the mask difference is noted in
-  `config.CLOUD_MASK_NOTE`.
-* **Winter.** At 58–61°N the optical record effectively stops from November to
-  February (low sun, snow — SCL 11 is rejected). S-CCD must not read the gap as
-  change, and alerts raised on the first spring observation deserve their own
-  confidence class. Not yet implemented.
+  (2026-08, raw DN, exact match); the mask difference is noted in `config.py`.
 * **The gate is under-calibrated.** `alerts.LOSS_GATE = 0.075` was tuned on 15
   loss positives. Re-tuning against a larger, *dated* NRT label set is the next
   calibration job — NRT accuracy is a function of time-to-detection, which the

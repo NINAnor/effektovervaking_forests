@@ -12,7 +12,7 @@ AlphaEarth annual embeddings (2017-2025). The library is the subpackage
 | **Question** | Where has each stand arrived, and which way is it moving? |
 | **Input** | 737 mapped stands (`skog_kartlegginger.gpkg`) + AlphaEarth 2017-2025 |
 | **Output** | a condition score and a trajectory class per 10 m cell and per stand |
-| **Cost** | about 30 min wall clock, about 50 GB read; Earth Engine only for step 02e |
+| **Cost** | about 30 min wall clock, about 50 GB read; Earth Engine for step 02e |
 | **Scale** | 168,832 cells, 2.0 M pixel-year scores, 5 UTM zones |
 | **Verified** | stand AUC 0.836 against the field labels (`local`); trajectory recall on Hansen clearing 0.33 at 2 % FPR (cell grain) |
 
@@ -42,7 +42,7 @@ and `/vsicurl` (the `rasterio` wheel has both).
 | mapped stands | `skog_kartlegginger.gpkg`, six layers | `FORESTS_KARTLEGGING_GPKG` |
 | AlphaEarth 2017-2025 | [Source Cooperative `tge-labs/aef`](https://source.coop/tge-labs/aef) | anonymous HTTPS |
 | ESA WorldCover v200 | AWS `esa-worldcover` | anonymous HTTPS, 2021 epoch |
-| Hansen GFC (optional) | Earth Engine `UMD/hansen/global_forest_change_2025_v1_13` | needs an Earth Engine project |
+| Hansen GFC (required by step 04) | Earth Engine `UMD/hansen/global_forest_change_2025_v1_13` | needs an Earth Engine project |
 
 ### Configuration
 
@@ -73,8 +73,9 @@ forestmon condition step 03 -- --help       # that step's own arguments
 
 `run` stops at the first failing step and tees each step to
 `<FORESTMON_LOG_DIR>/condition/<stamp>_<id>_<name>.log`. Without `--ee-project`
-(or `FORESTMON_EE_PROJECT`) step 02e is skipped and announced, and step 03 falls
-back to the uncalibrated p-value rule. Arguments after `--` go to the step.
+(or `FORESTMON_EE_PROJECT`) step 02e is skipped; `run` then refuses to start
+step 04 unless `outputs/data/hansen_pixels.parquet` already exists. Arguments
+after `--` go to the step.
 
 ## Steps
 
