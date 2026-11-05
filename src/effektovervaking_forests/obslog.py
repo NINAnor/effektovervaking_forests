@@ -1,29 +1,10 @@
-"""Structured logging and health metrics — how you find out what the system did.
+"""Structured logging and health metrics.
 
-The pipeline runs unattended. When it misbehaves the question is never "did it
-crash" (that much is obvious) but *where* it stopped being correct: is CDSE
-refusing reads, has a tile gone quiet, did the model stop advancing while the
-store kept filling, is the backlog growing faster than the run can drain it?
-None of those raise an exception.
-
-So two things live here.
-
-**An event log**, JSON Lines, one file per AOI, append-only. Every event carries
-`run_id`, `stage`, `event`, a UTC timestamp and whatever fields that event
-measures. JSON Lines because it is greppable by a human at 3am *and* loadable
-into pandas/DuckDB for "what was our p95 scene latency last month" — with no
-service to run. Human-readable lines go to stderr in parallel, so watching a
-terminal still works.
-
-**A health snapshot** computed from the artefacts themselves (ledger, store,
-state meta, catalogue), not from the log. That distinction matters: a log can be
-lost, truncated or never written by a process that died before it started, and
-the health check has to work anyway. It answers the questions a monitoring
-system asks — how far behind are we, when did the model last move, is anything
-stuck — and returns an exit code so a timer can page someone.
-
-The stage names match `runs.py`'s ledger stages deliberately, so an event in the
-log and a row in the ledger can be talked about with the same words.
+An append-only JSON Lines event log per AOI (events carry `run_id`, `stage`,
+`event` and a UTC timestamp; stage names match the `runs.py` ledger), plus a
+health snapshot computed from the artefacts themselves (ledger, store, state
+meta, catalogue) rather than from the log, so it works even when a run died
+before logging. `health_exit_code` maps the verdict to a timer-friendly code.
 """
 
 from __future__ import annotations
@@ -44,9 +25,8 @@ from . import config
 
 LOG_DIR = config.LOG_DIR
 
-# Health thresholds. Deliberately generous: Sentinel-2 over Norway can go a week
-# without a usable scene in winter, and paging on that would train everyone to
-# ignore the alarm. Override per deployment.
+# Health thresholds, deliberately generous (winter can go a week without a
+# usable scene). Override per deployment.
 STALE_STATE_DAYS = float(os.environ.get("FORESTMON_STALE_STATE_DAYS") or "14")
 STALE_RUN_HOURS = float(os.environ.get("FORESTMON_STALE_RUN_HOURS") or "48")
 MAX_BACKLOG = int(os.environ.get("FORESTMON_MAX_BACKLOG") or "50")
@@ -59,12 +39,9 @@ def log_path(aoi_name: str) -> Path:
 
 
 class RunLogger:
-    """One run's worth of events, written as they happen.
+    """One run's events, flushed line by line so they survive a killed process.
 
-    Written line-by-line and flushed, not buffered to the end: the whole point is
-    to be readable *while* an 11-hour backfill is running, and to survive the
-    process being killed. `run_id` ties every line of one invocation together, so
-    two overlapping runs (which the lease should prevent, but) stay separable.
+    `run_id` ties together the lines of one invocation.
     """
 
     def __init__(
@@ -116,9 +93,8 @@ class RunLogger:
 def run_logger(aoi_name: str, command: str, echo: bool = True, **start_fields):
     """Bracket a run with start/end events, recording failure if one escapes.
 
-    The `run_end` event is what `health` uses to answer "when did this last work",
-    so it is emitted on the failure path too — with `ok=false`. A run that ends
-    with no `run_end` at all was killed, and that absence is itself the signal.
+    `run_end` is also emitted on failure (`ok=false`); a run with no `run_end`
+    was killed.
     """
     log = RunLogger(aoi_name, command, echo=echo)
     log.event(
@@ -192,11 +168,9 @@ def last_run(aoi_name: str) -> dict | None:
 
 # ── health, computed from artefacts rather than from the log ─────────────────
 def health(aoi_name: str) -> dict:
-    """Everything a monitoring system should ask, answered from files on disk.
+    """Health snapshot answered from files on disk.
 
-    Deliberately import-local: `health` must work when the model, the store or
-    the catalogue is missing entirely, which is exactly the state a broken
-    deployment is in.
+    Imports are local so it still works when parts of the system are missing.
     """
     from . import alerts as alerts_mod
     from . import catalog, obs, runs, store

@@ -1,26 +1,15 @@
 """Step 3 (= the user-facing STEP 1) -- trajectory classification, 2017-2025.
 
-The RECOVER recipe -- z-score, Theil-Sen slope, Mann-Kendall test -- applied to
-AlphaEarth instead of GPP and short-vegetation height, which no longer carry
-recent years.
+Z-score, Theil-Sen slope and Mann-Kendall test on the yearly nature type AE score
+from step 04, so this step runs AFTER step 04 (needs `condition.parquet` and
+`pixel_condition.parquet`). Declining/improving classes are gated at a stated
+false-positive rate calibrated on Hansen-clean units (step 02e; without
+`hansen_pixels.parquet` it falls back to the Mann-Kendall p-value).
 
-The one thing that recipe needs and AlphaEarth does not hand over is a scalar
-per year. Since 2026-10 that scalar is the **AE score at the nature type scope**
-from `04_condition.py` -- the stand's median cell score each year, and each
-cell's own score at pixel grain -- so the trajectory and the condition class are
-read off one number. This step therefore runs AFTER step 4.
+Runs per polygon and, unless `--no-pixel-level`, per pixel.
 
-Until 2026-10 the scalar was a projection onto a fixed "naturalness axis"; it
-found cleared stands slightly better but the AE score was chosen for having one
-score everywhere (docs/condition/METHODS.md).
-
-Runs at two grains, both written out:
-  * per polygon  -- the stand's yearly score;
-  * per pixel    -- the default here, since the layers overlap and a pixel
-                    belongs to a set of polygons rather than to one
-                    (`condition/membership.py`).
-
-Output: `outputs/data/trajectory.parquet` (+ `trajectory_pixels.parquet`).
+Output: `outputs/data/trajectory.parquet`, `trajectory_pixels.parquet` and
+`trajectory_gate.json`.
 
 Run:  forestmon condition step 03
 """
@@ -54,9 +43,8 @@ from effektovervaking_forests.condition.trend import (
 
 GATE_JSON = OUT_DATA / "trajectory_gate.json"
 TRAJ_PIX = OUT_DATA / "trajectory_pixels.parquet"
-# The AE score jitters about twice as much as the old axis input, so a fixed
-# 0.30 z cut called 73% of stands fluctuating; this percentile keeps the 18.6%
-# of Hansen-clean stands the axis run called fluctuating.
+# Percentile (of Hansen-clean sd) for the stable/fluctuating cut; a fixed 0.30 z
+# cut would call most stands fluctuating on the AE score (METHODS.md).
 SD_PCTL_AE = 81.4
 
 
@@ -112,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _run_ae(args) -> None:
-    """The trend on the nature type AE score, read from step 4's outputs."""
+    """The trend on the nature type AE score from step 04's outputs."""
     for p in (CONDITION, PIXEL_CONDITION):
         if not p.exists():
             raise SystemExit(
@@ -156,11 +144,8 @@ def _run_ae(args) -> None:
 
     if args.no_pixel_level:
         return
-    # A pixel is one series however many stands claim it, on its first stand's
-    # forest type as under the axis input. Overlapping stands of that type score
-    # it against slightly different pools (each stand's own 3 km exclusion), so
-    # its yearly value is the mean over them; a claim from the other forest type
-    # is a different scale and is left out.
+    # One series per pixel, typed by its first stand. Its yearly value is the mean
+    # over claiming stands of that type; other-type claims are on another scale.
     px_type = (
         membership.drop_duplicates("pixel_id")
         .set_index("pixel_id")["poly_id"]
@@ -207,10 +192,7 @@ def _run_ae(args) -> None:
 
 def _clean_reference(membership: pd.DataFrame, poly_type: pd.Series):
     """(clean stand ids, clean pixel ids) -- no Hansen forest loss in any year.
-
-    Returns (None, None) when 02e has not been run, in which case the caller
-    falls back to the significance rule rather than inventing a gate.
-    """
+    (None, None) when 02e has not been run."""
     if not HANSEN_PIXELS.exists():
         print(
             "\n! no hansen_pixels.parquet -- run 02e_hansen_reference.py to "
@@ -238,13 +220,8 @@ def _trend_table(
 ):
     """z-score within forest type, then Theil-Sen + Mann-Kendall on each series.
 
-    Returns (table, gate). The gate is calibrated on `clean` -- the units an
-    independent product says were never cleared -- so the `declining` and
-    `improving` classes have a stated false-positive rate instead of relying on
-    a p-value that is calibrated but underpowered. One gate per grain: a
-    polygon-mean series is smoother than a pixel one and its slopes are
-    correspondingly less spread, so a pixel-calibrated cut applied to stands
-    would flag almost nothing.
+    Returns (table, gate). The gate is calibrated on `clean` units, one per grain
+    (stand slopes are less spread than pixel slopes).
     """
     key_df, mat = annual_matrix(long, "c", years, keys)
     z = zscore_by_group(mat, key_df["forest_type"].to_numpy())
@@ -270,8 +247,7 @@ def _trend_table(
         gate=gate,
     )
     out = pd.concat([key_df.reset_index(drop=True), feat], axis=1)
-    # Carry the un-standardised level too: the z-scored slope says how fast, the
-    # raw value (the AE score) says relative to what.
+    # Also carry the raw (un-standardised) yearly scores.
     raw = pd.DataFrame(mat, columns=[f"c_{y}" for y in years])
     return pd.concat([out, raw], axis=1), gate
 

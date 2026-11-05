@@ -1,25 +1,10 @@
 """Durability primitives shared by every file this package writes.
 
-Three things every writer here needs and none of them had:
-
-* **Atomic replace.** `df.to_parquet(p)` truncates the target before it writes.
-  A run killed at that moment leaves a zero-byte parquet where the ledger used
-  to be — and the ledger is the only record of what has been processed. Writing
-  to a temp file in the same directory and `os.replace`-ing it is atomic on
-  POSIX, so a reader ever sees the old file or the new one, never a torn one.
-
-* **A single-run lease.** Two `forestmon run` invocations on one AOI would
-  read-modify-write the same ledger and the same state pickle, and the loser's
-  work vanishes silently. Schedulers do double-fire — Kubernetes Jobs are
-  explicitly at-least-once, and a systemd timer plus an impatient operator gets
-  you there just as fast — so "idempotent when nothing is new" is not enough.
-  The lease is advisory, per-AOI, and carries the holder's pid/host/start so a
-  stale one can be diagnosed rather than just deleted.
-
-* **Immutable part files.** See `obs.py`: appending by rewriting a growing
-  yearly parquet costs O(n^2) over a backfill and puts the whole partition at
-  risk on every write. Parts are written once, never modified, and compacted
-  later as a separate, restartable step.
+* Atomic replace: writes go to a temp file in the same directory and are
+  `os.replace`d, so a reader never sees a torn file.
+* A per-AOI advisory lease (pid/host/start recorded) so two overlapping runs
+  cannot read-modify-write the same ledger and state.
+* Immutable part files: see `obs.py`.
 """
 
 from __future__ import annotations
@@ -99,11 +84,9 @@ def lease(
 ):
     """Hold the per-AOI write lease for the duration of the block.
 
-    Raises `LockBusy` rather than waiting: these are scheduled jobs, and a run
-    that fires while the previous one is still going should exit and let the
-    next tick pick the work up, not queue up behind it and double the load on
-    CDSE. A lease whose holder is gone, or older than `stale_after_h`, is taken
-    over with a note in the new lease.
+    Raises `LockBusy` rather than waiting (scheduled jobs; the next tick picks
+    up). A lease whose holder is gone, or older than `stale_after_h`, is taken
+    over and noted in the new lease.
     """
     p = lock_path(aoi_name)
     taken_over = None
@@ -139,8 +122,7 @@ def lease(
     try:
         yield payload
     finally:
-        # Only release a lease we still own — a forced takeover elsewhere means
-        # someone else is the writer now and their lease must survive.
+        # Only release a lease we still own (it may have been taken over).
         if _read_lock(p).get("pid") == os.getpid():
             try:
                 p.unlink()

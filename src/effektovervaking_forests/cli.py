@@ -1,7 +1,6 @@
 """`forestmon` — the operational CLI.
 
-Command groups follow the pipeline's stages, so the order you would run them in
-is the order they are listed by `--help`:
+Command groups follow the pipeline stages, in run order:
 
     forestmon grid build kalklindeskog        # the pixels we monitor
     forestmon catalog sync kalklindeskog      # what imagery exists
@@ -11,9 +10,8 @@ is the order they are listed by `--help`:
     forestmon run kalklindeskog               # the operational cycle
 
 Everything is per-AOI and idempotent; `run` is the one a timer calls.
-
-`forestmon condition ...` is the separate, annual AlphaEarth condition pipeline
-(docs/condition/README.md); it shares only the configuration with the above.
+`forestmon condition ...` is the separate annual condition pipeline
+(docs/condition/README.md); it shares only the configuration.
 """
 
 from __future__ import annotations
@@ -101,8 +99,7 @@ def _crs_summary(df: pd.DataFrame) -> str:
 
 # ── grid ─────────────────────────────────────────────────────────────────────
 def _tile_bounds(aoi: str) -> dict:
-    """{tile: (utm bounds, crs)} for every tile overlapping the AOI, read from
-    one product per tile. Empty when there is no catalogue yet."""
+    """{tile: (utm bounds, crs)} per AOI tile; empty when no catalogue yet."""
     import rasterio
 
     from . import reader as _reader
@@ -127,8 +124,7 @@ def _tile_bounds(aoi: str) -> dict:
 def grid_build(aoi: str = AOI_ARG):
     """Rasterise the AOI polygons onto the Sentinel-2 10 m lattice.
 
-    Run it again after `catalog sync`: with tile extents known, a polygon that
-    no tile of its MGRS zone covers is gridded in the zone that does.
+    Re-run after `catalog sync` so tile extents can refine each polygon's zone.
     """
     tb = _tile_bounds(aoi)
     if not tb:
@@ -146,9 +142,7 @@ def grid_build(aoi: str = AOI_ARG):
 def grid_assign_tiles(aoi: str = AOI_ARG):
     """Pin every pixel to one MGRS tile (its most interior covering tile).
 
-    MGRS tiles overlap ~9.8 km and Sentinel-2 corrects each tile separately, so a
-    seam pixel gets two disagreeing observations per acquisition unless it is
-    pinned. Run after `grid build` and after `catalog sync`.
+    Run after `grid build` and `catalog sync`.
     """
     bounds = _tile_bounds(aoi)
     if not bounds:
@@ -212,9 +206,7 @@ def cat_reconcile(
 ):
     """Sweep for scenes published late or reprocessed under a new baseline.
 
-    `sync` only looks forward from the newest acquisition it holds, so a product
-    published outside that window — or a 2019 granule reprocessed today — is
-    invisible to it forever. Run this weekly.
+    Run weekly; `sync` cannot see these.
     """
     res = catalog.reconcile(
         aoi, days=days, progress=lambda t, n: _echo(f"  {t}: {n} items")
@@ -264,9 +256,7 @@ def obs_backfill(
 ):
     """Read historical scenes into the observation store.
 
-    Resumable at batch granularity: each batch commits its own observation part
-    file and its own ledger rows, so an interrupted backfill resumes by
-    re-running the same command and loses at most one batch of work.
+    Resumable: each batch commits its own part file and ledger rows.
     """
     if not cdse_auth.have_credentials():
         _fail("CDSE S3 credentials missing — run `forestmon doctor`")
@@ -320,11 +310,7 @@ def obs_backfill(
 def obs_compact(
     aoi: str = AOI_ARG, year: int = typer.Option(None, help="Only this year")
 ):
-    """Fold immutable part files into one sorted parquet per year.
-
-    Safe to run at any time, including while nothing else is running; it is the
-    tidy-up half of the append path, not part of the critical path.
-    """
+    """Fold immutable part files into one sorted parquet per year."""
     out = obs.compact(aoi, years=[year] if year else None, progress=_echo)
     if not out:
         _echo("no part files to compact")
@@ -371,9 +357,7 @@ def sccd_bootstrap(
     """Fit initial per-pixel S-CCD state from the observation store."""
 
     grid = aoi_mod.load_grid(aoi)
-    # Fit in contiguous pixel chunks: the whole store is 117 M rows for
-    # olivinskog and was OOM-killed at 40 GB when loaded at once. Pixels are
-    # independent, so the result is identical to a single fit.
+    # Fit in pixel chunks to bound memory; pixels are independent.
     ids = np.sort(grid["pix_id"].to_numpy())
     chunks = np.array_split(ids, max(1, int(np.ceil(len(ids) / chunk_pixels))))
     states, breaks, n_obs, last_obs = {}, [], 0, None
@@ -412,9 +396,8 @@ def sccd_bootstrap(
         "alerts_dirty": True,
     }
     state_mod.save(aoi, states, meta)
-    # Every scene in the store is now folded into state, so the ledger's stages
-    # must say so — otherwise the first `run` would replay nine years of
-    # observations through sccd_update on top of the fit that just consumed them.
+    # Mark every stored scene as applied so the first `run` does not replay
+    # them through sccd_update.
     n_marked = runs.mark_applied(aoi, runs.processed_ids(aoi))
     alerts_mod.record(aoi, breaks, grid)
     meta["alerts_dirty"] = False
@@ -500,11 +483,8 @@ def alerts_rescore(
 ):
     """Recompute every alert's confidence tier.
 
-    Confidence is not a property of the moment an alert fired: its largest term
-    is the number of clear observations AFTER the break, which grows with every
-    cycle. So this belongs in the operational loop, not only at write time --
-    without it the queue stays permanently wrong about everything except
-    brand-new alerts.
+    Confidence grows as observations accumulate after the break, so this runs
+    in the operational loop, not only at write time.
     """
     df = alerts_mod.rescore(aoi, use_agreement=not no_agreement)
     if df.empty:
@@ -528,9 +508,7 @@ def publish_site(
 ):
     """Build PMTiles, the queue index, the GIS artefacts and the manifest.
 
-    Rescores first by default. Publishing a stale tier is worse than publishing
-    none: a reviewer works the queue in confidence order, so an out-of-date
-    ordering silently sends them to the wrong pixels.
+    Rescores first by default, since reviewers work the queue in tier order.
     """
     names = (
         list(aoi)
@@ -539,8 +517,7 @@ def publish_site(
     )
     if not names:
         _fail("no AOI has an alert table yet")
-    # Check before rescoring: a missing tool would otherwise surface as a
-    # FileNotFoundError halfway through the first AOI.
+    # Check up front, not as a FileNotFoundError halfway through the first AOI.
     if not shutil.which(publish_mod._gdal("ogr2ogr")):
         _fail(
             "ogr2ogr (GDAL >= 3.8) not found; put it on PATH or set FORESTMON_GDAL_BIN"
@@ -574,10 +551,8 @@ def health_cmd(
 ):
     """How far behind is the system, and is anything stuck?
 
-    Computed from the artefacts on disk — ledger, store, state, catalogue — not
-    from the log, so it still answers when a run died before it logged anything.
-    Exit code: 0 healthy, 1 degraded (with --strict), 2 unhealthy. Suitable as a
-    readiness probe or a cron guard.
+    Computed from artefacts on disk, not the log. Exit code: 0 healthy,
+    1 degraded (with --strict), 2 unhealthy.
     """
     h = obslog.health(aoi)
     if as_json:
@@ -621,8 +596,7 @@ def health_cmd(
                 f"  last run: {lr['command']} {'ok' if lr['ok'] else 'FAILED'} "
                 f"at {lr['ts']} ({lr.get('seconds')}s)"
             )
-            # pandas turns a missing error into NaN, which is truthy — a
-            # successful run was printing a bare "nan" under it.
+            # A missing error is NaN (truthy), hence the notna check.
             if lr.get("error") and pd.notna(lr["error"]):
                 typer.secho(f"    {lr['error']}", fg=typer.colors.RED)
         for w in h["warnings"]:
@@ -689,9 +663,8 @@ def run(
 ):
     """One operational cycle: sync, ingest new scenes, advance S-CCD, alert.
 
-    Safe to run on a frequent timer — with nothing new it does nothing. With
-    --wait-for-schedule it also skips the catalogue round trip when the
-    acquisition schedule says nothing can have landed yet.
+    Safe on a frequent timer; --wait-for-schedule skips the catalogue round
+    trip when nothing can have landed yet.
     """
     if wait_for_schedule:
         try:
@@ -708,8 +681,7 @@ def run(
             aoi, workers=workers, limit=limit, batch_size=batch, force_lock=force_lock
         )
     except store.LockBusy as e:
-        # Not an error: a scheduler firing while the previous run is still going
-        # is expected, and the right response is to leave the work to it.
+        # Not an error: the previous run still holds the lease.
         _echo(str(e))
         raise typer.Exit(code=0) from e
     _echo(json.dumps(res, indent=1, default=str))

@@ -1,20 +1,13 @@
-"""Shared paths and constants for the condition pipeline.
-
-Layout mirrors DegreeofRecovery/paper_release: a `data/` tree that holds inputs
-and caches, an `outputs/` tree that holds everything the steps generate, both
-under one root.
-"""
+"""Shared paths and constants for the condition pipeline: a `data/` tree (inputs,
+caches) and an `outputs/` tree under one root."""
 
 from __future__ import annotations
 
 from effektovervaking_forests.config import DATA as _FORESTMON_DATA
 from effektovervaking_forests.config import _env_path
 
-# Where the run keeps its `data/` and `outputs/` trees: CONDITION_ROOT, else
-# `<FORESTMON_DATA_DIR>/condition`. Point CONDITION_ROOT at an existing
-# condition/ directory to run against its cache and result set without copying
-# tens of GB (see docs/condition/README.md, "Configure"). Like the rest of the
-# package, nothing is created at import time -- see `ensure_dirs()`.
+# CONDITION_ROOT, else `<FORESTMON_DATA_DIR>/condition`. Nothing is created at
+# import time; see `ensure_dirs()`.
 ROOT = _env_path("CONDITION_ROOT", _FORESTMON_DATA / "condition")
 
 DATA = ROOT / "data"
@@ -41,7 +34,7 @@ LAYER_TYPE = {
 }
 FOREST_TYPES = ("olivinskog", "kalklindeskog")
 
-# Per-layer stable feature id column (see extract_alphaearth_embeddings.py).
+# Per-layer stable feature id column.
 ID_COLUMN = {
     "MI_olivinskog": "identifikasjon_lokalId",
     "MI_kalklindeskog": "identifikasjon_lokalId",
@@ -59,8 +52,7 @@ AEF_INDEX = CACHE / "aef_index.parquet"
 AEF_YEARS = tuple(range(2017, 2026))  # 2017-2025 inclusive
 BANDS = tuple(f"A{i:02d}" for i in range(64))
 AEF_NODATA = -128
-# One COG block on the ground: 1024 px x 10 m. Both readers address blocks in
-# metres, so this is the constant that ties them to the same grid.
+# One COG block on the ground: 1024 px x 10 m. Both readers address blocks in metres.
 BLOCK_M = 1024 * 10.0
 
 
@@ -76,10 +68,8 @@ COMBINED = OUT_DATA / "condition_combined.csv"
 # ---------------------------------------------------------------------------
 # Overlap-safe pixel model (see condition.membership)
 # ---------------------------------------------------------------------------
-# The mapped layers overlap: 2,237 ha of polygon area sits on 1,694 ha of
-# ground. A pixel therefore belongs to a SET of polygons, not to one, so the
-# embeddings are stored once per (utm_zone, x, y, year) and the polygon
-# membership is a separate many-to-many table.
+# Layers overlap, so a pixel belongs to a SET of polygons: embeddings are stored
+# once per (utm_zone, x, y, year) and membership is a separate m:n table.
 PIXELS = OUT_DATA / "pixels.parquet"  # pixel_id, x, y, year, A00..A63
 PIXEL_POLYGONS = OUT_DATA / "pixel_polygons.parquet"  # pixel_id <-> poly_id (m:n)
 POLY_OVERLAP = OUT_DATA / "polygon_overlap.parquet"  # poly_id <-> poly_id, shared area
@@ -87,21 +77,17 @@ POLY_OVERLAP = OUT_DATA / "polygon_overlap.parquet"  # poly_id <-> poly_id, shar
 # ---------------------------------------------------------------------------
 # ESA WorldCover -- the "transformed" bad pool (see condition.worldcover)
 # ---------------------------------------------------------------------------
-# v200 is the 2021 epoch, 10 m, EPSG:4326, in 3x3 degree COG tiles served
-# anonymously over plain HTTPS.
+# v200 is the 2021 epoch, 10 m, EPSG:4326, in 3x3 degree COG tiles (anonymous HTTPS).
 WORLDCOVER_URL = (
     "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/"
     "ESA_WorldCover_10m_2021_v200_{ns}{lat:02d}{ew}{lon:03d}_Map.tif"
 )
 WORLDCOVER_YEAR = 2021
-# Built-up and cropland only: the classes that are unambiguously transformed
-# land in Norway. Grassland (30) is excluded because it is mostly natural fjell
-# and pasture here, and bare/sparse (60) because Norwegian bare ground is
-# overwhelmingly rock and scree rather than anything a forest was turned into.
+# Built-up and cropland only; grassland (30) and bare/sparse (60) are mostly
+# natural fjell, pasture and rock in Norway.
 TRANSFORMED_CLASSES = (40, 50)
-# The bad pool is drawn from a ring around each stand, as in the
-# DegreeofRecovery paper: far enough out not to be the stand's own edge, close
-# enough to share its region, terrain and acquisition history.
+# The bad pool is drawn from a ring around each stand (inner radius clears the
+# stand's own edge).
 ANNULUS_INNER_M = 3_000.0
 ANNULUS_OUTER_M = 8_000.0
 
@@ -115,12 +101,9 @@ PIXEL_CONDITION = OUT_DATA / "pixel_condition.parquet"  # the per-pixel scores
 # ---------------------------------------------------------------------------
 # Hansen Global Forest Change -- the independent disturbance reference
 # ---------------------------------------------------------------------------
-# Landsat-based, annual, produced by someone else, so it is the one label in
-# this pipeline that is not derived from AlphaEarth. It calibrates the
-# trajectory step's slope gate (see condition.trend) and supplies the recall
-# figures in 05_validate.py. It is a sensitivity floor, not a ground truth: it
-# sees canopy removal and is blind to the selective removal and understorey
-# change these habitat types are mostly lost to.
+# Independent (Landsat) disturbance reference: calibrates the trajectory slope
+# gate and supplies the recall figures in 05_validate.py. A sensitivity floor,
+# not ground truth (blind to selective removal).
 HANSEN_PIXELS = OUT_DATA / "hansen_pixels.parquet"
 
 # ---------------------------------------------------------------------------

@@ -1,55 +1,14 @@
 """Step 4 (= the user-facing STEP 2) -- per-pixel condition scoring.
 
-The scoring maths is the published RECOVER one, vendored unchanged in
-`condition/core.py`: k nearest neighbours in cosine distance to a good and a bad
-reference pool, and a CI-vs-threshold rule that refuses to classify a site whose
-interval straddles the threshold.
+For every pixel of every stand and every year, scores the distance ratio
+dor = bad / (good + bad) from k nearest neighbours (cosine, whitened metric)
+to a good and a bad reference pool, at two scopes (`local`, `global`). The
+stand score is the median of its pixel scores with a donor-clustered
+bootstrap interval; thresholds are fitted leave-block-out on the field labels in
+their survey year. Method and defaults: docs/condition/METHODS.md.
 
-    dor = mean_cos(x -> k nearest bad refs)
-        / (mean_cos(x -> k nearest good refs) + mean_cos(x -> k nearest bad refs))
-
-Six things are re-defined for this project. Each has its own module docstring;
-in short:
-
-  * **the probe is a pixel** (`condition/score.py`). A stand is not in one
-    condition, and the polygon mean was averaging a clearcut in one corner
-    together with intact forest in the other. The stand score is the MEDIAN of
-    its pixel scores, with a donor-clustered bootstrap interval on that median
-    (`score.median_cluster_ci`); the old mean-embedding score is kept as
-    `dor_<scope>_probe`.
-  * **the good pool comes from that forest type, at two scopes**
-    (`condition/refs.py`). `local` = the nearest god-labelled stands, so the
-    comparison is regionally matched; `global` = all of them, so scores are
-    comparable AOI-wide. Both are reported for every pixel; they disagree
-    exactly where a stand is unusual for its region but not for the type.
-  * **labels are anchored to their survey year**. `tilstand` describes the day
-    the surveyor stood there, and these labels span 2015-2025, so a donor
-    contributes only its survey-year pixels and one surveyed before 2017 cannot
-    contribute at all.
-  * **the bad pool is transformed land from WorldCover**
-    (`condition/worldcover.py`), cropland and built-up in a 3-8 km ring around
-    each stand, contemporaneous with the probe year. Substituting the 36
-    field-labelled bad stands for it was tried and costs almost all of the
-    separation -- see `docs/METHODS.md`.
-  * **the distances are taken in a shrunk-whitened metric**
-    (`condition/whiten.py`), not in the raw embedding. A handful of AlphaEarth
-    directions carry most of the terrain and phenology variance over this AOI
-    and swamp the condition contrast in a plain cosine distance.
-  * **a probe never sees a donor from its own 5 km spatial block**
-    (`condition/blocks.py`), and the stand interval resamples donor stands
-    rather than reference pixels. Both were leaks: together they were worth
-    about a third of the reported stand-grain separation and about one stand in
-    eight of the condition classifications.
-
-Overlap is handled throughout by scoring pixels, not polygons: the layers share
-24% of their area, so a pool excluded by `poly_id` still contains the probe's
-own ground under a neighbour's id (`condition/membership.py`).
-
-The defaults here are the configuration validated in `condition/research/`:
-whitening at shrinkage 0.2, k = 25, leave-block-out pools and thresholds,
-donor-clustered intervals (E01-E14, five seeds), the transformed pool pooled per
-forest type (E38, corroborated on independent labels in E26), cleared donor
-pixels dropped (E25), and a 32-stand local pool (E44, ten seeds).
+Needs steps 00, 02, 02b, 02c, 02d and 02e (`hansen_pixels.parquet` is required to
+drop cleared donor pixels). Runs for the whole record unless `--years` is given.
 
 Outputs `pixel_condition.parquet` (per pixel-year), `condition.parquet` (per
 stand-year), `threshold.json` and `whitener.json`.
@@ -305,8 +264,7 @@ def main(argv: list[str] | None = None) -> None:
         .to_string()
     )
 
-    # Donor pixels Hansen records as cleared at or before their survey year
-    # are dropped from the good pool (research E25).
+    # Donor pixels cleared (Hansen) at or before their survey year are dropped.
     hp = OUT_DATA / "hansen_pixels.parquet"
     if not hp.exists():
         raise SystemExit(f"the good-pool cleanup needs {hp.name}; run step 02e")
@@ -369,9 +327,7 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     # ---- the metric --------------------------------------------------------
-    # Fitted per forest type on UNLABELLED pixels only, so the class means the
-    # score then measures distance to have no say in the metric it is measured
-    # with. See condition/whiten.py.
+    # Fitted per forest type on unlabelled pixels only (condition/whiten.py).
     whit = {}
     unlabelled = set(roles.loc[roles["role"] == "unlabelled", "pixel_id"])
     for ft in sorted(polygons["forest_type"].dropna().unique()):
@@ -392,9 +348,8 @@ def main(argv: list[str] | None = None) -> None:
         )
     WHITENER_JSON.write_text(json.dumps({ft: w.to_dict() for ft, w in whit.items()}))
 
-    # Locality of every transformed reference pixel, so the stand interval can
-    # resample localities rather than pixels: a 500 m cell of cropland is one
-    # observation of "what converted land looks like here", not 300.
+    # Locality of each transformed reference pixel: the interval resamples
+    # localities (500 m cells), not pixels.
     bad_sites = pd.read_parquet(OUT_DATA / "bad_sites.parquet")
     cell = (
         (bad_sites["x"] // BAD_CLUSTER_M).astype("int64").astype(str)
@@ -404,8 +359,7 @@ def main(argv: list[str] | None = None) -> None:
         + bad_sites["utm_zone"].astype(str)
     )
     cell_of = dict(zip(bad_sites["pixel_id"].to_numpy(), cell.to_numpy()))
-    # Integer codes in the cells' string sort order, so `np.unique` inside the
-    # bootstrap orders the clusters exactly as it did on the strings.
+    # Integer codes in the cells' string sort order.
     bad_row_cell = np.unique(
         np.array(
             [cell_of.get(int(p), "na") for p in bad_pixels["pixel_id"].to_numpy()]
@@ -414,7 +368,7 @@ def main(argv: list[str] | None = None) -> None:
     )[1].ravel()
 
     # ---- score every pixel of every stand, in every year --------------------
-    # One generator, consumed in stand order, so the bootstrap is reproducible.
+    # One rng, consumed in stand order, so the bootstrap is reproducible.
     by_poly = membership.groupby("poly_id")["pixel_id"].apply(np.asarray)
     _C.__dict__.update(
         builder=builder,
@@ -490,28 +444,12 @@ def main(argv: list[str] | None = None) -> None:
                 thr,
             )
         ]
-        # The threshold's own error bar is reported per stand but NOT used to
-        # withdraw the verdict. Two research results say why. E43 built a joint
-        # resample of `score - threshold` -- the test the verdict actually
-        # depends on -- and found that counting the boundary honestly still
-        # costs about 40% of the field-degraded stands found (recall 0.560 ->
-        # 0.320) while wrong reassurance does not fall (0.069 -> 0.074): the
-        # boundary is genuinely that poorly pinned down by 36 degraded stands in
-        # six localities, so this is a fact about the label set and not a rule
-        # worth adopting. E45 then tested whether the same verdict could be had
-        # from the two intervals THIS script already computes, and it cannot:
-        # agreement with the joint bootstrap is 0.835, because the block
-        # resample below holds the scores fixed and so sees only the
-        # label-sample half of the threshold's error. So the column is left out
-        # rather than shipped wrong; `threshold_se_*` is published as the
-        # partial figure it is, for readers who want to see how soft the
-        # boundary is next to the stand's own interval.
+        # `threshold_se_*` is the label-sample half of the threshold's error only;
+        # it is reported but not used to withdraw verdicts (METHODS.md, E43/E45).
         stands[f"threshold_se_{scope}"] = _thr_se_for(stands["block"], cal[scope])
         summ = summarise_pixels(pix, f"dor_{scope}")
         stands = stands.merge(summ, on=["poly_id", "year"], how="left")
-        # `frac_poor` uses each stand's OWN out-of-block threshold, so the
-        # share-of-a-stand-that-is-degraded number is held out the same way its
-        # class is.
+        # `frac_poor` uses each stand's own out-of-block threshold.
         thr_by_poly = dict(zip(stands["poly_id"], thr))
         pix_thr = pix["poly_id"].map(thr_by_poly)
         below = pix[f"dor_{scope}"] < pix_thr
@@ -543,9 +481,7 @@ def main(argv: list[str] | None = None) -> None:
         how="left",
     )
     pix["label_age"] = pix["year"] - pix["survey_year"]
-    # How far this pixel sits inside the stand that claims it. A small stand is
-    # mostly edge and an edge pixel is a mixture, so anything read per pixel has
-    # to be readable alongside this (research E10).
+    # Distance inside the claiming stand; read per-pixel scores with it (E10).
     if "edge_m" in membership.columns:
         pix = pix.merge(
             membership[["pixel_id", "poly_id", "edge_m"]],
@@ -575,18 +511,13 @@ def _rep(ft, X):
 def _bad_pack(poly_id, year, ft):
     """(bad, badT, badU, badU.T, bad_cluster) for one stand-year.
 
-    The transformed end-member is pooled per forest type, so this is the same
-    cloud for every stand of a type in a year: whitened, normalised and
-    transposed once per (type, year) and cached.
-    """
+    The bad pool is shared per (forest type, year), so it is cached."""
     key = (ft, int(year))
     if key in _C.bad_cache:
         return _C.bad_cache[key]
     brows = _C.builder.bad_pool_rows(poly_id, year, ft)
     bad = _C.builder.bad_mat[brows]
     badT = _rep(ft, bad)
-    # The bad pool is shared by both scopes, so its distances are computed
-    # once per stand-year rather than once per scope.
     badU = unit_rows(badT)
     out = (bad, badT, badU, np.ascontiguousarray(badU.T), _C.bad_row_cell[brows])
     _C.bad_cache[key] = out
@@ -594,13 +525,10 @@ def _bad_pack(poly_id, year, ft):
 
 
 def _stand_pools(poly_id, ft):
-    """A stand's two good pools, raw / in the metric / unit rows / transposed.
+    """A stand's two good pools: raw / in the metric / unit rows / transposed.
 
-    Good pools do not depend on the probe year -- donors are pinned to their
-    own anchor years -- so they are built and mapped into the metric once per
-    stand rather than once per stand-year. The transpose `knn_mean_unit` needs
-    for its matmul is also done once here rather than once per year per scope.
-    """
+    Independent of the probe year (donors are pinned to their anchor years),
+    so built once per stand."""
     pools = {s: _C.builder.good_pool(poly_id, ft, s, with_owners=True) for s in SCOPES}
     poolsT = {s: _rep(ft, g) for s, (g, _o, _n) in pools.items()}
     poolsU = {s: unit_rows(g) for s, g in poolsT.items()}
@@ -630,13 +558,8 @@ def _pixel_good(probesU, sp, cols):
 
 
 def _stand_record(poly_id, ft, year, probes, rng, sp, bp, probesU, cells):
-    """One stand-year row: the stand score and its donor-clustered interval.
-
-    The score is the median of the stand-year's cell scores `cells[dor_<scope>]`
-    and the interval resamples donor stands and localities once for all of
-    `probesU`; the mean-embedding score is kept, as a point value, in
-    `dor_<scope>_probe`.
-    """
+    """One stand-year row: median of `cells[dor_<scope>]` with its donor-clustered
+    interval; the mean-embedding score is kept as `dor_<scope>_probe`."""
     args = _C.args
     pools, poolsT, _u, poolsUt, n_clusters = sp
     bad, badT, _bu, badUt, bad_cluster = bp
@@ -647,9 +570,6 @@ def _stand_record(poly_id, ft, year, probes, rng, sp, bp, probesU, cells):
         "n_pixels": len(probes),
         "n_bad": len(bad),
     }
-    # The probe and the whole transformed half of the interval are the same
-    # for both scopes -- only the good pool changes -- so they are built once
-    # here rather than rebuilt inside each call.
     probe = stand_probe(probes, _C.whit.get(ft))
     med = median_cluster_ci(
         probesU,
@@ -739,18 +659,8 @@ def _calibrate(
     thr_boot: int = 300,
     seed: int = 42,
 ) -> dict:
-    """Fit a threshold per scope, using each labelled stand IN ITS SURVEY YEAR.
-
-    Scoring a `god` stand in 2025 against a label assigned in 2017 would
-    calibrate the threshold on whatever happened in between, which is exactly
-    the confound this pipeline exists to avoid. So the calibration set is one
-    row per labelled stand, taken at `year == survey_year`.
-
-    The threshold is also fitted **leave-block-out**: a threshold fitted to all
-    the labelled stands and then applied to those same stands is a fit reported
-    as a validation, and with 36 bad stands it is worth a couple of points of
-    Youden's J (research E01/E09).
-    """
+    """Fit a threshold per scope, leave-block-out, on one row per labelled
+    stand taken at `year == survey_year`."""
     lab = polygons.loc[
         polygons["ref_role"].isin(["good", "bad"]),
         ["poly_id", "ref_role", "survey_year"],
@@ -771,10 +681,7 @@ def _calibrate(
         cal = calibrate_threshold_blocked(
             at_survey[f"dor_{scope}"], at_survey["ref_role"], at_survey["block"]
         )
-        # The threshold is an estimate too, and on this label set a noisier
-        # one than the stand's own score. Reported, never classified with:
-        # research E43 measured what withdrawing verdicts on it costs, and
-        # E45 showed this estimator sees only the label-sample half of it.
+        # Reported only, never classified with (METHODS.md, E43/E45).
         cal["interval"] = threshold_interval_blocked(
             at_survey[f"dor_{scope}"],
             at_survey["ref_role"],

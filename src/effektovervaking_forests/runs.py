@@ -1,24 +1,12 @@
 """The run ledger: which scenes have been processed, and how far.
 
-Separate from the observation store on purpose. A scene that is 100% cloud over
-our polygons yields zero observations but has definitely been processed; if
-"processed" were inferred from the observation store, every such scene would be
-retried forever. The ledger records the attempt, the outcome and the cost, which
-also makes it the natural place to notice that reads have started failing or
-that a tile has gone quiet.
-
-**Stages.** "Processed" is not one event. A scene's observations reach the store
-before the model has consumed them, and the two commits cannot be made atomic
-across a parquet file and a state pickle. So the ledger records how far a scene
-got:
+Separate from the observation store because a fully clouded scene yields no
+observations but has been processed. Stages:
 
     discovered -> observations_committed -> state_applied
 
-A crash between the two leaves rows at `observations_committed`. Those scenes
-must NOT be re-read from CDSE (their observations are already stored and the
-store is keyed idempotently) and must NOT be considered done (S-CCD has never
-seen them). `unapplied_scene_ids` is how the next run finds them and replays
-them from disk.
+Scenes at `observations_committed` must not be re-read from CDSE nor considered
+done; `unapplied_scene_ids` finds them so the next run replays them from disk.
 """
 
 from __future__ import annotations
@@ -56,9 +44,7 @@ def load(aoi_name: str) -> pd.DataFrame:
         return pd.DataFrame(columns=COLUMNS)
     df = pd.read_parquet(p)
     if "stage" not in df.columns:
-        # Ledgers written before stages existed: their scenes predate any
-        # incremental state, so treat them as fully applied rather than
-        # replaying nine years of history through sccd_update.
+        # Pre-stage ledgers: treat as fully applied, not replayed.
         df["stage"] = STAGE_APPLIED
     return df
 
@@ -66,8 +52,7 @@ def load(aoi_name: str) -> pd.DataFrame:
 def processed_ids(aoi_name: str, include_failed: bool = False) -> set[str]:
     """Scenes that must not be read from CDSE again.
 
-    Includes scenes still at `observations_committed` — their observations are
-    on disk; what is outstanding is model application, not reading.
+    Includes scenes at `observations_committed` (only model application remains).
     """
     df = load(aoi_name)
     if df.empty:

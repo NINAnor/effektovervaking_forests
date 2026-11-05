@@ -1,19 +1,8 @@
 """Turning S-CCD breaks into alerts.
 
-A break is not an alert. The label study in this project (see
-`results/label_accuracy.json`) found that an ungated break flags more than half
-of all stable pixels — across every segmenter, the magnitude gate mattered more
-than the choice of algorithm or its parameters. So the gate is applied here,
-explicitly and with the threshold recorded on every row, rather than being
-buried in the detector.
-
-The gate default is the label-tuned S-CCD value carried over from the inspector.
-It is a starting point, not a settled number: it was fitted on 15 loss positives,
-so its confidence interval is wide, and re-tuning it against a larger, dated
-NRT label set is the obvious next calibration job.
-
-Alerts are append-only with a lifecycle status, so a human verdict recorded in
-review is never overwritten by a later run.
+A break is not an alert: the magnitude gate is applied here, with the threshold
+recorded on every row, rather than inside the detector. Alerts are append-only
+with a lifecycle status, so a human verdict is never overwritten by a later run.
 """
 
 from __future__ import annotations
@@ -25,22 +14,18 @@ import pandas as pd
 from . import confidence as conf_mod
 from . import config, store
 
-# Label-tuned S-CCD magnitude gate (NBR units). Breaks weaker than this are
-# stored with status "below_gate" rather than dropped, so re-gating later does
-# not require re-running the model.
+# Magnitude gate (NBR units). Weaker breaks are stored as "below_gate", not
+# dropped, so re-gating does not require re-running the model.
 LOSS_GATE = 0.075
 
-# "historical" is the bootstrap's output: a break the initial fit found somewhere
-# in 2017-2025. It is real change, and it belongs in the table as context for a
-# pixel's history, but it is not something anyone can go and look at now. Only
-# breaks dated on or after config.MONITORING_START become operational alerts.
+# "historical" = break found by the bootstrap fit before config.MONITORING_START;
+# kept as context, not an operational alert.
 STATUSES = ("new", "historical", "below_gate", "confirmed", "verified", "rejected")
 
 # A human verdict outranks anything a re-run computes.
 REVIEWED = ("verified", "rejected")
 
-# Written by `confidence.score_breaks`. Every input to the tier is stored, not
-# just the tier, so a reviewer disputing "low" can see which term produced it.
+# Written by `confidence.score_breaks`; every input to the tier is stored.
 CONF_COLS = (
     "n_confirm",
     "gap_before_days",
@@ -84,12 +69,7 @@ def load(aoi_name: str) -> pd.DataFrame:
 
 
 def alert_id(aoi: str, pix_id: str, break_ordinal: int) -> str:
-    """Stable id: one pixel + one break date is one alert, forever.
-
-    Deterministic rather than sequential so a re-run, a re-bootstrap or a
-    restore from backup cannot mint a duplicate alert for a break a human has
-    already reviewed.
-    """
+    """Deterministic id: one pixel + one break date is one alert."""
     return f"{aoi}:{pix_id}:{break_ordinal}"
 
 
@@ -111,10 +91,7 @@ def record(
 ) -> pd.DataFrame:
     """Append breaks as alerts, preserving any existing human verdict.
 
-    Statuses are assigned here, not in the detector, and all of them are stored:
-    a break below the gate or before the monitoring start is kept with that
-    status rather than dropped, so re-gating or moving the start date is a query
-    rather than a re-run of the model.
+    Below-gate and pre-monitoring breaks are kept with that status, not dropped.
     """
     if not breaks:
         return load(aoi_name)
@@ -129,14 +106,12 @@ def record(
     df["aoi"] = aoi_name
     df["gate"] = gate
     df["detected_at"] = dt.datetime.now(dt.UTC)
-    # Bootstrap and refit breaks carry no latency fields; keep the columns so
-    # the table's schema does not depend on which path produced a row.
+    # Bootstrap/refit breaks carry no latency fields; keep the schema fixed.
     for col in ("detection_lag_days", "nrt_mode"):
         if col not in df.columns:
             df[col] = pd.NA
     df["recipe_version"] = config.RECIPE_VERSION
-    # Only losses are alertable; a gain break is real change but not the signal
-    # this system exists to catch, so it is stored and left un-triaged.
+    # Only losses are alertable; gains are stored but left un-triaged.
     below = df["magnitude"].abs() < gate
     df["status"] = "new"
     df.loc[below, "status"] = "below_gate"
@@ -146,21 +121,16 @@ def record(
     old = pd.to_datetime(df["break_date"]) < start
     df.loc[old & (df["status"] == "new"), "status"] = "historical"
 
-    # Confidence is computed here rather than in the detector for the same
-    # reason the gate is: it is a publication decision, it depends on the
-    # observation store as well as the model, and it must be re-derivable
-    # without re-running S-CCD.
+    # Confidence depends on the observation store, so it is scored here.
     df = conf_mod.score_breaks(aoi_name, df)
 
     existing = load(aoi_name)
     if len(existing):
-        # A verdict or a triage decision outranks anything a re-run computes. A
-        # refit re-derives a pixel's whole break history, so without this a
-        # reprocessed 2019 granule would quietly un-review alerts from 2019.
+        # A verdict or triage decision outranks a re-run (a refit re-derives
+        # the whole break history).
         settled = existing[existing["status"].isin(REVIEWED + ("confirmed",))]
         df = df[~df["alert_id"].isin(settled["alert_id"])]
-        # First detection is the truth: a break re-derived by a refit was not
-        # detected today, and detection_lag_days is a latency measurement.
+        # Keep first-detection time: detection_lag_days is a latency measure.
         first = existing.set_index("alert_id")[["detected_at", "detection_lag_days"]]
         seen = df["alert_id"].isin(first.index)
         if seen.any():
@@ -195,19 +165,10 @@ def summary(aoi_name: str) -> pd.DataFrame:
 
 
 def rescore(aoi_name: str, use_agreement: bool = True) -> pd.DataFrame:
-    """Recompute confidence for every alert in the table, in place.
+    """Recompute confidence for every alert in place; statuses are untouched.
 
-    Confidence is NOT a property of the moment an alert was raised. Its largest
-    term is the number of clear observations *after* the break, which grows with
-    every cycle -- so an alert correctly published as `low` on the day it fired
-    should climb to `medium` or `high` as the record accumulates behind it, and
-    an alert that never gains corroboration should stay where it is. Freezing the
-    tier at write time would make the review queue permanently wrong about
-    everything except brand-new alerts.
-
-    Statuses are not touched. A human verdict is a statement about reality; the
-    confidence tier is a statement about our evidence, and a re-run is entitled
-    to revise the second without disturbing the first.
+    Confidence grows as clear observations accumulate after the break, so it is
+    not frozen at write time.
     """
     df = load(aoi_name)
     if df.empty:
@@ -218,25 +179,14 @@ def rescore(aoi_name: str, use_agreement: bool = True) -> pd.DataFrame:
 
 
 def publishable(aoi_name: str, include_gain: bool = True) -> pd.DataFrame:
-    """The rows the public product is allowed to show.
-
-    `below_gate` is excluded from publication but never deleted from the table,
-    so re-gating stays a query rather than a re-run of the model -- which is the
-    whole reason those 60k-odd rows are kept.
-    """
+    """The rows the public product is allowed to show (never `below_gate`)."""
     df = load(aoi_name)
     if df.empty:
         return df
     keep = df["status"].isin(("new", "historical", "confirmed") + REVIEWED)
     if include_gain:
-        # `record` files every gain as `below_gate` because gain is not the
-        # signal this system exists to catch, so it is stored and left
-        # un-triaged. But the review vocabulary lets a reviewer answer "gain",
-        # and a verdict option with nothing on screen to attach it to is a
-        # broken form -- so a gain that clears the same magnitude gate is
-        # publishable as its own layer. Its `status` is deliberately NOT
-        # rewritten: it is still un-triaged, and the triage pipeline should keep
-        # seeing it that way.
+        # `record` files gains as `below_gate`; a gain clearing the magnitude
+        # gate is published as its own layer without rewriting its status.
         keep |= (df["kind"] == "gain") & (df["magnitude"].abs() >= df["gate"])
     else:
         keep &= df["kind"] == "loss"

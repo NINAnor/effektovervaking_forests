@@ -1,54 +1,18 @@
 """Step 5 -- join trajectory to condition, and check both against the field labels.
 
-This is the step that decides whether any of the preceding numbers mean
-anything. The `tilstand` labels give four tests, and the fourth exists because
-the first run of this pipeline failed it:
+Prints a validation report, all at `label_age == 0` (each labelled stand in its
+survey year), with AUC intervals from a bootstrap over spatial blocks:
+  1. ordering of median DoR across the `tilstand` classes;
+  2. good-vs-bad separation (AUC, Youden J) at stand and pixel grain, and what
+     the deployed three-way decision delivers;
+  3. which distance component (m_good / m_bad) carries the separation;
+  4. controls (area strata, interior pixels), condition vs trajectory, and the
+     trajectory against Hansen loss (4c);
+  5. stands whose pixels disagree with their stand-level class.
 
-  1. **Ordering.** Median DoR should fall god > moderat > dårlig >
-     sværtRedusert. `moderat` never enters a reference pool, so its position
-     between the two anchors is a genuine out-of-sample check, not a fit.
-  2. **Separation.** How well the leave-one-out DoR separates labelled good from
-     labelled bad, as AUC and as the calibrated Youden J -- at BOTH grains. The
-     stand and the pixel answer differently and both belong in the report: a
-     `tilstand` describes a whole stand, so it is a weak label for any one
-     pixel, and a pixel-grain AUC well below the stand-grain one is expected
-     rather than alarming.
-  3. **Where the score is coming from.** `dor = m_bad / (m_good + m_bad)` can
-     rise either because a pixel moved toward the good cloud or because it is
-     far from the transformed one. Those are different claims, and with a bad
-     pool built from cropland and built-up the second is the larger term: `m_bad`
-     runs 2-3x `m_good` and varies more. So this step reports the discriminative
-     power of each component separately. If `m_bad` alone carries almost all of
-     the AUC, the map is substantially a map of distance-from-town, and that has
-     to be visible rather than buried in a ratio.
-  4b. **Controls.** Stand area predicts the field label almost as well as the
-     embedding does -- the bad-labelled stands are smaller -- and every bad
-     label in the set comes from an MI survey. So the AUC is also reported
-     within log-area strata and on pixels at least 20 m inside their own stand,
-     because a separation that only exists between stands of different sizes,
-     or only on mixed edge pixels, is not a condition signal.
-  4c. **Trajectory against an independent product.** Hansen Global Forest Change
-     loss year (step 2e) is Landsat-based, so it is the one label here that does
-     not come from AlphaEarth. It gives the `declining` class a recall and a
-     false-positive rate instead of an assertion.
-
-  5. **Coherence with trajectory.** Stands the Mann-Kendall test calls
-     `declining` should score lower than `improving` ones. The trajectory is
-     the trend of the nature type score itself (since 2026-10; the naturalness
-     axis under `03_trajectory.py --input axis`), so disagreement points at
-     stands in poor condition but recovering, or good but deteriorating -- which
-     is exactly the management-relevant quadrant.
-
-Every AUC carries a bootstrap over whole 5 km spatial BLOCKS, not over pixels:
-97k pixels from 421 stands in 66 localities are not 97k independent
-observations, and a row-wise interval would understate the uncertainty by
-roughly the square root of that ratio.
-
-Everything is evaluated at `label_age == 0`, i.e. each labelled stand in the
-year it was actually surveyed. Scoring a 2017 `god` label against a 2025
-embedding would test what happened in between, not the method.
-
-Output: `outputs/data/condition_combined.csv` + a printed report.
+Reads `condition.parquet`, `pixel_condition.parquet` and `trajectory.parquet`
+(steps 04, 03); Hansen checks need steps 02e and `trajectory_pixels.parquet`.
+Output: `outputs/data/condition_combined.csv` + the printed report.
 
 Run:  forestmon condition step 05
 """
@@ -99,12 +63,7 @@ def auc(scores: np.ndarray, positive: np.ndarray) -> float:
 
 
 def block_ci(scores, positive, blocks, n_boot: int = 200, seed: int = 0):
-    """(auc, lo, hi) resampling whole spatial blocks.
-
-    The stands are not independent -- the six layers map the same localities
-    repeatedly -- so the block, not the pixel and not the stand, is the unit
-    that is plausibly exchangeable.
-    """
+    """(auc, lo, hi) resampling whole spatial blocks, the exchangeable unit."""
     s = np.asarray(scores, float)
     y = np.asarray(positive, bool)
     b = np.asarray(blocks)
@@ -223,13 +182,8 @@ def main(argv: list[str] | None = None) -> None:
             print(line)
         print("     intervals resample whole 5 km spatial blocks, not rows")
 
-    # ---- 2b. what the DEPLOYED three-way decision actually delivers --------
-    # AUC answers "does the score rank a degraded stand below a good one", which
-    # is prevalence-free and is the right question for the ranking claim. It is
-    # silent about the question a manager asks -- "of the stands this calls poor,
-    # how many are degraded, and how many degraded stands does it miss" -- and
-    # those depend on the threshold AND on the abstention rule. Reported here
-    # because the gap between the two is large and not visible from AUC.
+    # ---- 2b. what the deployed three-way decision delivers --------
+    # Precision/recall depend on the threshold and abstention rule, which AUC hides.
     print("\n2b. what the deployed decision delivers (positive class = DEGRADED)")
     lab2 = at_stand[at_stand["ref_role"].isin(["good", "bad"])]
     yb = (lab2["ref_role"] == "bad").to_numpy()
@@ -295,10 +249,7 @@ def main(argv: list[str] | None = None) -> None:
         for scope in SCOPES:
             print(f"     dor_{scope:<12} {auc(lab[f'dor_{scope}'].to_numpy(), y):.3f}")
         a_bad = auc(lab["m_bad"].to_numpy(), y)
-        # Compare against the BEST scope, not `global` alone. Once the good pool
-        # got its own inner radius (research E20) the reference side started
-        # carrying real signal and `local` overtook `m_bad`; warning off the
-        # global column only would keep crying wolf about the better scope.
+        # Compare against the best scope, not `global` alone.
         a_dor = max(auc(lab[f"dor_{sc}"].to_numpy(), y) for sc in SCOPES)
         if np.isfinite(a_bad) and np.isfinite(a_dor) and a_bad >= a_dor - 0.02:
             print(

@@ -1,41 +1,14 @@
 """Turning the alert table into the artefacts the public site and GIS users read.
 
-WHAT THIS PUBLISHES, AND WHY EACH FORM EXISTS
----------------------------------------------
-* **PMTiles (vector)** -- what the web app reads. Attributes travel with the
-  geometry, so the browser filters by date, confidence and status and restyles
-  without a server round trip and without re-tiling. A click yields `alert_id`
-  directly, which is what the feedback path needs.
-* **GeoJSON** -- the same features, unbundled. Used by `npm run dev`, by anyone
-  scripting against the product, and as the fallback if PMTiles range requests
-  are ever blocked by a host.
-* **GeoPackage** -- for QGIS and ArcGIS. Full attributes, one layer per kind.
-* **COG** -- one band per published variable, on the native Sentinel-2 10 m
-  lattice in the AOI's own UTM zone. No warping: `aoi.py` pinned the grid to the
-  real S2 lattice precisely so this artefact can be exact rather than resampled.
+* PMTiles (vector): what the web app reads; attributes travel with geometry.
+* GeoJSON: the same features unbundled (dev, scripting, PMTiles fallback).
+* GeoPackage: for QGIS/ArcGIS.
+* COG: one band per variable on the native S2 10 m lattice, one per UTM zone.
 
-ONE FEATURE PER PIXEL, NOT PER ALERT
-------------------------------------
-342 pixels carry more than one loss break. A map that draws them twice is a map
-that lies about how much has happened, so the published feature is the PIXEL,
-carrying `first_loss_date` (onset -- what management asks for) and
-`last_loss_date` (what is new -- what a monitoring product answers), with
-`n_events` recording that the pixel has a history.
-
-The `alert_id` on a published feature is the MOST RECENT loss event, because
-that is the one the map is colouring and therefore the one a reviewer is looking
-at. A reviewer's verdict is a statement about that event, not about the pixel's
-whole history.
-
-THE FOREST MASK IS THE AOI
---------------------------
-No separate forest baseline is rasterised here, and that is deliberate rather
-than missing. The AOI polygons ARE the forest mask for this project: they are
-mapped kalklindeskog and olivinskog naturtype polygons, and the system only ever
-looks inside them. Publishing a second, coarser forest layer derived from RADD
-would imply a distinction the pipeline does not make. RADD's tcd50 baseline stays
-available in the app as an external cross-reference layer, which is the honest
-role for it.
+The published feature is the PIXEL, not the alert: `first_loss_date` is onset,
+`last_loss_date` is what is new, and `alert_id` is the most recent loss event
+(the one a reviewer's verdict applies to). The AOI polygons are the forest
+mask; no separate forest layer is rasterised.
 """
 
 from __future__ import annotations
@@ -54,33 +27,25 @@ from . import alerts as alerts_mod
 from . import confidence as conf_mod
 from . import config, store
 
-# Day 0 for the raster date bands. Sentinel-2 L2A over these AOIs starts in 2017,
-# so no published date can be negative and uint16 covers ~179 years.
+# Day 0 for the raster date bands (uint16 days since this date).
 EPOCH = dt.date(2017, 1, 1)
 
-# 0 means "no event" in every raster band, which is also the nodata value -- the
-# requirement that a pixel with no loss shows nothing, expressed in the format.
+# 0 means "no event" in every raster band and is also the nodata value.
 NODATA = 0
 
 PIXEL_M = 10.0
 
-# Two destinations, because they have different jobs and very different size
-# budgets. The web payload is what every visitor downloads, so only the tiled
-# form and the small context files go there. The GIS artefacts are bulky,
-# redundant with the tiles, and wanted by a handful of people who will fetch
-# them deliberately -- putting them on the site would multiply the page weight
-# roughly twentyfold to serve nobody.
+# Web payload (tiles and small context files) vs bulky GIS artefacts, which
+# are kept off the site.
 WEB_OUT = config.WEB_OUT
 GIS_OUT = config.GIS_OUT
 DEFAULT_OUT = WEB_OUT
 
 
 def _gdal(tool: str) -> str:
-    """Locate a GDAL command-line tool.
+    """Locate a GDAL CLI tool (`ogr2ogr` >= 3.8 for PMTiles).
 
-    The rasterio wheel bundles the GDAL library but not its CLI, so `ogr2ogr`
-    (GDAL >= 3.8, for the PMTiles driver) comes from the system or a conda/pixi
-    env. FORESTMON_GDAL_BIN names the directory explicitly; otherwise PATH.
+    FORESTMON_GDAL_BIN names the directory; otherwise PATH.
     """
     bin_dir = os.environ.get("FORESTMON_GDAL_BIN")
     if bin_dir:
@@ -143,12 +108,7 @@ def pixel_table(aoi_name: str, kind: str = "loss") -> pd.DataFrame:
 
 
 def _to_wgs84(px: pd.DataFrame, geom: list, crs: np.ndarray):
-    """Geometries built in each pixel's own UTM zone, reprojected to WGS84.
-
-    A multi-zone AOI (olivinskog: 32-35) has coordinates on several lattices, so
-    the reprojection is done per zone; tagging them all with the first pixel's
-    CRS would put three of the zones hundreds of km from where they are.
-    """
+    """Geometries built in each pixel's own UTM zone, reprojected to WGS84 per zone."""
     import geopandas as gpd
 
     px = px.reset_index(drop=True)
@@ -166,12 +126,7 @@ def _to_wgs84(px: pd.DataFrame, geom: list, crs: np.ndarray):
 
 
 def _pixel_squares(px: pd.DataFrame, grid: pd.DataFrame):
-    """Real 10 m footprints, not points.
-
-    A reviewer giving a verdict has to see exactly which pixel is being claimed
-    against the orthophoto. A circle floating near a pixel invites a verdict
-    about the wrong ground.
-    """
+    """Real 10 m pixel footprints, so a reviewer sees exactly which ground."""
     from shapely.geometry import box
 
     g = grid.set_index("pix_id")
@@ -183,13 +138,8 @@ def _pixel_squares(px: pd.DataFrame, grid: pd.DataFrame):
 
 
 def _pixel_points(px: pd.DataFrame, grid: pd.DataFrame):
-    """The centres of those same footprints.
-
-    Derived from the grid's UTM coordinates rather than the alert table's
-    lon/lat so that a point is guaranteed to be the exact centre of the square
-    published for the same pixel. Two independently-derived positions for one
-    pixel is a discrepancy waiting to be found by a reviewer at high zoom.
-    """
+    """Centres of those footprints, from the grid's UTM coordinates (not lon/lat)
+    so they match the squares exactly."""
     from shapely.geometry import Point
 
     g = grid.set_index("pix_id")
@@ -204,12 +154,8 @@ def write_vector(
 ) -> dict:
     """GeoJSON first, then PMTiles and GPKG derived from it by GDAL.
 
-    Both PMTiles and GPKG are SQLite underneath -- GDAL's PMTiles writer stages
-    into a temporary mbtiles -- and this repository lives on a CIFS share where
-    SQLite cannot take the locks it needs. (The 0-byte `test_write.gpkg` and the
-    stray `opera.pmtiles.tmp.mbtiles` in the repo root are both scars from this.)
-    So anything SQLite-backed is built on local disk and copied to its final
-    home, which is also faster than writing tiles over SMB.
+    SQLite-backed outputs are built on local disk and copied, because SQLite
+    cannot lock files on a CIFS share.
     """
     import shutil
     import tempfile
@@ -227,21 +173,9 @@ def write_vector(
         local_gj = tmp / f"{stem}.geojson"
         shutil.copyfile(gj, local_gj)
 
-        # SQUARES ONLY WHERE A SQUARE IS HONEST -- z12 and up.
-        #
-        # MVT quantises geometry to EXTENT (4096) units per tile at every zoom,
-        # and below z12 a 10 m pixel is smaller than one unit. Measured against
-        # this very output on 2026-08-21: a footprint that is 19.3 m at z16 comes
-        # back 38.2 m at z8 and 305.7 m at z5, snapped to the quantisation grid,
-        # so pixels both bloat and MOVE -- by up to half a cell, ~153 m at z5 --
-        # as the reviewer zooms. That is a map telling a different story about
-        # where the loss is at every scale, which is worse than showing nothing.
-        #
-        # MAX_SIZE/MAX_FEATURES=0 already stop feature DROPPING; they do nothing
-        # about quantisation, and conflating the two is what let this survive.
-        # Raising EXTENT does not rescue it either: at its 65536 maximum z5 still
-        # quantises to 19 m. The only correct fix is to stop drawing footprints
-        # at scales that cannot represent them.
+        # Footprints only at z12+: MVT quantisation (EXTENT units per tile) makes
+        # a 10 m square bloat and shift at lower zooms, and raising EXTENT does
+        # not fix it. MAX_SIZE/MAX_FEATURES=0 only stop feature dropping.
         local_pm = tmp / f"{stem}.pmtiles"
         r = subprocess.run(
             [
@@ -276,11 +210,8 @@ def write_vector(
         else:
             made["pmtiles_error"] = (r.stderr or "no output")[-400:]
 
-        # ... and CENTRES below it, drawn as fixed-radius circles. A point
-        # quantises too, but to a position error of at most half a cell, which
-        # is 0.03 screen px at z5 -- invisible, where the same error applied to
-        # a footprint is the bug above. The overview stops claiming an area it
-        # cannot resolve and claims only a location, which is all it knows.
+        # Centres below z12 (z5-11): a point's quantisation error is invisible,
+        # and the overview claims only a location, not an area.
         if points is not None and len(points):
             local_pts_gj = tmp / f"{stem}_pts.geojson"
             points.to_file(local_pts_gj, driver="GeoJSON")
@@ -353,15 +284,9 @@ def write_cog(px: pd.DataFrame, grid: pd.DataFrame, out_path: Path) -> dict:
     Bands: 1 last_loss_date, 2 first_loss_date, 3 confidence (1/2/3),
     4 aoi_mask (1 inside a monitored polygon).
 
-    `grid` must hold a single `utm_crs`; `publish` calls this once per zone,
-    because one raster cannot hold two UTM lattices without warping.
-
-    The AOI spans hundreds of km but holds only tens of thousands of pixels in a
-    few hundred small clusters, so the array is >99.9% empty. It is therefore
-    never materialised: only the 512 px blocks that hold a pixel are written,
-    into a sparse tiled GTiff, which GDAL then copies to COG with SPARSE_OK so
-    empty blocks stay absent. (Allocating the full extent cost 4.8 GB for
-    kalklindeskog and would be ~17 GB for olivinskog's zone 32, 58-69 N.)
+    `grid` must hold a single `utm_crs`; `publish` calls this once per zone.
+    The array is >99.9% empty, so only the 512 px blocks holding a pixel are
+    written (sparse GTiff, then COG with SPARSE_OK); it is never materialised.
     """
     import rasterio
     import rasterio.shutil
@@ -386,8 +311,7 @@ def write_cog(px: pd.DataFrame, grid: pd.DataFrame, out_path: Path) -> dict:
             np.round((xs - x0) / PIXEL_M - 0.5).astype(int),
         )
 
-    # One value table over the grid pixels: mask=1 everywhere, alert bands where
-    # the pixel has a loss event.
+    # Value table over grid pixels: mask=1 everywhere, alert bands where lossy.
     r, c = rc(gx, gy)
     vals = np.zeros((4, len(grid)), dtype="uint16")
     vals[3] = 1
@@ -487,17 +411,10 @@ QUEUE_FIELDS = [
 
 
 def write_queue_index(px: pd.DataFrame, out_dir: Path, aoi_name: str, kind: str) -> str:
-    """Attributes only, no geometry -- what the review queue reads.
+    """Attributes only, no geometry: what the review queue reads.
 
-    The tiles are indexed by space; a queue is ordered by date, confidence or
-    magnitude and has to see every candidate at once, so it cannot be built from
-    them. Shipping the published GeoJSON instead would work but costs ~3.5 MB of
-    geometry to answer a question that needs none.
-
-    The fields are exactly those the queue sorts by and the evidence panel shows,
-    so selecting from the queue and clicking the map put identical objects into
-    the same state -- which is what stops the two halves of the app disagreeing
-    about an alert.
+    Fields are those the queue sorts by and the evidence panel shows, so queue
+    selection and map clicks agree.
     """
     cols = [c for c in QUEUE_FIELDS if c in px.columns]
     recs = px[cols].copy()
@@ -509,8 +426,7 @@ def write_queue_index(px: pd.DataFrame, out_dir: Path, aoi_name: str, kind: str)
         if c in recs:
             recs[c] = recs[c].fillna(0).astype(int)
     name = f"queue_{aoi_name}_{kind}.json"
-    # Separators without spaces: this file is machine-read only, and at a few
-    # thousand rows the whitespace is a measurable share of the download.
+    # Compact separators: machine-read only.
     (out_dir / name).write_text(
         json.dumps(recs.to_dict(orient="records"), separators=(",", ":")),
         encoding="utf-8",
@@ -578,9 +494,7 @@ def publish(
     if include_gain:
         gain = pixel_table(aoi_name, "gain")
         if len(gain):
-            # Published because the review vocabulary lets a reviewer answer
-            # "gain"; a verdict option with nothing on screen to attach it to is
-            # a broken form. Default off in the app.
+            # Published so the "gain" verdict has something to attach to.
             gdf = _pixel_squares(gain, grid)
             result["outputs"]["gain"] = write_vector(
                 gdf,
@@ -590,23 +504,17 @@ def publish(
                 gis_dir=gis_dir,
                 points=_pixel_points(gain, grid),
             )
-            # No queue index for gain. The review queue exists to produce an
-            # unbiased label set for the LOSS detector; gain is context, and a
-            # 22k-row worklist nobody is asked to work through would cost 8 MB
-            # of everyone's bandwidth to sit unused. Gain pixels stay clickable
-            # on the map, which is all the "gain" verdict option needs.
+            # No queue index for gain: the queue labels the LOSS detector; gain
+            # stays clickable on the map.
             result["n_gain_pixels"] = int(len(gain))
 
     if write_raster:
-        # Same CIFS problem as the SQLite artefacts, different symptom: the COG
-        # driver seeks backwards over its staging file to lay down the header
-        # and overviews, and this share answers that with _tiffSeekProc I/O
-        # errors. Build local, copy once.
+        # Build locally and copy: the COG driver seeks backwards, which fails on
+        # CIFS (_tiffSeekProc I/O errors).
         import shutil
         import tempfile
 
-        # One COG per UTM zone. A single-zone AOI keeps its plain name, so
-        # kalklindeskog's published file does not move.
+        # One COG per UTM zone; a single-zone AOI keeps the plain name.
         zones = sorted(grid["utm_crs"].unique())
         infos = []
         with tempfile.TemporaryDirectory(prefix="forestmon_cog_") as tmp:
@@ -638,13 +546,8 @@ def publish(
 def write_alert_ids(results: list[dict], out_dir: Path | str = WEB_OUT) -> Path:
     """The flat list of published alert ids, read by the feedback endpoint.
 
-    This is the cheapest and most effective control on an open write endpoint: a
-    drive-by POST does not know any real alert id, so requiring one rejects
-    almost all junk without asking a single reviewer to log in.
-
-    It is generated here, from the same run that produces the tiles, so the
-    endpoint validates against exactly what the site is currently showing rather
-    than against a list that quietly went stale.
+    The endpoint rejects unknown ids; generating the list with the tiles keeps
+    it in step with what the site shows.
     """
     out_dir = Path(out_dir)
     ids: list[str] = []
@@ -660,17 +563,11 @@ def write_alert_ids(results: list[dict], out_dir: Path | str = WEB_OUT) -> Path:
 
 
 def write_manifest(results: list[dict], out_dir: Path | str = DEFAULT_OUT) -> Path:
-    """What the app reads first: freshness, counts, and which files exist.
-
-    A public monitoring map whose age is unknowable is worse than no map, so the
-    run date is a first-class part of the product rather than a footnote.
-    """
+    """What the app reads first: freshness, counts, and which files exist."""
     out_dir = Path(out_dir)
     now = dt.datetime.now(dt.UTC)
-    # The cycle publishes one AOI at a time, so a manifest built from `results`
-    # alone would drop every other AOI the moment the next one is published.
-    # Keep the entries of AOIs not in this run (a stale entry is honest -- its
-    # files are still on disk -- whereas a missing one takes the AOI off the map).
+    # AOIs are published one at a time: keep manifest entries of AOIs not in
+    # this run (their files are still on disk).
     results = list(results)
     done = {r["aoi"] for r in results}
     prev = out_dir / "manifest.json"

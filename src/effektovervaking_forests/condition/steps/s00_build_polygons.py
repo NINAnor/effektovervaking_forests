@@ -1,34 +1,14 @@
 """Step 0 -- build the polygon manifest for both forest types.
 
-Reads the six mapped layers out of `skog_kartlegginger.gpkg`, gives every
-polygon a stable `poly_id`, attaches its forest type and its `tilstand` field
-condition label, and assigns the reference role that steps 3-5 use:
-
-    good        tilstand = god                -> reference pool
-    bad         tilstand = daarlig / svaertRedusert -> reference pool
-    holdout     tilstand = moderat            -> scored, never a reference
-    unlabelled  no tilstand (HB13)            -> scored, never a reference
-
-It also records two things without which the roles above cannot be used
-honestly. `survey_year`, because these labels were assigned between 2015 and
-2025, so a `god` from 2017 says nothing about 2025 and a stand cut in 2020 still
-carries it. And `block`, the stand's spatial block: the six layers map the same
-localities repeatedly and `god` stands cluster, so a reference pool that excludes
-only the probe and its overlapping neighbours still contains a donor a few
-hundred metres away on the same hillside. Excluding by block instead costs about
-a third of the apparent stand-grain separation, which is the part that was
-leakage (`condition/research/`, experiment E01). See `condition.blocks`.
-
-The layers overlap on about a quarter of their combined area. That is not
-resolved here -- the polygons stay as mapped -- but `02b_membership.py` builds
-the pixel model that stops overlapping stands from taking each other's pixels.
+Reads the six mapped layers from `skog_kartlegginger.gpkg` (FORESTS_KARTLEGGING_GPKG),
+gives each polygon a stable `poly_id`, its forest type and `tilstand` label, and
+assigns the reference role used by steps 3-5: good (god), bad (daarlig /
+svaertRedusert), holdout (moderat) or unlabelled (HB13). Holdout and unlabelled
+are scored but never used as references. Also records `survey_year` and the
+spatial `block` (see `condition.blocks`).
 
 Writes `outputs/data/polygons.parquet` (attributes) and `polygons_geo.parquet`
-(GeoParquet, EPSG:25833) -- the geometry file is what the extraction step reads.
-GeoParquet rather than GeoPackage because this project tree lives on a network
-share where SQLite cannot take a write transaction (`pyogrio` fails with
-"Failed to start transaction"); GeoParquet has no such problem and geopandas
-reads it back with `read_parquet`.
+(GeoParquet, EPSG:25833; read by the extraction step).
 
 Run:  forestmon condition step 00
 """
@@ -53,8 +33,7 @@ from effektovervaking_forests.condition.refs import assign_roles, survey_year
 WORKING_CRS = 25833  # ETRS89 / UTM 33N -- the CRS the source layers already use
 POLY_GEO = OUT_DATA / "polygons_geo.parquet"
 
-# Attributes carried through where present. Everything else is dropped: the six
-# layers have incompatible schemas and a union of all of them is unusable.
+# Attributes carried through where present; the six layers' schemas differ.
 KEEP = [
     "tilstand",
     "naturtype",
@@ -102,8 +81,7 @@ def main(argv: list[str] | None = None) -> None:
         out.insert(0, "src_id", gdf[idc].astype(str))
         out.insert(0, "layer", layer)
         out.insert(0, "forest_type", ftype)
-        # poly_id must survive re-runs and be unique across layers, since the two
-        # HB13/MI layers can share an identifikasjon_lokalId.
+        # Layer-prefixed: source ids can repeat across layers.
         out.insert(0, "poly_id", layer + ":" + out["src_id"])
         frames.append(out)
         print(f"  {layer:<22} {len(out):>4} polygons")
@@ -115,23 +93,17 @@ def main(argv: list[str] | None = None) -> None:
         dup = poly.loc[poly["poly_id"].duplicated(keep=False), "poly_id"].unique()[:5]
         raise SystemExit(f"poly_id is not unique, e.g. {list(dup)}")
 
-    # The six layers type their shared column names differently (`year` is text
-    # in MI, numeric in HB13), which parquet will not accept. Normalise the
-    # carried-through attributes to string; they are descriptive only.
+    # Layers type shared columns differently (`year`), which parquet rejects.
     for c in KEEP:
         if c in poly.columns:
             poly[c] = poly[c].astype("string")
 
     poly["ref_role"] = assign_roles(poly)
-    # When the label was assigned. `tilstand` describes the day the surveyor
-    # stood there, not the record, so nothing downstream may use a label
-    # without also knowing its year -- see condition/refs.py.
+    # A label is evidence about its survey year only (see condition/refs.py).
     poly["survey_year"] = survey_year(poly)
     poly["area_ha"] = poly.geometry.area / 10_000.0
-    # 10 m pixels; a stand under ~0.05 ha will be represented by its centroid
-    # pixel only (see aef._pixels_for_geometry), which is worth knowing about.
+    # 10 m pixels; stands under ~0.05 ha get their centroid pixel only.
     poly["approx_pixels"] = (poly.geometry.area / 100.0).round().astype(int)
-    # Spatial blocks, so a probe can be kept out of its own locality's pool.
     poly = poly.merge(
         assign_blocks(poly, km=args.block_km)[["poly_id", "block"]],
         on="poly_id",

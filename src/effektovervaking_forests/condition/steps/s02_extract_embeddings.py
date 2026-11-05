@@ -1,16 +1,12 @@
 """Step 2 -- download the AlphaEarth embeddings for every polygon pixel, 2017-2025.
 
-Reads straight from the Source Cooperative mirror: no Earth Engine account, no
-quota, no export job. See `condition.aef` for why this is block-aligned and what
-that buys.
+Reads from the Source Cooperative mirror (no Earth Engine account needed); see
+`condition.aef`. The unit of work and of resume is one (tile, year): each writes a
+parquet shard under `data/cache/pixels/`, and a re-run skips existing shards.
+Tiles run concurrently in threads (network-bound).
 
-The unit of work and of resume is one (tile, year): each writes a parquet shard
-under `data/cache/pixels/`, and a re-run skips shards that already exist. Tiles
-run concurrently -- the workload is entirely network-bound, so threads (not
-processes) are the right tool and the GIL is irrelevant.
-
-Output: `outputs/data/polygon_pixels.parquet`, long-format, one row per
-(poly_id, year, pixel) with A00..A63 plus the pixel's UTM x/y.
+Reads `polygons_geo.parquet` (step 00). Output: `outputs/data/polygon_pixels.parquet`,
+one row per (poly_id, year, pixel) with A00..A63 plus the pixel's UTM x/y.
 
 Run:
     forestmon condition step 02
@@ -58,11 +54,8 @@ def run_tile(
     if out.exists():
         return out.name, -1, 0.0
     t0 = time.time()
-    # GDAL retries individual range requests (GDAL_HTTP_RETRY_CODES in
-    # condition.aef), but a tile can still fail outright when Cloudflare sheds
-    # load. Retry the whole tile with a backoff before giving up on it -- a
-    # dropped tile is a silent hole in the pixel table, and the shard-exists
-    # check means a later re-run would consider it done.
+    # Retry the whole tile with backoff: GDAL retries single requests, but a
+    # tile can still fail when the server sheds load.
     for attempt in range(1, attempts + 1):
         try:
             df = extract_from_tile(
@@ -73,7 +66,6 @@ def run_tile(
             if attempt == attempts:
                 raise
             time.sleep(5 * 2 ** (attempt - 1))
-    # Downcast: 64 float32 bands is 256 B/pixel and this table has ~1e6 rows.
     for c in BANDS:
         if c in df.columns:
             df[c] = df[c].astype("float32")
@@ -154,8 +146,7 @@ def main(argv: list[str] | None = None) -> None:
     if not shards:
         raise SystemExit("no shards written")
     df = pd.concat((pd.read_parquet(p) for p in shards), ignore_index=True)
-    # A polygon on a tile seam is read from both tiles; the two reads agree, so
-    # dedupe on the pixel's own identity rather than trusting read order.
+    # A polygon on a tile seam is read from both tiles.
     df = df.drop_duplicates(subset=["poly_id", "year", "x", "y"])
     df.to_parquet(POLY_PIXELS, index=False, compression="zstd")
 

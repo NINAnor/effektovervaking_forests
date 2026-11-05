@@ -1,33 +1,11 @@
 """S-CCD: initial fit, online update, and the breaks that come out of it.
 
-S-CCD (Stochastic Continuous Change Detection) is the only member of the CCDC
-family in this project that is genuinely recursive: it carries a Kalman-filtered
-model of each pixel forward and tests each new observation against it, instead
-of refitting the whole history. That is what allows near-real-time operation,
-and it is why `update()` here calls `sccd_update` rather than `sccd_detect`.
-
-The numerical recipe is copied deliberately from `scripts/c2c_ts_server.py`
-(`_pyxccd_breaks_and_fit`): the same band order, the same clipping to 1-10000,
-the same all-clear QA vector, and the same label-tuned p_cg/conse. An
-operational alert should be reproducible in the inspector a scientist is
-looking at, so the two must not drift.
-
-A caveat worth stating plainly: S-CCD scored worst of the six segmenters against
-this project's human labels — cross-validated loss F1 **0.185** for the
-configuration actually deployed here (p_cg 0.90, conse 6, with the 0.075
-magnitude gate), against 0.79 for VeRDET.
-
-Be careful which number gets quoted. `results/label_tuning_cv.csv` reports three:
-`cv_f1_tuned` 0.074 (the grid-searched config, which `tune_on_labels.py`
-REJECTED as overfitted), `cv_f1_current` 0.138 (these parameters, ungated) and
-`cv_f1_gate_only` 0.185 (these parameters plus the tuned gate — what runs here).
-Earlier drafts of the design doc quoted 0.074 against the deployed system, which
-understated it 2.5x. The ranking is unchanged either way.
-
-It earns its place here by being deployable in near-real-time at all, not by
-being the most accurate detector we have. Its output should be
-treated as a trigger for review, and the confirmation logic that turns breaks
-into alerts is where the precision will have to come from.
+S-CCD is recursive: it carries a Kalman-filtered model per pixel forward and
+tests each new observation against it, so `update()` calls `sccd_update`
+rather than refitting history with `sccd_detect`. The recipe (band order,
+clipping to 1-10000, all-clear QA, p_cg/conse) mirrors the inspector so alerts
+are reproducible there. Breaks are triggers for review, not final answers; see
+docs/ for detector accuracy.
 """
 
 from __future__ import annotations
@@ -46,8 +24,8 @@ try:
 except ImportError:  # pragma: no cover
     HAVE_PYXCCD = False
 
-# Below this many clear observations a harmonic fit is meaningless. Matches the
-# inspector's threshold so the two agree about which pixels are modellable.
+# Below this many clear observations a harmonic fit is meaningless (matches
+# the inspector).
 MIN_OBS = 20
 
 
@@ -66,10 +44,7 @@ def frac_year(ordinal: int) -> float:
 def pixel_arrays(g: pd.DataFrame) -> tuple:
     """One pixel's observations as the arrays pyxccd wants.
 
-    Same-day duplicates are collapsed to their median. They arise where MGRS
-    tiles overlap: a pixel in the seam is imaged twice in one pass and appears
-    twice with slightly different values. Feeding both would let a purely
-    geometric artefact drive the change statistic.
+    Same-day duplicates (MGRS tile overlap) are collapsed to their median.
     """
     g = g.sort_values("datetime")
     ordinals = _to_ordinal(g["datetime"])
@@ -84,8 +59,7 @@ def pixel_arrays(g: pd.DataFrame) -> tuple:
     arr = {
         b: np.clip(df[b].to_numpy(dtype=np.int64), max(lo, 1), hi) for b in config.BANDS
     }
-    # Observations are pre-masked, so every one is "clear" as far as pyxccd is
-    # concerned; the SCL screening already happened in the reader.
+    # Observations are pre-masked by the reader, so all are "clear" to pyxccd.
     qa = np.zeros(len(dts), dtype=np.int64)
     return dts, arr, qa
 
@@ -134,10 +108,8 @@ def update_pixel(pack, g: pd.DataFrame):
 def breaks_from_pack(pack, pix_id: str) -> list[dict]:
     """Confirmed breaks in a pixel's state, as alert candidates.
 
-    S-CCD keeps only CONFIRMED, closed segments in `rec_cg`; an in-progress
-    break lives in `nrt_model` and is not reported here. The magnitude is the
-    NIR/SWIR2 change rescaled to the NBR range, matching every other detector in
-    this project so a single gate threshold is comparable across them.
+    Only confirmed segments in `rec_cg` are reported (in-progress breaks live
+    in `nrt_model`). Magnitude is the NIR/SWIR2 change rescaled to the NBR range.
     """
     rec = getattr(pack, "rec_cg", None)
     if rec is None or len(rec) == 0:
@@ -164,14 +136,7 @@ def breaks_from_pack(pack, pix_id: str) -> list[dict]:
 
 
 def nrt_status(pack) -> int | None:
-    """The pixel's current S-CCD mode.
-
-    pyxccd encodes what the recursive model is doing right now — stable
-    monitoring, or accumulating consecutive anomalous observations toward a
-    break. It is the closest thing to "something may be happening here" before a
-    break is confirmed, so it is carried through to the alert table even though
-    v1 does not alert on it.
-    """
+    """The pixel's current pyxccd NRT mode (stable vs accumulating anomalies)."""
     v = getattr(pack, "nrt_mode", None)
     if v is None:
         return None
@@ -184,11 +149,8 @@ def nrt_status(pack) -> int | None:
 def all_breaks(states: dict) -> list[dict]:
     """Every confirmed break currently held in state, across all pixels.
 
-    The alert table is meant to be a view of this. Writing alerts and saving
-    state cannot be one transaction, so a run that saves state and then fails to
-    write alerts would otherwise lose those breaks forever — `update()` only
-    ever reports the DELTA. Recomputing the full set from state is what makes
-    that recoverable (see pipeline.reconcile_alerts).
+    Lets a failed alert write be recovered, since `update()` only reports the
+    delta (see pipeline.reconcile_alerts).
     """
     out: list[dict] = []
     for pix_id, pack in states.items():
@@ -201,10 +163,8 @@ def bootstrap(
 ) -> tuple[dict, list[dict], dict]:
     """Fit initial state for every pixel with enough clear observations.
 
-    Also used mid-life, on a subset: pixels too sparse to fit at bootstrap that
-    have since crossed MIN_OBS, and pixels whose history changed underneath them
-    (a reprocessed product landing behind the state watermark). Both are refits
-    from stored observations, not reads from CDSE.
+    Also used on subsets: pixels that crossed MIN_OBS since bootstrap, and
+    pixels refit after a reprocessed product landed behind the watermark.
     """
     if not HAVE_PYXCCD:
         raise RuntimeError("pyxccd is not installed (pip install 'pyxccd>=1.0.3')")
@@ -242,11 +202,9 @@ def update(
 ) -> tuple[dict, list[dict], dict]:
     """Advance state with new observations; return newly confirmed breaks.
 
-    "New" is decided by comparing each pixel's break set before and after the
-    update, keyed on the break ordinal. S-CCD can confirm a break that occurred
-    some observations ago — confirmation needs `conse` subsequent looks — so a
-    break appearing in this run may be dated weeks back. That lag is inherent to
-    the method and is reported as `detection_lag_days` rather than hidden.
+    "New" = break ordinals absent before the update. Confirmation needs `conse`
+    further looks, so a new break may be dated weeks back; that lag is reported
+    as `detection_lag_days`.
     """
     if not HAVE_PYXCCD:
         raise RuntimeError("pyxccd is not installed (pip install 'pyxccd>=1.0.3')")
@@ -258,10 +216,8 @@ def update(
     for pix_id, g in new_obs.groupby("pix_id", sort=False):
         pack = states.get(pix_id)
         if pack is None:
-            # No state: the pixel was below MIN_OBS when the fit was made. It is
-            # not permanently unknowable — it is a pixel waiting for its 20th
-            # clear look — so name it rather than just counting it, and let the
-            # caller fit it once the store says it qualifies.
+            # No state (below MIN_OBS at fit time): return it so the caller can
+            # fit it once it qualifies.
             unknown += 1
             unfitted.append(pix_id)
             continue
@@ -296,20 +252,14 @@ def split_by_watermark(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Separate observations S-CCD can absorb from ones that need a refit.
 
-    `sccd_update` is recursive: it advances a Kalman-filtered model forward in
-    time. Handing it an observation dated BEFORE the newest one already folded
-    into state is not merely inefficient, it corrupts the model — the change
-    statistic is computed against a fit that has already moved past that date.
-
-    This happens for real, not just in theory: ESA reprocesses granules, and a
-    2024 product republished today is a genuinely new scene_id carrying an old
-    sensing date. Those observations are routed to a full refit of the affected
-    pixels instead, which is the only correct way to fold them in.
+    `sccd_update` is recursive: an observation dated at or before the state
+    watermark would corrupt the model. Such observations (e.g. a reprocessed old
+    product under a new scene_id) go to a full refit of the pixel instead.
     """
     if watermark is None or new_obs.empty:
         return new_obs, new_obs.iloc[0:0]
     ts = pd.to_datetime(new_obs["datetime"], utc=True)
     late = ts <= pd.Timestamp(watermark)
-    # Only pixels that actually carry state can be "behind" it.
+    # Only pixels with state can be behind it.
     late &= new_obs["pix_id"].isin(states.keys())
     return new_obs[~late], new_obs[late]

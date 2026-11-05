@@ -1,28 +1,14 @@
 """Step 2c -- choose the AlphaEarth blocks the transformed bad pool needs.
 
 The bad pool is cropland and built-up pixels in a 3-8 km ring around each stand
-(`condition/worldcover.py`). Taking that literally -- every transformed pixel in
-every ring -- is unaffordable: the rings touch 329 AlphaEarth blocks per year
-against the 87 the stands themselves need, and a block costs ~40 MB and 6-10 s
-whether you read one pixel of it or a million. Naively that is ~118 GB.
+(`condition/worldcover.py`). Reading every ring is unaffordable, so this step
+solves a greedy set-cover: the fewest blocks such that every stand has at least
+`--min-bad` transformed pixels inside its own annulus. Stands still short get
+their outer radius widened (8 -> 16 -> 32 -> 64 km); the radius used is recorded
+per stand.
 
-But no stand needs its whole ring; it needs a few hundred reference pixels from
-it. So which blocks get read is a **set-cover problem**, and solving it is the
-difference between 118 GB and a run measured in minutes:
-
-    choose the fewest blocks such that every stand has at least
-    `--min-bad` transformed pixels available inside its own annulus
-
-Greedy, by marginal deficit reduction -- blocks near towns serve dozens of
-stands at once, so the first few picks do most of the work. Stands still short
-after the pass get their outer radius widened (8 -> 16 -> 32 -> 64 km) and the
-search repeats, because an outer-coast olivinskog stand can have no cropland or
-built-up within 8 km at all; the widened radius is recorded per stand rather
-than hidden.
-
-This step downloads no AlphaEarth data. It reads WorldCover (a few MB per
-block, uint8) and writes the plan, so the cost of step 2d is known before it is
-paid.
+Downloads no AlphaEarth data; it reads WorldCover only, so the cost of step 2d
+is known before it is paid. Reads `polygons_geo.parquet`.
 
 Outputs `bad_pool_plan.parquet` (blocks to read) and `bad_candidates.parquet`
 (the chosen pixels and the stands each serves).
@@ -85,10 +71,8 @@ def candidate_blocks(ring: gpd.GeoDataFrame, year: int) -> pd.DataFrame:
             continue
         for b in blocks_for_geometries(sub, td):
             w, s, e, n = b.bounds(td)
-            # Keyed by the TILE ORIGIN, not by tile_id: the mirror re-hashes
-            # every tile filename per year, so tile_id identifies a file, not a
-            # place. (utm_zone, utm_west, utm_south) is what is stable, and it
-            # is what step 2d joins the annual index back on.
+            # Keyed by tile origin, not tile_id: the mirror re-hashes tile
+            # filenames per year. Step 2d joins on these columns.
             rows.append(
                 {
                     "utm_zone": t.utm_zone,
@@ -161,10 +145,7 @@ def scan(
 def greedy_cover(cand: pd.DataFrame, stands: list[str], min_bad: int) -> list[int]:
     """Fewest blocks such that every stand reaches `min_bad` candidate pixels.
 
-    Marginal-gain greedy: the gain of a block is how much it reduces the *unmet*
-    deficit, so a block offering a stand its 400th pixel when 150 are wanted
-    counts for nothing. That is what keeps a city block from being picked twice
-    over for stands it has already satisfied.
+    Marginal-gain greedy: a block's gain is the reduction in *unmet* deficit.
     """
     by_block: dict[int, dict[str, int]] = defaultdict(dict)
     for blk, grp in cand.groupby("block", sort=False):
@@ -250,7 +231,7 @@ def main(argv: list[str] | None = None) -> None:
         if cand.empty:
             print("  no transformed pixels found anywhere in these rings")
             continue
-        # Block ids are per-round; make them global before they are stored.
+        # Block ids are per-round; make them global.
         offset = sum(len(b) for b in all_blocks)
         cand["block"] += offset
         keep = greedy_cover(cand, list(sub["poly_id"]), args.min_bad)

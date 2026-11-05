@@ -1,42 +1,19 @@
 """Read AlphaEarth annual embeddings from Source Cooperative (no Earth Engine).
 
-The community mirror at `s3://us-west-2.opendata.source.coop/tge-labs/aef` holds
-the same annual 64-band, 10 m embeddings as `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`,
-as 8192x8192 int8 COGs -- one directory per year and UTM zone -- plus a spatial
-index (`aef_index.parquet`) with one row per (tile, year).
+The mirror holds 64-band, 10 m int8 COGs (8192x8192, one directory per year and
+UTM zone) plus a tile index (`aef_index.parquet`). Design constraints:
 
-Three properties of the mirror drive the whole design of this module. They were
-measured, not assumed; `scripts/09_bench_reads.py` reproduces the numbers.
+1. COGs are band-interleaved with 1024x1024 blocks, so small windows are
+   expensive. This module block-aligns: it finds the blocks the polygons touch,
+   reads each once in full, and cuts polygons out in memory.
+2. The `.tiff` is bottom-up (origin at the SOUTH edge). The sibling `.vrt` is
+   north-up but re-blocks to 128x512, defeating (1), so `_read_block` reads the
+   `.tiff` natively and flips.
+3. Values are int8, nodata -128, quantised with a signed square root;
+   `dequantise` inverts it.
 
-1. **The COGs are BAND-interleaved with 1024x1024 blocks.** Reading a 32x32
-   window is therefore not cheap: GDAL must fetch one 1024x1024 block *per band*,
-   i.e. 64 compressed blocks totalling ~40 MB, to answer it. Measured from here,
-   a 32x32x64 window took >90 s while a full 1024x1024x64 block took **6-10 s**.
-   The window size is almost free; the block count is everything.
-
-   So this module never reads per-polygon windows. It block-aligns: it works out
-   which 1024x1024 blocks the polygons touch, reads each such block **once**, in
-   full, and cuts every polygon out of the block in memory. That turns a
-   per-polygon read pattern into a handful of large reads and is the difference
-   between a run of days and a run of tens of minutes.
-
-   `GDAL_HTTP_MULTIRANGE=YES` matters just as much: it lets the 64 per-band
-   range requests go out concurrently instead of serially.
-
-2. **The `.tiff` is bottom-up.** Its geotransform has a POSITIVE y step with the
-   origin at the tile's SOUTH edge, so row 0 is the southernmost row. Every tile
-   ships a sibling `.vrt` that presents it north-up -- but that `.vrt` is a
-   *warped* VRT which re-blocks to 128x512 and defeats the block alignment above.
-   So we read the `.tiff` natively and flip, which `_read_block` does, returning
-   a normal north-up affine. `tests/test_aef_reader.py` checks the flipped output
-   against the `.vrt` pixel for pixel.
-
-3. **Values are int8, nodata -128,** the unit-normalised float embedding
-   quantised with a signed square root; `dequantise` inverts it.
-
-Anonymous access needs `AWS_NO_SIGN_REQUEST=YES` for `/vsis3`; the default here
-is `/vsicurl` against `data.source.coop`, which needs no credentials at all and
-measured faster from Europe. `gdal_env()` applies both plus the HTTP tuning.
+Reads use `/vsicurl` against data.source.coop (no credentials); `gdal_env()`
+applies the HTTP tuning.
 """
 
 from __future__ import annotations
@@ -82,8 +59,7 @@ _GDAL_ENV = {
     # Never list a prefix just to open one object.
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tiff,.vrt",
-    # The single most important setting here: issue the 64 per-band block ranges
-    # concurrently. Without it a block read is 64 serial round trips.
+    # Most important setting: issue the 64 per-band block ranges concurrently.
     "GDAL_HTTP_MULTIRANGE": "YES",
     "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
     "GDAL_HTTP_MULTIPLEX": "YES",
@@ -94,10 +70,8 @@ _GDAL_ENV = {
     "VSI_CACHE": True,
     "VSI_CACHE_SIZE": 64 * 1024 * 1024,
     "GDAL_NUM_THREADS": "ALL_CPUS",
-    # data.source.coop sits behind Cloudflare, which returns 520/522/525 under
-    # concurrency often enough to fail whole tiles. GDAL's own retry does not
-    # cover those codes by default -- they are Cloudflare-specific, not RFC
-    # statuses -- so they are listed explicitly alongside the usual 5xx.
+    # data.source.coop (Cloudflare) returns 520/522/525 under concurrency; GDAL
+    # does not retry those by default, so list them with the usual 5xx.
     "GDAL_HTTP_MAX_RETRY": 5,
     "GDAL_HTTP_RETRY_DELAY": 2,
     "GDAL_HTTP_RETRY_CODES": "429,500,502,503,504,520,521,522,523,524,525",
@@ -226,10 +200,8 @@ def blocks_for_geometries(gdf_utm, tile: dict) -> list[Block]:
 def dequantise(raw: np.ndarray) -> np.ndarray:
     """Stored int8 (nodata -128) -> float32 embedding: v = (raw / 127.5)^2 * sign(raw).
 
-    The mirror is quantised with a signed square root. Checked against
-    `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` over 400 pixels (2024): cosine 1.000000
-    and unit norm, where a linear raw / 127 read is off in direction (cosine
-    0.96), not just in scale. A 256-entry lookup table, with nodata -> NaN.
+    The mirror is quantised with a signed square root (not linear). A 256-entry
+    lookup table; nodata -> NaN.
     """
     return _DEQUANT_LUT[np.asarray(raw).astype(np.int16) + 128]
 
@@ -279,13 +251,10 @@ class _GdalTile:
 def _read_block(ds, blk: Block) -> tuple[np.ndarray, Affine]:
     """Read one whole block and return it north-up, with a north-up affine.
 
-    The block is addressed geographically -- `brow` counts north from the tile's
-    SOUTH edge -- and the file rows are then derived from the dataset's own
-    transform, so this is correct whether the file is bottom-up (the `.tiff`, y
-    step +10, origin at the south edge) or north-up (the `.vrt`). Getting this
-    backwards reads the block mirrored about the tile's centre line, which is a
-    silent wrong answer rather than an error: the array is valid, just from
-    somewhere else. `tests/test_aef_reader.py` pins it against the `.vrt`.
+    `brow` counts north from the tile's SOUTH edge; file rows are derived from
+    the dataset's own transform, so this works for the bottom-up `.tiff` and the
+    north-up `.vrt`. Getting it backwards silently reads a mirrored block
+    (pinned by tests/test_aef_reader.py).
     """
     west, south, north = _tile_origin(ds)
     step = abs(ds.transform.e)
@@ -331,12 +300,9 @@ def extract_from_tile(
     """All pixels of `gdf` that fall on one (tile, year) -- the unit of work and resume.
 
     `tile` is a row of `tiles_for_geometries`. Returns long-format rows
-    `id_col, year, utm_zone, x, y, A00..A63`, with x/y the pixel centre in the
-    tile's UTM CRS -- so a pixel keeps a stable identity across years, since the
-    annual tiles of one zone share a grid.
-
-    Never raises for "nothing here": a caller sharding by tile can treat an empty
-    frame as done.
+    `id_col, year, utm_zone, x, y, A00..A63`, x/y being the pixel centre in the
+    tile's UTM CRS (stable across years: annual tiles of a zone share a grid).
+    An empty frame, never an exception, means nothing here.
     """
     tile = tile._asdict() if hasattr(tile, "_asdict") else dict(tile)
     empty = pd.DataFrame(columns=[id_col, "year", "utm_zone", "x", "y", *BANDS])
@@ -356,8 +322,7 @@ def extract_from_tile(
 
     frames: list[pd.DataFrame] = []
     seen: set = set()
-    # The polygon bounds are needed once per block, so they are taken out of the
-    # GeoSeries once rather than through a Python call per polygon per block.
+    # Polygon bounds taken out of the GeoSeries once, not per polygon per block.
     bounds = sub.geometry.bounds.to_numpy()
     with open_tile(tile) as src:
         blocks = blocks_for_geometries(sub, tile)
@@ -394,18 +359,15 @@ def extract_from_tile(
                     frames.append(df)
                     seen.update(df[id_col].unique())
 
-        # Stands smaller than a pixel rasterize to nothing; fall back to the
-        # pixel under the centroid so a 0.01 ha kalklindeskog stand is scored
-        # rather than silently dropped. This runs AFTER every block, not inside
-        # the loop: a stand spanning two blocks may rasterize in the second one,
-        # and adding its centroid while processing the first would give it a
-        # spurious extra pixel.
+        # Stands smaller than a pixel rasterize to nothing; fall back to the pixel
+        # under the centroid. Runs AFTER every block (not inside the loop): a
+        # stand spanning two blocks may rasterize in the second, and adding its
+        # centroid while processing the first would give it a spurious extra pixel.
         missing = sub[~sub[id_col].isin(seen)]
         cent = missing.geometry.centroid if len(missing) else None
         for blk in blocks_for_geometries(missing, tile) if len(missing) else []:
             bb = blk.bounds(tile)
-            # Strict on both sides, exactly as `_overlaps` was on the degenerate
-            # bounds of a point: a centroid on a block edge belongs to neither.
+            # Strict on both sides: a centroid on a block edge belongs to neither.
             cx, cy = cent.x.to_numpy(), cent.y.to_numpy()
             here = missing[(cx > bb[0]) & (cx < bb[2]) & (cy > bb[1]) & (cy < bb[3])]
             if here.empty:

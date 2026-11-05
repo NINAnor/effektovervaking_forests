@@ -1,22 +1,9 @@
-"""CDSE credentials.
+"""CDSE S3 credentials (access key + secret for `s3://eodata`).
 
-CDSE has two independent credential systems and they are easy to confuse:
-
-* **S3 keys** (access key + secret) generated at
-  https://eodata-s3keysmanager.dataspace.copernicus.eu/ — these read the
-  `s3://eodata` archive directly and are what this package uses. They allow
-  byte-range reads, which is the whole point: we need a few hundred pixels out
-  of a 100 MB JP2, not the file.
-* **Account username/password** (OIDC), used by the OData/zipper endpoints.
-  Those serve whole files, so they are a fallback, not a plan.
-
-Keys are read from the environment, then from `~/.config/cdse/credentials`,
-then from a `.env` in the working directory. The home-directory file is the intended
-place and the one `forestmon` creates: the project drive is a network mount
-that silently forces mode 755, so a secret stored there is readable by every
-member of the group. $HOME is ext4 and honours 600.
-
-Keys are never written to any artefact this package produces.
+Keys are read from the environment, then `~/.config/cdse/credentials`, then a
+`.env` in the working directory. Prefer the home-directory file: the project
+drive is a network mount that forces mode 755. Keys are never written to any
+artefact this package produces.
 """
 
 from __future__ import annotations
@@ -27,8 +14,7 @@ from pathlib import Path
 
 from . import config
 
-# In precedence order. Anything already in the environment wins over both, so a
-# systemd unit or a container can inject credentials without touching disk.
+# Anything already in the environment wins over both files.
 CRED_FILES = (Path.home() / ".config" / "cdse" / "credentials", Path.cwd() / ".env")
 
 
@@ -38,15 +24,11 @@ def _load_files() -> None:
 
 
 def _warn_if_world_readable() -> None:
-    """A credentials file on the shared project drive is a real exposure.
-
-    chmod does not stick there (the mount forces 755), so this cannot be fixed
-    in place — it can only be moved. Say so rather than failing silently.
-    """
+    """Warn if a `.env` holding keys is group/world readable (chmod cannot fix)."""
     repo_env = CRED_FILES[1]
     if not repo_env.is_file() or not (repo_env.stat().st_mode & 0o077):
         return
-    # A .env holding only FORESTMON_* paths is fine to share; keys are not.
+    # Only keys matter; a .env with just paths is fine.
     if any(
         line.strip().startswith((config.S3_KEY_ENV, config.S3_SECRET_ENV))
         for line in repo_env.read_text().splitlines()
@@ -82,9 +64,7 @@ def s3_credentials() -> tuple[str, str]:
 def s3_filesystem():
     """An s3fs filesystem pointed at CDSE's object store.
 
-    `default_block_size` matters more than it looks: rasterio reads JP2 headers
-    and then scattered tiles, so an oversized block turns a 4 KB window read
-    into megabytes of transfer.
+    The 1 MiB block size is deliberately small: JP2 reads are scattered windows.
     """
     import s3fs
 

@@ -1,23 +1,13 @@
 """Read per-pixel Sentinel-2 L2A reflectance out of CDSE's S3 archive.
 
-The design constraint is that our pixels are a needle in a haystack: ~38k
-scattered 10 m pixels inside a 110 x 110 km tile, i.e. about 0.3% of it. So we
-never read a band, we read the JP2's internal blocks that our pixels fall in —
-typically a few dozen per tile — through GDAL's /vsis3 byte-range support.
+Our pixels are a tiny scattered fraction of a 110 km tile, so only the JP2
+internal blocks they fall in are read, via GDAL /vsis3 byte-range support.
+Three details keep values matching Earth Engine:
 
-Three details decide whether the numbers match Earth Engine, and all three are
-handled here rather than being assumed:
-
-* **BOA_ADD_OFFSET.** Processing baseline 04.00 (2022-01-25 onward) shifted L2A
-  DNs by +1000. Earth Engine's *_HARMONIZED collections undo it. We read the
-  actual offset from each product's metadata instead of hard-coding the
-  changeover date, because reprocessed old scenes carry new baselines.
-* **20 m bands.** B11/B12 are natively 20 m. Earth Engine's getRegion at
-  scale=10 returns the 20 m value of the containing cell, so we read the 20 m
-  asset and locate the containing cell — reproducing it exactly, with no
-  resampling of our own.
-* **No warping.** A scene whose CRS differs from the AOI grid is skipped, not
-  reprojected. See operational.aoi for why.
+* BOA_ADD_OFFSET is read from each product's metadata (not a fixed baseline
+  date), reproducing the *_HARMONIZED scale.
+* B11/B12 are read from the native 20 m asset at the containing cell.
+* No warping: a scene whose CRS differs from the pixel's is skipped.
 """
 
 from __future__ import annotations
@@ -36,31 +26,18 @@ from rasterio.windows import Window
 
 from . import cdse_auth, config
 
-# A scene means seven files (six bands + SCL), each a separate network open.
-# That fixed cost — not the bytes — is what dominates: reading them concurrently
-# instead of in sequence measured 4.9-6.4x faster (13-25 s -> 2.6-5.1 s per
-# scene, 17-20k pixels). Rasterio's Env is thread-local, so each worker enters
-# its own; the S3 credentials are process-wide environment variables and need no
-# such care.
-#
-# Note this multiplies with the scene-level workers in pipeline.ingest: 4 scene
-# workers x 7 band threads is 28 concurrent connections to CDSE, and measured
-# throughput peaks at ~14 and degrades past it. The pair is therefore expressed
-# as one budget, config.MAX_CDSE_CONNECTIONS; raise it there, not here.
+# A scene is seven files (six bands + SCL), each a separate network open, so
+# they are read concurrently. Multiplies with the scene workers in
+# pipeline.ingest; see config.MAX_CDSE_CONNECTIONS for the budget.
 BAND_WORKERS = 7
 
 
 def _install_s3_env() -> None:
     """Put CDSE's S3 settings into the process environment for GDAL.
 
-    They cannot go through `rasterio.Env(...)`: rasterio 1.5 rejects AWS_* config
-    options there ("AWS credentials are handled exclusively by boto3") and
-    expects a `rasterio.session.AWSSession`, which pulls in boto3 purely to hand
-    back keys we already have. GDAL reads these names from the environment
-    directly, so setting them here gets the same result with one less
-    dependency.
-
-    AWS_VIRTUAL_HOSTING=FALSE is required — CDSE uses path-style addressing.
+    rasterio 1.5 rejects AWS_* options in `rasterio.Env(...)` (it wants a boto3
+    session), so they are set in the environment. CDSE needs path-style
+    addressing (AWS_VIRTUAL_HOSTING=FALSE).
     """
     key, secret = cdse_auth.s3_credentials()
     os.environ.update(
@@ -72,16 +49,13 @@ def _install_s3_env() -> None:
             ),
             "AWS_VIRTUAL_HOSTING": "FALSE",
             "AWS_HTTPS": "YES",
-            # CDSE's S3 is not AWS and issues no region; an unset region makes GDAL's
-            # signer fall back to a default that CDSE rejects on some endpoints.
+            # CDSE has no region; an unset one makes GDAL's signer pick a default
+            # that CDSE rejects on some endpoints.
             "AWS_DEFAULT_REGION": (os.environ.get("AWS_DEFAULT_REGION") or "default"),
         }
     )
 
 
-# Remaining GDAL settings are plain config options and are safe in Env().
-# DISABLE_READDIR_ON_OPEN stops GDAL listing a whole SAFE directory to open one
-# file, which over S3 is a directory listing per band.
 def _gdal_env() -> rasterio.Env:
     """The GDAL config for a read (`config.GDAL_OPTS`)."""
     _install_s3_env()
@@ -96,9 +70,8 @@ def _vsis3(href: str) -> str:
 def _boa_offsets_from_xml(xml_href: str) -> tuple[int, ...]:
     """BOA_ADD_OFFSET per band index, from a product's MTD_MSIL2A.xml.
 
-    Returns a 13-long tuple indexed by S2 band number order (B01..B12 as ESA
-    lists them). Pre-04.00 products have no offset element at all, which
-    correctly yields zeros.
+    Returns a 13-long tuple in ESA band_id order. Pre-04.00 products have no
+    offset element, which correctly yields zeros.
     """
     fs = cdse_auth.s3_filesystem()
     path = xml_href.replace("s3://", "")
@@ -120,14 +93,10 @@ _BAND_ID = {"B02": 1, "B03": 2, "B04": 3, "B08": 7, "B11": 11, "B12": 12}
 
 
 def boa_offsets_for_scene(scene: pd.Series) -> dict[str, int]:
-    """Every band's offset for one scene, fetched ONCE.
+    """Every band's offset for one scene, fetched once.
 
-    Deliberately called before the band threads start rather than from inside
-    them. `_boa_offsets_from_xml` is `lru_cache`d, but an lru_cache does not
-    coalesce concurrent misses: six threads hitting a cold entry simultaneously
-    issue six identical reads of the same product XML, so the "seven network
-    opens per scene" the design is tuned around was really up to thirteen on
-    every uncached scene.
+    Called before the band threads start: `lru_cache` does not coalesce
+    concurrent misses, so threads would each re-read the same XML.
     """
     return {b: boa_offset_for(scene, b) for b in config.BANDS}
 
@@ -135,11 +104,9 @@ def boa_offsets_for_scene(scene: pd.Series) -> dict[str, int]:
 def boa_offset_for(scene: pd.Series, band: str) -> int:
     """The offset to ADD to a raw DN to put it on the harmonized scale.
 
-    ESA stores BOA_ADD_OFFSET as -1000 for baseline >= 04.00, meaning the
-    already-shifted DN needs it added back. Falling back to the baseline rule if
-    metadata is unavailable keeps an unattended run alive, but is logged by the
-    caller because a silently wrong offset is a 0.1-reflectance step change —
-    exactly the kind of thing S-CCD would report as a disturbance.
+    ESA stores BOA_ADD_OFFSET as -1000 for baseline >= 04.00. If metadata is
+    unreadable it falls back to the baseline rule with a warning: a wrong offset
+    is a 0.1-reflectance step that S-CCD would report as a disturbance.
     """
     xml = scene["assets"].get("product_metadata")
     if xml:
@@ -161,9 +128,8 @@ def _read_at(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Values at the given map coordinates, read block-by-block.
 
-    Returns (values, valid) where `valid` marks points that fell inside the
-    raster. Reading whole internal blocks rather than per-point windows is the
-    difference between a few dozen range requests and tens of thousands.
+    Returns (values, valid); `valid` marks points inside the raster. Whole
+    internal blocks are read, not per-point windows (far fewer range requests).
     """
     with rasterio.open(path) as ds:
         if ds.crs is None or ds.crs.to_string() != expect_crs:
@@ -209,25 +175,13 @@ def read_scene(
     AOI simply contributes fewer rows. Values are raw DN on the harmonized scale
     (0-10000), which is what pyxccd wants; no reflectance division happens here.
 
-    `scl_first` reads the single 20 m SCL band before the six reflectance bands
-    and returns early when it yields nothing usable — a granule's bbox can
-    contain our pixels while its actual data footprint (swaths are not square)
-    does not, and the bbox prefilter cannot tell the difference.
-
-    Measured, this is a SMALL win, not the big one it looks like: on a 2025
-    sample it took empty scenes from ~1.7 s to ~0.3 s, but those were already
-    cheap — `_read_at` returns before fetching any block when no point is inside
-    the raster — and total backfill time is dominated by the scenes that DO have
-    data (40-60 s each). Net effect on that sample was ~1.0x. It is kept because
-    it is free (the probe is reused below, not re-read) and it makes the empty
-    case cheap in the operational path, where one scene is the whole run.
-
-    Turn it off for anything that needs the full pixel set regardless of
-    quality (e.g. comparing raw reflectance on cloudy pixels).
+    `scl_first` reads SCL before the reflectance bands and returns early when
+    nothing is usable (a granule's bbox can contain our pixels while its swath
+    does not). Turn it off to get the full pixel set regardless of quality.
     """
     crss = pixels["utm_crs"].unique()
     if len(crss) != 1:
-        # A multi-zone AOI must be split before reading; `pixels_for_scene` does.
+        # Multi-zone pixels must be split first; `pixels_for_scene` does.
         raise ValueError(f"{scene['id']}: pixels span {len(crss)} CRSs {list(crss)}")
     crs = crss[0]
     xs = pixels["utm_x"].to_numpy("float64")
@@ -273,12 +227,8 @@ def read_scene(
         raw_nodata = vals == config.NODATA_DN
         if apply_offset:
             off = offsets[band]
-            # Only shift real observations; DN 0 is nodata and must stay 0.
-            # Clamp at 0 as the HARMONIZED collection does (max(DN - 1000, 0)):
-            # a dark pixel with DN < 1000 would otherwise go negative where
-            # Earth Engine reports 0 (0.6-0.9% of rows; olivinskog parity failed
-            # on exactly these). Nodata is judged on the RAW DN, so a clamped
-            # dark pixel stays a real observation.
+            # DN 0 is nodata and stays 0. Clamp at 0 like HARMONIZED does (dark
+            # pixels would otherwise go negative); nodata is judged on the RAW DN.
             vals = np.where(raw_nodata, 0, np.maximum(vals + off, 0))
         return band, vals, valid, raw_nodata
 
@@ -288,7 +238,7 @@ def read_scene(
 
     with ThreadPoolExecutor(max_workers=BAND_WORKERS) as pool:
         futures = [pool.submit(_one_band, b) for b in config.BANDS]
-        # When scl_first already fetched SCL, reuse it rather than paying twice.
+        # Reuse SCL if scl_first already fetched it.
         scl_fut = None if scl is not None else pool.submit(_read_scl)
         for f in futures:
             band, vals, valid, raw0 = f.result()
@@ -308,16 +258,14 @@ def read_scene(
     df["datetime"] = pd.Timestamp(scene["datetime"])
     df = df[valid_all].reset_index(drop=True)
 
-    # Nodata in any band means the pixel is outside the granule's data footprint
-    # (tiles are square, swaths are not), which is different from being cloudy.
+    # Nodata in any band = outside the swath, which is not the same as cloudy.
     df["nodata"] = raw_nodata_any[valid_all]
     df["clear"] = (~df["nodata"]) & (~df["scl"].isin(config.SCL_REJECT))
     return df
 
 
 def tile_utm_crs(tile: str) -> str | None:
-    """'32VNM' -> 'EPSG:32632'. Sentinel-2 L2A granules are always in the
-    northern/southern UTM zone their MGRS code names; this tool is northern."""
+    """'32VNM' -> 'EPSG:32632' (granules are in the UTM zone their code names)."""
     m = re.match(r"^(\d{1,2})[C-X]", tile)
     return f"EPSG:{32600 + int(m.group(1))}" if m else None
 
@@ -325,23 +273,16 @@ def tile_utm_crs(tile: str) -> str | None:
 def pixels_for_scene(pixels: pd.DataFrame, scene: pd.Series) -> pd.DataFrame:
     """Cheap pre-filter so we do not open a tile that holds none of our pixels.
 
-    Uses the granule's WGS84 bbox from the catalogue. This is a bounding box,
-    not the true footprint, so it over-selects slightly near swath edges; the
-    read itself is the exact test, dropping anything outside the raster. The
-    point is only to avoid the network round trip for the 7 tiles' worth of
-    scenes that miss our polygons entirely.
+    Uses the catalogue's granule bbox, which over-selects near swath edges; the
+    read itself is the exact test.
     """
-    # A pixel is assigned exactly one home tile (see aoi.assign_home_tiles), so
-    # a scene only ever contributes the pixels that belong to its tile. This is
-    # both the exact spatial filter and the guard against a seam pixel getting
-    # two differently-corrected observations for one acquisition.
+    # A pixel has one home tile (aoi.assign_home_tiles); a scene contributes
+    # only its own tile's pixels.
     if "home_tile" in pixels.columns and scene.get("tile"):
         pixels = pixels[pixels["home_tile"] == scene["tile"]]
         if pixels.empty:
             return pixels
-    # A tile's UTM zone is its leading digits (32VNM -> 32). Only pixels gridded
-    # in that zone can be read from it without warping; without home tiles this
-    # is what keeps a multi-zone AOI from offering another zone's pixels.
+    # Only pixels gridded in the tile's UTM zone can be read without warping.
     zone = tile_utm_crs(scene.get("tile") or "")
     if zone and "utm_crs" in pixels.columns:
         pixels = pixels[pixels["utm_crs"] == zone]

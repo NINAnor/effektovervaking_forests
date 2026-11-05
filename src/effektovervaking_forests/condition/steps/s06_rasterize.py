@@ -1,50 +1,23 @@
 """Step 6 -- write the per-pixel results out as GeoTIFFs, one per spatial block.
 
-Everything upstream is a parquet table keyed by `pixel_id`. This turns it back
-into raster, on **exactly the AlphaEarth grid** -- same 10 m cells, same UTM zone
-per tile, no resampling anywhere -- so a value in QGIS is the value that was
-scored and not an interpolation of it.
+Rasters sit exactly on the AlphaEarth grid (10 m, UTM zone of the tile, no
+resampling). One file per spatial block keeps the rasters small (the stands are
+scattered across Norway); each block lies in one UTM zone. `index.csv` and one
+`.vrt` per zone tie the files together.
 
-**Why one file per spatial block rather than one per forest type or one per
-zone.** The stands are scattered over most of Norway: a dense raster covering
-zone 32N's bounding box would be 28,426 x 63,346 cells, 1.8 billion of them, to
-carry 115,172 real ones. The 66 spatial blocks are exactly the natural grouping
--- they are single-linkage clusters of the stands themselves -- and their
-bounding boxes hold 8.3 million cells in total, a factor of 300 less. Each block
-falls wholly inside one UTM zone, so no file mixes projections. `index.csv` and
-one `.vrt` per zone tie them back together.
+Bands (float32, NaN outside the mapped stands): dor_global_<year> for every
+year; dor_local, m_good_global and m_bad for `--year`; threshold_global (fitted
+without the stand's own block, so `dor_global > threshold_global` is the
+calibrated call); sen_slope, mk_p, trajectory (1 improving 2 stable 3
+fluctuating 4 declining); stand_condition (1 good 2 indistinguishable 3 poor);
+edge_m (metres inside the stand; pixels under 20 m are mixed); forest_type
+(1 kalklindeskog 2 olivinskog); n_polygons. Read m_good alongside the ratio.
 
-**Bands.** Twenty, float32, NaN outside the mapped stands:
+A pixel claimed by several stands takes the largest claiming stand's value, so
+all bands come from one reference frame; `n_polygons` marks those pixels and the
+spread across claimants is printed.
 
-    dor_global_2017..2025   condition, 0-1, high is close to the good reference
-    dor_local_<last>        condition against the nearest donor stands only
-    m_good_global_<last>    distance to the good pool  \\  read these alongside
-    m_bad_<last>            distance to transformed land /  the ratio, never alone
-    threshold_global        this stand's decision threshold, fitted WITHOUT its
-                            own spatial block -- so `dor_global > threshold` is
-                            the calibrated call, and the threshold varies by
-                            block on purpose
-    sen_slope               trajectory, z-units per year, negative is declining
-    mk_p                    Mann-Kendall p, reported but NOT the class rule
-    trajectory              1 improving 2 stable 3 fluctuating 4 declining
-    stand_condition         1 good 2 indistinguishable 3 poor, from the stand's
-                            own interval against its own threshold
-    edge_m                  metres from the stand boundary; under 20 m the pixel
-                            is a mixture and its score is partly its neighbours'
-    forest_type             1 kalklindeskog 2 olivinskog
-    n_polygons              how many mapped stands claim this pixel
-
-**A pixel claimed by several stands is scored more than once, and the raster
-takes the largest claiming stand's value.** 30.6% of the mapped ground is
-claimed by more than one polygon, and those scores genuinely differ: the good
-pool is shared (overlapping stands fall in the same spatial block, so they
-exclude the same donors) but the transformed pool is drawn from each stand's own
-3-8 km annulus, so two stands on the same ground are measured against different
-converted land. Averaging would blend two reference frames; taking the largest
-stand keeps every band -- pixel scores, stand class, threshold -- attributed to
-one stand, which is the only way `dor_global > threshold_global` stays a valid
-comparison. The spread across claimants is reported so it stays visible, and
-`n_polygons` marks which pixels it applies to.
+Reads steps 02b, 03 and 04 outputs (incl. `trajectory_pixels.parquet`).
 
 Run:  forestmon condition step 06
 """
@@ -89,9 +62,7 @@ def build_table(year: int) -> pd.DataFrame:
     traj = pd.read_parquet(TRAJ_PIX)
 
     meta = pol.set_index("poly_id")
-    # A pixel's block and forest type come from the stands that claim it. Both
-    # are constant across those stands in practice (a block IS a cluster of
-    # stands, and the two forest types do not overlap), so `first` is safe.
+    # Block and forest type are constant across claiming stands, so `first` is safe.
     per_pixel = (
         mem.assign(
             block=mem["poly_id"].map(meta["block"]),
@@ -106,8 +77,7 @@ def build_table(year: int) -> pd.DataFrame:
         )
     )
 
-    # One claiming stand per pixel -- the largest -- so every band on the pixel
-    # comes from the same reference frame.
+    # One claiming stand per pixel (the largest): one reference frame per pixel.
     primary = (
         mem.assign(area=mem["poly_id"].map(meta["area_ha"]))
         .sort_values(["area", "poly_id"], ascending=[False, True])
@@ -142,7 +112,6 @@ def build_table(year: int) -> pd.DataFrame:
     t["stand_condition"] = t["condition_global"].map(COND_CODE)
     t["forest_type_code"] = t["forest_type"].map(FTYPE_CODE)
 
-    # How much is being decided by that choice, reported rather than hidden.
     spread = (
         pix[pix["year"] == year]
         .groupby("pixel_id")["dor_global"]
@@ -188,7 +157,7 @@ def write_block(t: pd.DataFrame, block, zone: str, bands, out_dir: Path) -> dict
     row = np.rint((y1 - t["y"].to_numpy()) / RES).astype(int)
 
     epsg = 32600 + int(str(zone)[:-1])
-    # The pixel CENTRE is at (x, y), so the top-left corner is half a cell out.
+    # (x, y) is the pixel centre; the corner is half a cell out.
     transform = from_origin(x0 - RES / 2, y1 + RES / 2, RES, RES)
     path = out_dir / f"condition_block{int(block):03d}_{zone}.tif"
     profile = dict(
@@ -238,15 +207,8 @@ def write_block(t: pd.DataFrame, block, zone: str, bands, out_dir: Path) -> dict
 
 
 def _build_vrt(path: Path, tifs: list[Path], bands) -> None:
-    """Hand-write a mosaic VRT.
-
-    `gdalbuildvrt` is not on the path in this environment and the osgeo Python
-    bindings are not installed either (rasterio vendors GDAL without them), so
-    the VRT is written directly. That is safe here because every block in a zone
-    is on the SAME 10 m grid in the SAME CRS -- they are cut from one AlphaEarth
-    tiling -- so the mosaic is a pure offset placement with no resampling and no
-    reprojection to get wrong.
-    """
+    """Write a mosaic VRT directly (no GDAL bindings needed). Blocks in a zone
+    share one 10 m grid and CRS, so this is pure offset placement."""
     metas = []
     for t in tifs:
         with rasterio.open(t) as src:
@@ -319,9 +281,7 @@ def main(argv: list[str] | None = None) -> None:
         .to_string()
     )
 
-    # One VRT per UTM zone. Blocks in a zone share a CRS and are aligned to the
-    # same 10 m grid, so they mosaic without resampling; a VRT across zones
-    # would not, which is why there is one per zone rather than one overall.
+    # One VRT per UTM zone: blocks only mosaic without resampling within a zone.
     for zone, g in idx.groupby("utm_zone"):
         vrt = args.out / f"condition_{zone}.vrt"
         try:
