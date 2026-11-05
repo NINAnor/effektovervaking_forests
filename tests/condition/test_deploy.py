@@ -167,3 +167,12 @@ def test_cli_rejects_unknown_step() -> None:
     assert result.exit_code == 1
     result = runner.invoke(app, ["condition", "run", "--from", "09"])
     assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("step", steps.STEPS, ids=lambda s: s.id)
+def test_every_step_prints_help(step: steps.Step, capsys) -> None:
+    mod = importlib.import_module(steps.module_name(step))
+    with pytest.raises(SystemExit) as exc:
+        mod.main(["--help"])
+    assert exc.value.code == 0
+    assert "usage" in capsys.readouterr().out
