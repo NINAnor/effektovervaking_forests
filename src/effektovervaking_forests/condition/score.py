@@ -367,9 +367,6 @@ def classify_condition(row, threshold: float) -> str:
     return CONDITION_CLASS[classify(row["dor"], row["ci_lo"], row["ci_hi"], threshold)]
 
 
-Z95 = 1.959963985
-
-
 def threshold_interval_blocked(
     scores: pd.Series,
     labels: pd.Series,

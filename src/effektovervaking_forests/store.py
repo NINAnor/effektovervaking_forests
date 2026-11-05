@@ -13,7 +13,6 @@ import datetime as dt
 import json
 import os
 import socket
-import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -139,6 +138,3 @@ def now_iso() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
 
 
-def stopwatch():
-    t0 = time.time()
-    return lambda: round(time.time() - t0, 2)

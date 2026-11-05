@@ -221,18 +221,6 @@ def load(
     return out.sort_values(KEY).reset_index(drop=True)
 
 
-def scene_ids_present(aoi_name: str) -> set[str]:
-    """Every scene with at least one stored row.
-
-    A fully clouded scene leaves no trace here; `runs.py` is the authority on
-    what has been processed.
-    """
-    ids: set[str] = set()
-    for p in _files(aoi_name, None):
-        ids |= set(pd.read_parquet(p, columns=["scene_id"])["scene_id"].unique())
-    return ids
-
-
 def observation_counts(aoi_name: str, pix_ids: set[str] | None = None) -> pd.Series:
     """Clear observations per pixel, over the whole store.
 

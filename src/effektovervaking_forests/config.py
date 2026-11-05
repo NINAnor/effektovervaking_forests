@@ -137,14 +137,6 @@ GDAL_OPTS = {
 # ── the processing recipe ────────────────────────────────────────────────────
 # S-CCD band order: blue, green, red, nir, swir1, swir2.
 BANDS = ["B02", "B03", "B04", "B08", "B11", "B12"]
-GEE_BAND_ALIAS = {
-    "B02": "B2",
-    "B03": "B3",
-    "B04": "B4",
-    "B08": "B8",
-    "B11": "B11",
-    "B12": "B12",
-}
 
 # CDSE assets are per band and resolution. B11/B12 are natively 20 m; reading
 # the 20 m asset at the containing cell matches Earth Engine's nearest-neighbour
@@ -159,21 +151,16 @@ ASSET_FOR_BAND = {
 }
 SCL_ASSET = "SCL_20m"
 
-NATIVE_RES = {"B02": 10, "B03": 10, "B04": 10, "B08": 10, "B11": 20, "B12": 20}
 GRID_RES = 10  # the grid we carry state on
 
 # SCL values rejected (as on the GEE side): 3 cloud shadow, 8 cloud medium,
 # 9 cloud high, 10 thin cirrus, 11 snow/ice.
 SCL_REJECT = (3, 8, 9, 10, 11)
 
-# CLOUD_MASK_NOTE: the Earth Engine recipe also requires s2cloudless probability
-# < 40, which is not in the CDSE archive. The operational mask is SCL-only and
-# so looser than the inspector's: some cloud-edge observations may be retained.
-S2CLOUDLESS_MAX_PROB = 40  # GEE-side threshold, for reference
-
-# Baseline 04.00 shifted L2A DNs by +1000; BOA_ADD_OFFSET is read from each
-# product's metadata and applied, which reproduces GEE's *_HARMONIZED scale.
-DN_SCALE = 10000.0  # DN -> reflectance divisor
+# The Earth Engine recipe also masks s2cloudless probability >= 40, which the
+# CDSE archive lacks: the operational mask is SCL-only and so looser, and may
+# keep some cloud-edge observations. BOA_ADD_OFFSET (baseline 04.00+) is read
+# per product and applied, reproducing GEE's *_HARMONIZED scale.
 NODATA_DN = 0  # L2A JP2 nodata
 
 # pyxccd expects 0-10000 reflectance, which offset-corrected L2A DNs already are.
@@ -195,9 +182,6 @@ MONITORING_START = os.environ.get("FORESTMON_MONITORING_START") or "2026-01-01"
 # before a backfill.
 STORE_ALL_OBSERVATIONS = (os.environ.get("FORESTMON_STORE_ALL") or "0") == "1"
 
-# Band threads x scene workers = simultaneous CDSE connections; throughput
-# peaks around 14 and degrades beyond it.
-MAX_CDSE_CONNECTIONS = int(os.environ.get("FORESTMON_MAX_CONNECTIONS") or "14")
 SCENE_WORKERS = 2  # 2 x 7 band threads = 14
 
 # Scenes per commit during ingest (bounds work lost on interruption).

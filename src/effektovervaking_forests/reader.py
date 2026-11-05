@@ -28,7 +28,7 @@ from . import cdse_auth, config
 
 # A scene is seven files (six bands + SCL), each a separate network open, so
 # they are read concurrently. Multiplies with the scene workers in
-# pipeline.ingest; see config.MAX_CDSE_CONNECTIONS for the budget.
+# pipeline.ingest; band threads x scene workers = ~14 concurrent CDSE connections.
 BAND_WORKERS = 7
 
 
