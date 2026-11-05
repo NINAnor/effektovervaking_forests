@@ -4,7 +4,7 @@ Ported from RECOVER (`scripts/analysis/analyze_trajectories.py`,
 `scripts/analysis/test_trend_classification.py`, "Option A"), which ran this on
 annual GPP and short-vegetation-height series. Those products no longer carry
 recent years, so the same three-step recipe is applied here to an annual scalar
-derived from the AlphaEarth embedding (see `condition.axis`).
+derived from the AlphaEarth embedding (the AE score from step 04).
 
 What is kept from RECOVER:
   * the fully vectorised pairwise formulation -- all pairs (i<j) computed once
@@ -296,3 +296,24 @@ def classify_trend(
     out[down] = "declining"
     out[~np.isfinite(feat["mk_p"])] = "no_data"
     return out
+
+
+def annual_matrix(
+    df: pd.DataFrame,
+    value: str,
+    years: list[int],
+    keys: list[str],
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Pivot long (keys, year, value) rows into a dense (n, len(years)) matrix.
+
+    Returns the key frame (one row per unit, in matrix order) and the matrix,
+    with NaN for years a unit has no observation in -- which the Mann-Kendall
+    code treats as missing rather than as zero.
+    """
+    wide = (
+        df.pivot_table(index=keys, columns="year", values=value, aggfunc="mean")
+        .reindex(columns=years)
+        .reset_index()
+    )
+    mat = wide[years].to_numpy(dtype=float)
+    return wide[keys].copy(), mat

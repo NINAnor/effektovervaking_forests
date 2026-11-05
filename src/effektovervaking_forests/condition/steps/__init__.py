@@ -34,7 +34,6 @@ class Step:
 STEPS: tuple[Step, ...] = (
     # stage A: inputs and plan
     Step("00", "s00_build_polygons", "polygons, roles, survey years, blocks"),
-    Step("01", "s01_plan_reads", "which AlphaEarth blocks the AOI needs"),
     # stage B: embeddings (02 and 02d are the downloads; both resume)
     Step("02", "s02_extract_embeddings", "download stand pixels", ("--workers", "6")),
     Step("02b", "s02b_membership", "overlap-safe pixel <-> stand model"),

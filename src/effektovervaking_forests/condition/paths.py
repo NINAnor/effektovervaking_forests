@@ -7,9 +7,6 @@ under one root.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 from effektovervaking_forests.config import DATA as _FORESTMON_DATA
 from effektovervaking_forests.config import _env_path
 
@@ -62,38 +59,10 @@ AEF_INDEX = CACHE / "aef_index.parquet"
 AEF_YEARS = tuple(range(2017, 2026))  # 2017-2025 inclusive
 BANDS = tuple(f"A{i:02d}" for i in range(64))
 AEF_NODATA = -128
-# The COGs store the unit-normalised float embedding quantised to int8. A single
-# global scale factor cancels out of cosine distance (the metric both the
-# trajectory axis and the DoR score use), so nothing downstream depends on the
-# exact value.
-AEF_INT8_SCALE = 1.0 / 127.0
-
 # One COG block on the ground: 1024 px x 10 m. Both readers address blocks in
 # metres, so this is the constant that ties them to the same grid.
 BLOCK_M = 1024 * 10.0
 
-# How the stored int8 becomes a float embedding. THIS IS NOT A FREE CHOICE and
-# the two options are not a scale apart -- see `condition.aef.dequantise`.
-#
-#   "linear"         v = raw / 127         what this pipeline has always applied
-#   "signed_square"  v = (raw/127.5)^2 * sign(raw)    what Earth Engine returns
-#
-# A one-off comparison (2026-09) measured both against
-# GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL over 400 pixels of this AOI:
-#
-#              cosine to GEE   implied scale   ||v||     max |GEE - ours|
-#   linear         0.9617          0.380       2.531          0.2598
-#   signed_square  1.0000          1.000       1.000          0.0111
-#
-# AlphaEarth embeddings are unit-norm by construction, and only the second
-# recovers that. So "linear" is wrong, and wrong in DIRECTION rather than in
-# scale, which is the one kind of error a cosine-based score cannot absorb.
-#
-# The default is "signed_square" as of the 2026-09-09 re-run: the whole pipeline
-# was re-extracted and re-scored on it, and everything in outputs/ and docs/ now
-# comes from it. "linear" is kept only to reproduce the pre-2026-09-09 results,
-# which were computed on an embedding that is not the one Earth Engine serves.
-AEF_DEQUANT = os.environ.get("AEF_DEQUANT", "signed_square")
 
 # ---------------------------------------------------------------------------
 # Outputs

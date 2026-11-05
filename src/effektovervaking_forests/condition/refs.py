@@ -575,36 +575,6 @@ class PoolBuilder:
         return self.bad_mat[self.bad_pool_rows(poly_id, year, forest_type)]
 
     # -- the naturalness axis ------------------------------------------------
-    def axis_pools(
-        self, forest_type: str, years: tuple[int, ...], max_bad: int = 5_000
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """(good, bad) for fitting one forest type's naturalness axis.
-
-        Unlike a probe's pools these carry no exclusions: the axis is a property
-        of the forest type, fitted once from every donor at its anchor year and
-        every transformed pixel of the type, and then held fixed. Leaving a
-        stand out of the axis it is measured on would make the ruler move with
-        the thing being measured, which is the opposite of what is wanted here
-        -- the leave-one-out that matters is in the *score*, not the axis.
-
-        The bad side is pooled over all years on purpose: the axis must not
-        encode one year's atmosphere.
-        """
-        cached = self._global.get(forest_type)
-        good = (
-            self.good_mat[cached[0]]
-            if cached is not None
-            else np.empty((0, 64), np.float32)
-        )
-
-        pid = self._bad_by_type.get(forest_type)
-        if pid is None or not len(pid):
-            return good, np.empty((0, 64), dtype=np.float32)
-        rows = np.concatenate([_rows_for(self._bad_index, pid, y) for y in years])
-        if len(rows) > max_bad:
-            rows = self._rng.choice(rows, max_bad, replace=False)
-        return good, self.bad_mat[rows]
-
     # -- probes -------------------------------------------------------------
     def probe_rows(self, pixel_ids: np.ndarray, year: int) -> np.ndarray:
         """Matrix rows for these pixels in one year, skipping ones not observed."""
