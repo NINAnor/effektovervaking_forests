@@ -55,7 +55,8 @@ def main(argv: list[str] | None = None) -> None:
         "--sd-stable",
         type=float,
         default=0.30,
-        help="z-units; below this a non-significant series is 'stable'",
+        help="z-units; below this a non-significant series is 'stable'. Used "
+        "only without a Hansen-clean reference; otherwise --sd-pctl sets it",
     )
     ap.add_argument(
         "--min-slope",
