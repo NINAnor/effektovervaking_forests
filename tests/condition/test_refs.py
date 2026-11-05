@@ -425,3 +425,20 @@ def test_good_pool_owners_line_up_with_the_pool_rows():
     for owner in set(owners):
         vals = good[owners == owner][:, 0]
         assert len(set(vals.tolist())) <= 2
+
+
+def test_rows_for_matches_dict_semantics():
+    from effektovervaking_forests.condition.refs import _index_embeddings, _rows_for
+
+    px = pd.DataFrame(
+        {"pixel_id": [5, 3, 5, 9, 3, 5], "year": [2020, 2020, 2021, 2020, 2020, 2020]}
+    )
+    for b in BANDS:
+        px[b] = 0.0
+    _, index = _index_embeddings(px)
+    ref = {k: i for i, k in enumerate(zip(px["pixel_id"], px["year"]))}
+    q = np.array([9, 5, 7, 3, 5])
+    want = [ref[(int(p), 2020)] for p in q if (int(p), 2020) in ref]
+    assert _rows_for(index, q, 2020).tolist() == want  # duplicates -> last row
+    assert _rows_for(index, q, 2021).tolist() == [2, 2]
+    assert _rows_for(index, q, 1999).tolist() == []

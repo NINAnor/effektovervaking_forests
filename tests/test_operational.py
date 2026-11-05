@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from effektovervaking_forests import alerts as alerts_mod
-from effektovervaking_forests import config, obs, pipeline, reader, runs, store
+from effektovervaking_forests import config, obs, pipeline, runs, store
 from effektovervaking_forests import sccd as sccd_mod
 
 AOI = "testaoi"
@@ -551,5 +551,3 @@ def test_loss_gate_is_the_label_tuned_argmax():
         f"LOSS_GATE={alerts_mod.LOSS_GATE} but the label-tuned argmax is "
         f"{best['gate']} (F1 {best['f1']:.3f})"
     )
-
-

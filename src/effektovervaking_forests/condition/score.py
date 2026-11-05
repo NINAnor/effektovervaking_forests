@@ -18,8 +18,7 @@ one pool. Called per pixel-year that is ~1.5 M x 2 scopes x a 500-row pool of
 Python-level calls. Cosine distance to a set is
 `1 - normalise(X) @ normalise(P).T`, so a whole stand-year scores against a
 whole pool in a single BLAS call, and the k smallest come from `np.partition`
-along the row. `score_matrix` below is that, and it agrees with the vendored
-scalar path to floating-point noise -- `tests/test_score.py` pins it.
+along the row (`knn_mean_unit`).
 
 **The bootstrap resamples donors, not reference pixels.** The published
 `bootstrap_ci` resamples the distance vector row by row. That is right when the
@@ -31,8 +30,6 @@ bootstrap over whole donor stands (and whole 500 m localities on the transformed
 side) moves the share of stands whose interval straddles the threshold from 20%
 to 32% -- so about one stand in eight was carrying a condition class the
 reference sampling never supported (`condition/research/`, experiment E09).
-`cluster_bootstrap_ci` below is that estimator; the row-wise one is kept for the
-case where the pool really is unclustered.
 
 **No per-pixel bootstrap, on purpose.** The paper's CI resamples the reference
 pool, so it measures *reference-pool sampling error*. Every pixel of a stand
@@ -62,23 +59,15 @@ import pandas as pd
 
 from effektovervaking_forests.condition import _kernels
 from effektovervaking_forests.condition.core import (
-    bootstrap_ci,
     classify,
-    cosine_dists_to_set,
-    knn_score,
 )
 
 __all__ = [
     "unit_rows",
-    "cluster_bootstrap_ci",
     "calibrate_threshold_blocked",
-    "cosine_dist_matrix",
     "knn_mean",
     "knn_mean_unit",
-    "score_matrix",
-    "score_stand_year",
     "stand_probe",
-    "bad_side",
     "summarise_pixels",
     "calibrate_threshold",
     "classify_condition",
@@ -106,13 +95,6 @@ def unit_rows(x: np.ndarray) -> np.ndarray:
     return x / (n + EPS)
 
 
-def cosine_dist_matrix(probes: np.ndarray, pool: np.ndarray) -> np.ndarray:
-    """(n_probes, n_pool) cosine distances -- one BLAS call, not a Python loop."""
-    if len(probes) == 0 or len(pool) == 0:
-        return np.empty((len(probes), len(pool)), dtype=np.float32)
-    return 1.0 - unit_rows(probes) @ unit_rows(pool).T
-
-
 def knn_mean(d: np.ndarray, k: int) -> np.ndarray:
     """Mean of the k smallest distances in each row.
 
@@ -132,7 +114,7 @@ def knn_mean_unit(
     *,
     pool_t: np.ndarray | None = None,
 ) -> np.ndarray:
-    """`knn_mean(cosine_dist_matrix(...), k)` for rows already through `unit_rows`.
+    """`knn_mean` of cosine distances, for rows already through `unit_rows`.
 
     Row chunks keep the similarity block in cache instead of materialising the
     full (n_probes, n_pool) distance matrix. The k values are summed in float64,
@@ -146,297 +128,11 @@ def knn_mean_unit(
     n = len(probes_u)
     if len(pool_u) < k:
         return np.full(n, np.nan, dtype=np.float32)
-    if not _kernels.AVAILABLE:
-        return knn_mean(1.0 - probes_u @ pool_u.T, k)
     out = np.empty(n, dtype=np.float32)
     qt = np.ascontiguousarray(pool_u.T) if pool_t is None else pool_t
     for s in range(0, n, chunk):
         out[s : s + chunk] = _kernels.topk_mean_rows(probes_u[s : s + chunk] @ qt, k)
     return out
-
-
-def score_matrix(
-    probes: np.ndarray, good: np.ndarray, bad: np.ndarray, k: int = 5
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Per-probe DoR against one pair of pools. Returns (dor, m_good, m_bad).
-
-    `dor = m_bad / (m_good + m_bad)`, the vendored ratio: near 1 means the pixel
-    sits close to the good cloud and far from the transformed one.
-
-    `m_good` and `m_bad` come back alongside the ratio because the ratio alone
-    cannot distinguish "close to good" from "far from both", and for a pixel in
-    an unmapped forest interior those are very different statements.
-    """
-    n = len(probes)
-    if n == 0 or len(good) < k or len(bad) < k:
-        nan = np.full(n, np.nan, dtype=np.float32)
-        return nan, nan.copy(), nan.copy()
-    m_g = knn_mean(cosine_dist_matrix(probes, good), k)
-    m_b = knn_mean(cosine_dist_matrix(probes, bad), k)
-    return (m_b / (m_g + m_b + EPS)).astype(np.float32), m_g, m_b
-
-
-def _cluster_knn_table(d: np.ndarray, cluster: np.ndarray, k: int) -> np.ndarray:
-    """(n_clusters, k) -- the k smallest distances within each cluster, +inf-padded.
-
-    This is what makes the cluster bootstrap affordable, and it is exact rather
-    than an approximation: the kNN mean takes the k smallest distances of the
-    resampled pool, and only a cluster's own k smallest can ever be among them.
-    So a draw needs `Gk[drawn]` and nothing else, and 2,000 draws over 115 donor
-    stands become two array operations instead of 2,000 concatenations of
-    2,000-element pools.
-
-    One `lexsort` rather than a mask per cluster: the transformed pool has about
-    1,050 localities in it, so the loop was 1,050 boolean passes over a
-    2,000-element vector for every stand-year and every scope.
-    """
-    d = np.asarray(d, dtype=float)
-    u, inv = np.unique(cluster, return_inverse=True)
-    inv = np.asarray(inv).ravel()
-    out = np.full((len(u), k), np.inf)
-    if not len(d):
-        return out
-    order = np.lexsort((d, inv))  # ascending d within each cluster
-    inv_s, d_s = inv[order], d[order]
-    counts = np.bincount(inv_s, minlength=len(u))
-    starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
-    rank = np.arange(len(d_s)) - np.repeat(starts, counts)
-    take = rank < k
-    out[inv_s[take], rank[take]] = d_s[take]
-    return out
-
-
-# How many of the globally smallest candidate distances to carry into the
-# bootstrap. See `_boot_knn_mean`; draws that need more than this are rare and
-# are finished off exactly by the fallback, so the constant is a speed knob and
-# never an approximation.
-_BOOT_CANDIDATES = 8
-
-
-def _boot_knn_mean(
-    table: np.ndarray,
-    n_boot: int,
-    k: int,
-    rng: np.random.Generator,
-    thinned: bool = False,
-) -> np.ndarray:
-    """Mean of the k smallest, for `n_boot` draws of clusters with replacement.
-
-    The obvious implementation -- gather `table[idx]` and partition it -- builds
-    an `(n_boot, n_clusters * k)` array to read `k` numbers out of each row. On
-    the transformed pool that is 2,000 x 26,150 float64, **365 MB**, partitioned
-    52 M elements at a time, once per stand-year and per scope: it was 94% of
-    this pipeline's total runtime.
-
-    It is also almost all wasted. The candidate distances are the same
-    `n_clusters * k` numbers in every draw; only their multiplicities change. So
-    sort those candidates ONCE, ascending, and keep the first `T` of them. A
-    draw's `k` smallest are all inside that prefix whenever at least `k` of the
-    draw's values fall inside it -- everything outside is larger by
-    construction -- and that is a condition each draw can be tested against, not
-    assumed. Then the k-th smallest is found by walking the prefix and
-    accumulating each candidate's multiplicity until it reaches `k`, which is a
-    cumulative sum over `T` columns rather than a partition over `n_clusters * k`.
-
-    `T = max(8k, 256)` because a draw takes `n_clusters` clusters from
-    `n_clusters` with replacement, so each is drawn about once and roughly `T`
-    of the prefix's values are drawn -- comfortably more than `k`. Draws that
-    fall short are finished by the exact gather-and-partition path above, so the
-    result is identical whatever `T` is: `tests/test_score.py` pins it
-    elementwise against the old implementation, including at `T = k`.
-
-    The RNG is consumed exactly as before -- one `(n_boot, n_clusters)` draw of
-    cluster indices -- so this reproduces the published intervals bit for bit.
-    `thinned=True` draws the same resample distribution far more cheaply but
-    from a different stream; see `_boot_knn_mean_thinned`.
-    """
-    c = len(table)
-    table = np.asarray(table, dtype=float)
-    if thinned:
-        return _boot_knn_mean_thinned(table, n_boot, k, rng)
-    # int32 draws are the same values from the same stream as the int64 default
-    # (tests/test_kernels.py), at two thirds of the cost.
-    idx = rng.integers(0, c, size=(n_boot, c), dtype=np.int32)
-    if c * k <= max(_BOOT_CANDIDATES * k, 256):
-        return _boot_exact(table, idx, k)
-
-    pref = _boot_prefix_table(table, k)
-    if pref is None:
-        return _boot_exact(table, idx, k)
-    V, Lr, ids = pref
-    remap = np.full(c, -1, dtype=np.int64)
-    remap[ids] = np.arange(len(ids))
-    if _kernels.AVAILABLE:
-        out, enough = _kernels.boot_prefix(idx, remap, Lr, V, k, len(ids))
-        if not enough.all():
-            out[~enough] = _boot_exact(table, idx[~enough], k)
-        return out
-    r = remap[idx]
-    hit = r >= 0
-    rows = np.broadcast_to(np.arange(n_boot)[:, None], r.shape)[hit]
-    mult = np.bincount(rows * len(ids) + r[hit], minlength=n_boot * len(ids)).reshape(
-        n_boot, len(ids)
-    )
-
-    out, enough = _walk_prefix(mult[:, Lr], V, k)  # (n_boot, T) multiplicities
-
-    if not enough.all():
-        # A prefix that happens to be owned by few clusters, none of which this
-        # draw picked. Rare, and settled exactly rather than approximated.
-        out[~enough] = _boot_exact(table, idx[~enough], k)
-    return out
-
-
-def _boot_prefix_table(table: np.ndarray, k: int):
-    """(V, Lr, ids) for the prefix walk, or None when the prefix is empty.
-
-    `V` is the `T` smallest finite candidates of `table`, ascending with ties in
-    row-major order; `Lr[t]` indexes `ids`, the clusters owning them.
-    """
-    c = len(table)
-    V = table.ravel()
-    L = np.repeat(np.arange(c), k)
-    T = max(_BOOT_CANDIDATES * k, 256)
-    # `argsort(V, kind="stable")[:T]` without sorting all c*k values.
-    thr = np.partition(V, T - 1)[T - 1]
-    cand = np.flatnonzero(V <= thr)
-    keep = cand[np.argsort(V[cand], kind="stable")][:T]
-    # `_cluster_knn_table` pads clusters holding fewer than k references with
-    # +inf. Those sort to the end, so they can only reach the prefix when the
-    # whole pool is smaller than it -- and carrying them in would put `0 * inf`
-    # into the weighted cumulative sum of the walk. Drop them instead: a draw
-    # that then cannot reach k inside the prefix falls through to the exact
-    # path, which is where a pool that short belongs anyway.
-    keep = keep[np.isfinite(V[keep])]
-    if not len(keep):
-        return None
-    # Only the clusters owning a prefix candidate can matter, so the draw is
-    # counted against those and not against all `c` of them.
-    ids, Lr = np.unique(L[keep], return_inverse=True)
-    return np.ascontiguousarray(V[keep]), np.ascontiguousarray(Lr.ravel()), ids
-
-
-def _boot_knn_mean_thinned(
-    table: np.ndarray, n_boot: int, k: int, rng: np.random.Generator
-) -> np.ndarray:
-    """`_boot_knn_mean`, drawing only the part of each resample that matters.
-
-    A resample is `c` clusters drawn uniformly with replacement, but only the
-    `m` clusters owning a prefix candidate (about 200 of 1,300 here) can move
-    its kNN mean. How many of the `c` draws land on those `m` is
-    Binomial(c, m/c), and given that count each of them is uniform over the
-    `m`, independently. So the count, then that many picks from `m`, has
-    exactly the joint law of the prefix multiplicities under the full draw,
-    for about m + 1 random numbers per resample instead of `c` -- and the RNG
-    was ~80% of the full path's time. The prefix walk is unchanged.
-
-    Same distribution, different stream: the interval moves from the full
-    draw's by Monte-Carlo noise only (tests/test_kernels.py). A resample the
-    prefix cannot settle gets the rest of its draw -- `c - hits` clusters
-    uniform over the other `c - m` -- and goes to the exact path, as before.
-    """
-    c = len(table)
-    if c * k <= max(_BOOT_CANDIDATES * k, 256):
-        return _boot_exact(table, rng.integers(0, c, size=(n_boot, c)), k)
-    pref = _boot_prefix_table(table, k)
-    if pref is None:
-        return _boot_exact(table, rng.integers(0, c, size=(n_boot, c)), k)
-    V, Lr, ids = pref
-    m = len(ids)
-    hits = rng.binomial(c, m / c, size=n_boot).astype(np.int64)
-    picks = rng.integers(0, m, size=int(hits.sum()))
-    if _kernels.AVAILABLE:
-        out, enough = _kernels.boot_counts(hits, picks, Lr, V, k, m)
-    else:
-        rows = np.repeat(np.arange(n_boot), hits)
-        mult = np.bincount(rows * m + picks, minlength=n_boot * m).reshape(n_boot, m)
-        out, enough = _walk_prefix(mult[:, Lr], V, k)
-    if not enough.all():
-        rest = np.setdiff1d(np.arange(c), ids)
-        starts = np.concatenate(([0], np.cumsum(hits)))
-        need = np.flatnonzero(~enough)
-        idx = np.empty((len(need), c), dtype=np.int64)
-        for i, b in enumerate(need):
-            h = hits[b]
-            idx[i, :h] = ids[picks[starts[b] : starts[b] + h]]
-            if h < c:
-                idx[i, h:] = rest[rng.integers(0, len(rest), size=c - h)]
-        out[need] = _boot_exact(table, idx, k)
-    return out
-
-
-def _walk_prefix(w: np.ndarray, V: np.ndarray, k: int):
-    """(out, enough) from (n_boot, T) prefix multiplicities -- the numpy walk."""
-    cum = np.cumsum(w, axis=1)
-    enough = cum[:, -1] >= k
-    at = np.argmax(cum >= k, axis=1)  # column holding the k-th
-    prev = np.maximum(at - 1, 0)[:, None]
-    below = np.take_along_axis(np.cumsum(w * V, axis=1), prev, 1)[:, 0]
-    n_below = np.take_along_axis(cum, prev, 1)[:, 0]
-    first = at == 0
-    below = np.where(first, 0.0, below)
-    n_below = np.where(first, 0, n_below)
-    return (below + (k - n_below) * V[at]) / k, enough
-
-
-def _boot_exact(table: np.ndarray, idx: np.ndarray, k: int) -> np.ndarray:
-    """The gather-and-partition kNN mean, for draws the prefix could not settle."""
-    if not len(idx):
-        return np.empty(0, dtype=float)
-    pool = table[idx].reshape(len(idx), -1)
-    return np.partition(pool, k - 1, axis=1)[:, :k].mean(axis=1)
-
-
-def cluster_bootstrap_ci(
-    d_g: np.ndarray,
-    g_cluster: np.ndarray,
-    d_b: np.ndarray,
-    b_cluster: np.ndarray,
-    k: int,
-    n_boot: int,
-    rng: np.random.Generator,
-    bk: np.ndarray | None = None,
-    thinned: bool = False,
-) -> tuple[float, float, float]:
-    """(point, lo, hi) for the kNN DoR, resampling whole CLUSTERS of references.
-
-    `g_cluster` and `b_cluster` label which donor stand (good side) or which
-    locality (transformed side) each distance came from. Clusters are drawn with
-    replacement at their own count and every member of a drawn cluster comes
-    with it, so the interval answers "how much does this score depend on which
-    stands happened to be surveyed" rather than "how much does it depend on
-    which pixels of those stands were sampled". The second question has an
-    answer far too optimistic to report -- see the module docstring.
-    """
-    if len(d_g) < k or len(d_b) < k:
-        return float("nan"), float("nan"), float("nan")
-    point = knn_score(np.asarray(d_g, float), np.asarray(d_b, float), k)
-    if not np.isfinite(point):
-        return float("nan"), float("nan"), float("nan")
-    gk = _cluster_knn_table(np.asarray(d_g, float), np.asarray(g_cluster), k)
-    # The transformed side does not depend on the scope, so a caller scoring the
-    # same stand-year against both pools can build its table once and pass it in.
-    if bk is None:
-        bk = _cluster_knn_table(np.asarray(d_b, float), np.asarray(b_cluster), k)
-    if len(gk) < 2 or len(bk) < 2:
-        # One cluster cannot be resampled: the interval would be zero-width and
-        # would read as certainty. Say "unknown" instead.
-        return float(point), float("nan"), float("nan")
-    mg = _boot_knn_mean(gk, n_boot, k, rng, thinned)
-    mb = _boot_knn_mean(bk, n_boot, k, rng, thinned)
-    # A draw whose clusters between them hold fewer than k references has no
-    # kNN mean; `_cluster_knn_table` pads those with +inf so they come out
-    # non-finite here and are dropped, rather than being quietly filled in.
-    with np.errstate(invalid="ignore"):
-        boots = mb / (mg + mb + EPS)
-    boots = boots[np.isfinite(boots)]
-    if len(boots) < max(20, n_boot // 20):
-        return float(point), float("nan"), float("nan")
-    return (
-        float(point),
-        float(np.percentile(boots, 2.5)),
-        float(np.percentile(boots, 97.5)),
-    )
 
 
 def stand_probe(probes: np.ndarray, transform=None) -> np.ndarray:
@@ -450,103 +146,6 @@ def stand_probe(probes: np.ndarray, transform=None) -> np.ndarray:
     if transform is not None:
         x = np.asarray(transform(x.reshape(1, -1))[0], dtype=float)
     return x
-
-
-def bad_side(
-    probe: np.ndarray, bad_t: np.ndarray, bad_cluster: np.ndarray, k: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """(distances, cluster table) for the transformed pool -- scope-independent.
-
-    Both good pools are scored against the same transformed cloud with the same
-    probe, so this half of the interval is built once per stand-year and handed
-    to `score_stand_year` for each scope.
-    """
-    d_b = cosine_dists_to_set(probe, np.asarray(bad_t, dtype=float))
-    return d_b, _cluster_knn_table(d_b, np.asarray(bad_cluster), k)
-
-
-def score_stand_year(
-    probes: np.ndarray,
-    good: np.ndarray,
-    bad: np.ndarray,
-    k: int = 5,
-    n_boot: int = 2000,
-    rng: np.random.Generator | None = None,
-    good_cluster: np.ndarray | None = None,
-    bad_cluster: np.ndarray | None = None,
-    transform=None,
-    probe: np.ndarray | None = None,
-    good_t: np.ndarray | None = None,
-    bad_t: np.ndarray | None = None,
-    bad_knn: tuple[np.ndarray, np.ndarray] | None = None,
-    thinned: bool = False,
-) -> dict:
-    """Stand-level DoR with a bootstrap CI, from the stand's mean embedding.
-
-    Used once per stand-year rather than once per pixel -- see the module
-    docstring on why a per-pixel CI would be a common-mode error worn as a
-    per-pixel one.
-
-    Pass `good_cluster` / `bad_cluster` (the donor stand of each good reference
-    row and the locality of each transformed one) to get the donor-clustered
-    interval, which is the one this project reports. Without them the vendored
-    row-wise bootstrap is used and the interval is about a third too narrow.
-
-    `transform` is the metric the distances are taken in -- a
-    `condition.whiten.Whitener`, or None for plain cosine on the raw embedding.
-
-    A caller scoring one stand-year against several good pools is doing the same
-    work repeatedly: the probe, the transformed pools and the whole transformed
-    side of the interval are identical whichever pool is in play. `probe`,
-    `good_t`, `bad_t` and `bad_knn` let it hand those in already built -- see
-    `stand_probe` and `bad_side` -- and the arithmetic is otherwise unchanged.
-    """
-    rng = rng or np.random.default_rng(42)
-    if len(probes) == 0 or len(good) < k or len(bad) < k:
-        return {
-            "dor": np.nan,
-            "ci_lo": np.nan,
-            "ci_hi": np.nan,
-            "n_good": len(good),
-            "n_bad": len(bad),
-        }
-    x = stand_probe(probes, transform) if probe is None else probe
-    if good_t is None:
-        good_t = transform(good) if transform is not None else good
-    if bad_t is None:
-        bad_t = transform(bad) if transform is not None else bad
-    d_g = cosine_dists_to_set(x, np.asarray(good_t, dtype=float))
-    if bad_knn is None:
-        d_b, bk = (
-            bad_side(x, bad_t, bad_cluster, k)
-            if bad_cluster is not None
-            else (cosine_dists_to_set(x, np.asarray(bad_t, dtype=float)), None)
-        )
-    else:
-        d_b, bk = bad_knn
-    if good_cluster is not None and bad_cluster is not None:
-        point, lo, hi = cluster_bootstrap_ci(
-            d_g,
-            np.asarray(good_cluster),
-            d_b,
-            np.asarray(bad_cluster),
-            k,
-            n_boot,
-            rng,
-            bk=bk,
-            thinned=thinned,
-        )
-    else:
-        point, lo, hi = bootstrap_ci(
-            lambda a, b: knn_score(a, b, k), d_g, d_b, n_boot, rng
-        )
-    return {
-        "dor": point,
-        "ci_lo": lo,
-        "ci_hi": hi,
-        "n_good": len(good),
-        "n_bad": len(bad),
-    }
 
 
 # Distances carried per cell into the bootstrap walk. A cell whose draw runs
@@ -584,7 +183,7 @@ def _cluster_draws(
     """(codes, mult, n_clusters): clusters drawn with replacement at their own count.
 
     `mult[b, c]` is how often cluster `c` was drawn in resample `b`, the same
-    resample `cluster_bootstrap_ci` makes, as counts rather than indices.
+    resample of whole clusters, as counts rather than indices.
     """
     u, codes = np.unique(cluster, return_inverse=True)
     c = len(u)
@@ -617,7 +216,7 @@ def boot_knn_cells(
     out = np.full((n, n_boot), np.nan, dtype=np.float32)
     if not n or pool_t.shape[1] < k:
         return out
-    walk = _kernels.boot_walk_cells if _kernels.AVAILABLE else _walk_cells_numpy
+    walk = _kernels.boot_walk_cells
     for s in range(0, n, chunk):
         pu = probes_u[s : s + chunk]
         d, own = _cell_prefix(pu, pool_t, codes, T)
@@ -628,29 +227,6 @@ def boot_knn_cells(
             o[bad] = walk(d, own, mult, k)[0]
         out[s : s + chunk] = o
     return out
-
-
-def _walk_cells_numpy(d, own, mult, k):
-    """`_kernels.boot_walk_cells` without numba -- same walk, vectorised over draws."""
-    n, T = d.shape
-    out = np.empty((n, mult.shape[0]), dtype=np.float32)
-    ok = np.ones(n, dtype=bool)
-    for i in range(n):
-        w = mult[:, own[i]]  # (n_boot, T)
-        cum = np.cumsum(w, axis=1)
-        enough = cum[:, -1] >= k
-        at = np.argmax(cum >= k, axis=1)
-        prev = np.maximum(at - 1, 0)[:, None]
-        below = np.take_along_axis(np.cumsum(w * d[i].astype(float), axis=1), prev, 1)[
-            :, 0
-        ]
-        n_below = np.take_along_axis(cum, prev, 1)[:, 0]
-        below = np.where(at == 0, 0.0, below)
-        n_below = np.where(at == 0, 0, n_below)
-        v = (below + (k - n_below) * d[i, at]) / k
-        out[i] = np.where(enough, v, np.nan)
-        ok[i] = enough.all()
-    return out, ok
 
 
 def _rank_pick(scores: np.ndarray, m: int) -> np.ndarray:

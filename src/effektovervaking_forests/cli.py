@@ -842,13 +842,9 @@ def condition_doctor():
     gtiff = "GTiff" in drivers
     _echo(f"  {'OK ' if gtiff else 'MISSING'}  GDAL GTiff driver (mirror COGs)")
     ok &= gtiff
-    for mod, why in (
-        ("numba", "step 04 runs ~3x faster; `--extra fast`"),
-        ("threadpoolctl", "step 04 --workers; `--extra fast`"),
-        ("ee", "step 02e only; `--extra gee`"),
-    ):
-        have = importlib.util.find_spec(mod) is not None
-        _echo(f"  {'OK ' if have else 'WARN'}  {mod}{'' if have else f' ({why})'}")
+    have_ee = importlib.util.find_spec("ee") is not None
+    note = "" if have_ee else " (step 02e only; `--extra gee`)"
+    _echo(f"  {'OK ' if have_ee else 'WARN'}  ee{note}")
     _echo(f"  AEF_DEQUANT: {paths.AEF_DEQUANT}")
     _echo(f"  root:        {paths.ROOT}")
     for name, p in (("polygons", paths.POLYGONS), ("condition", paths.CONDITION)):

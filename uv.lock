@@ -720,6 +720,7 @@ dependencies = [
     { name = "affine" },
     { name = "duckdb" },
     { name = "geopandas" },
+    { name = "numba" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pandas" },
@@ -740,10 +741,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-fast = [
-    { name = "numba" },
-    { name = "threadpoolctl" },
-]
 gee = [
     { name = "earthengine-api" },
 ]
@@ -760,7 +757,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.0" },
     { name = "earthengine-api", marker = "extra == 'gee'", specifier = ">=1.0" },
     { name = "geopandas", specifier = ">=1.0" },
-    { name = "numba", marker = "extra == 'fast'", specifier = ">=0.59" },
+    { name = "numba", specifier = ">=0.59" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pyarrow", specifier = ">=15" },
@@ -772,11 +769,10 @@ requires-dist = [
     { name = "s3fs", specifier = ">=2024.2" },
     { name = "scipy", specifier = ">=1.10" },
     { name = "shapely", specifier = ">=2.0" },
-    { name = "threadpoolctl", marker = "extra == 'fast'", specifier = ">=3" },
     { name = "tqdm", specifier = ">=4.60" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["fast", "gee"]
+provides-extras = ["gee"]
 
 [package.metadata.requires-dev]
 dev = [
