@@ -34,8 +34,8 @@ needed only to build the 2017–2025 history for a *new* AOI (section 3B).
   Check with `ogr2ogr --formats | grep PMTiles`. Ubuntu 24.04's `gdal-bin` (3.8)
   or a conda/pixi `gdal` both work. Detection runs without it; only publishing
   fails.
-- **[rclone](https://rclone.org/install/)** and access to the S3 bucket (an
-  access key with read and write rights on it).
+- **[rclone](https://rclone.org/install/)** and an access key with read and write
+  rights on NINA's S3 bucket `miljodata-test` (endpoint `https://s3-int-1.nina.no`).
 - **Local disk**, not a network share (the locks rely on it), for the working
   copy: about 2 GB for the two current AOIs, growing by roughly 0.2 GB a year.
   The bucket holds the same amount.
@@ -61,19 +61,22 @@ To update later: `git pull && uv sync --frozen --no-dev`.
 
 ## 3. Data
 
-The bucket (the rclone path in `FORESTMON_S3_REMOTE`) holds:
+The data is in the bucket `miljodata-test`, under the project prefix
+`156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/`. The monitor uses
+its `sccd/` folder; `alerts/` and `condition/` beside it hold separately
+published products, which the monitor does not touch.
 
 ```text
-<remote>/aoi/<aoi>.parquet          AOI polygons, one GeoParquet per AOI
-                                    (the AOI name is the file stem; a "_union" suffix is dropped)
-<remote>/operational/obs/<aoi>/     observation store (the expensive part)
-<remote>/operational/state/         S-CCD model state
-<remote>/operational/runs/          ledger of processed scenes
-<remote>/operational/alerts/        alerts, including reviewers' verdicts
-<remote>/operational/grid/          pixel grid
-<remote>/operational/catalog/       scene index
-<remote>/web/  <remote>/published/  outputs, written by each cycle
-<remote>/logs/                      logs, copied after each cycle
+sccd/aoi/<aoi>.parquet          AOI polygons, one GeoParquet per AOI
+                                (the AOI name is the file stem; a "_union" suffix is dropped)
+sccd/operational/obs/<aoi>/     observation store (the expensive part)
+sccd/operational/state/         S-CCD model state
+sccd/operational/runs/          ledger of processed scenes
+sccd/operational/alerts/        alerts, including reviewers' verdicts
+sccd/operational/grid/          pixel grid
+sccd/operational/catalog/       scene index
+sccd/web/  sccd/published/      outputs, written by each cycle
+sccd/logs/                      logs, copied after each cycle
 ```
 
 The server keeps a working copy with the same layout under `FORESTMON_DATA_DIR`
@@ -84,30 +87,33 @@ rebuild the model without CDSE keys and hours of downloads.
 
 ### 3A. Take over the existing AOIs (recommended)
 
-kalklindeskog and olivinskog are already running on another machine. The
-current operator uploads their data to the bucket once, from a clone of this
-repository on that machine, with rclone configured for the bucket (section 4):
+kalklindeskog and olivinskog run on another machine, and their data was uploaded
+to `sccd/` on 2026-11-05 (1.75 GB, checked file by file). That machine keeps
+running nightly until the handover, so the bucket falls behind it. At the
+handover, the current operator, in a clone of this repository with the same
+`.env.s3`, after the old machine's last nightly cycle has finished:
 
 ```bash
-# a folder holding only the AOI polygons, under the names the AOIs should have
-mkdir -p /tmp/forestmon_aoi
+mkdir -p /tmp/forestmon_aoi     # just the AOI polygons, under the AOIs' names
 cp <old data>/processed/kalklindeskog_union.parquet <old data>/processed/olivinskog_union.parquet /tmp/forestmon_aoi/
 
 FORESTMON_DATA_DIR=<old data> FORESTMON_AOI_DIR=/tmp/forestmon_aoi \
-FORESTMON_S3_REMOTE=<remote> scripts/forestmon_cycle.sh --s3-push
+FORESTMON_GIS_OUT=/nonexistent scripts/forestmon_cycle.sh --s3-push
+crontab -e                      # then remove the old forestmon_cycle.sh line
 ```
 
-`--s3-push` uploads only what the monitor needs: `aoi/` and the six folders of
-`operational/` (about 1.8 GB). It leaves out `locks/`, `parity/`, `*_bench.json`
-and `*_gdal_*.csv`; the last three are leftovers of removed benchmarking tools.
-`grid/` must come along rather than be rebuilt: the state records a fingerprint
-of the grid and refuses a different one.
+`--s3-push` only uploads what changed since the last push. It sends `aoi/` and
+the six folders of `operational/`, and leaves out `locks/`, `parity/`,
+`*_bench.json` and `*_gdal_*.csv` (the last three are leftovers of removed
+benchmarking tools). `FORESTMON_GIS_OUT=/nonexistent` skips the old machine's
+published files; the server's first cycle publishes its own. `grid/` must come
+along rather than be rebuilt: the state records a fingerprint of the grid and
+refuses a different one.
 
-Upload after the old machine's nightly cycle has finished, and **remove the old
-machine's cron job before the server's first cycle.** Two machines must never
-update the same AOI: each would apply scenes the other has not seen, and the
-alerts (which hold review verdicts) would diverge. From the handover on, the
-bucket is the only copy that matters.
+**Remove the old machine's cron job before the server's first cycle.** Two
+machines must never update the same AOI: each would apply scenes the other has
+not seen, and the alerts (which hold review verdicts) would diverge. From the
+handover on, the bucket is the only copy that matters.
 
 On the server, after sections 4 and 5, run one cycle by hand and check it:
 
@@ -116,10 +122,11 @@ scripts/forestmon_cycle.sh                   # pulls from S3, runs, pushes back
 .venv/bin/forestmon health kalklindeskog     # expect HEALTHY
 ```
 
-This was tested with a local folder standing in for the bucket, on a copy of the
+Tested with a local folder standing in for the bucket, on a copy of the
 production kalklindeskog data and with no CDSE keys: the upload, a first cycle
 on an empty server, a failed push and its recovery all behaved as described in
-section 5. `health` reported HEALTHY on the same data.
+section 5. `health` reported HEALTHY on the same data. A push and pull round
+trip through the real bucket returned identical files.
 
 ### 3B. Start a new AOI
 
@@ -145,8 +152,19 @@ Then add the AOI to `FORESTMON_AOIS`, and add its polygon to the bucket's
 
 Copy `.env.example` to `.env` in the clone (it is git-ignored) and set:
 
+Copy `.env.s3.example` to `.env.s3` and fill in the access key:
+
 ```bash
-FORESTMON_S3_REMOTE=nina:forestmon      # rclone remote and bucket (path); see below
+cp .env.s3.example .env.s3 && chmod 600 .env.s3     # then edit the two AWS_* lines
+```
+
+It already names the endpoint, bucket and prefix. The cycle script reads it and
+passes the keys to rclone only, so no `rclone config` is needed. Check access
+with `scripts/forestmon_cycle.sh --s3-pull`, which fills the working copy.
+
+Then set in `.env`:
+
+```bash
 FORESTMON_DATA_DIR=/srv/forestmon/data
 FORESTMON_AOIS=kalklindeskog olivinskog
 FORESTMON_BIN=/opt/forestmon/.venv/bin/forestmon
@@ -154,22 +172,9 @@ FORESTMON_PUSH=0
 # FORESTMON_GDAL_BIN=/path/to/dir/containing/ogr2ogr   # only if ogr2ogr is not on PATH
 ```
 
-- **`FORESTMON_S3_REMOTE`**: an rclone path, `<remote name>:<bucket>[/<prefix>]`.
-  Create the remote once with `rclone config` as the user that runs the cron job
-  (it is stored in `~/.config/rclone/rclone.conf`, keep it mode 600). For a
-  generic S3 service the remote looks like this:
-
-  ```ini
-  [nina]
-  type = s3
-  provider = Other
-  endpoint = https://<s3 endpoint>
-  access_key_id = ...
-  secret_access_key = ...
-  ```
-
-  Check it with `rclone lsf nina:forestmon/operational`. Unset, the script works
-  on the local data directory only, as before.
+- **`FORESTMON_S3_REMOTE`** (optional): any rclone path overrides `.env.s3`,
+  for example a remote made with `rclone config`. Without either, the script
+  works on the local data directory only.
 
 - **`FORESTMON_BIN`**: cron runs with a minimal PATH. Without this setting the
   script looks for `uv` on PATH or in `~/.local/bin`, and stops with
@@ -266,9 +271,10 @@ Never put them in the repository, an image, or a network share.
 ## Backup
 
 The bucket is the primary copy, but each push mirrors the server, so a bad run
-or a mistake on the server reaches the bucket at the next push. Turn on
-**versioning** for the bucket (or copy it elsewhere regularly) so that an
-earlier state can be restored. The parts that matter, under `operational/`:
+or a mistake on the server reaches the bucket at the next push. Ask the bucket's
+administrator to turn on **versioning** (the project's key cannot even read that
+setting), or copy `sccd/` elsewhere regularly, so that an earlier state can be
+restored. The parts that matter, under `operational/`:
 
 | What | Path | Notes |
 |---|---|---|
@@ -361,8 +367,8 @@ Verified on 2026-11-05:
 
 Not verified:
 
-- the S3 sync against a real S3 bucket (only against a local folder; the rclone
-  commands are the same);
+- a full cycle against the real bucket (the sync logic was tested against a
+  local folder, and a push and pull round trip against the real bucket);
 - the Docker build and the systemd units;
 - olivinskog's memory peak on a new server;
 - `FORESTMON_PUSH=1` from a new server.
