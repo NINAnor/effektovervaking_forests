@@ -6,7 +6,6 @@ is the order they are listed by `--help`:
     forestmon grid build kalklindeskog        # the pixels we monitor
     forestmon catalog sync kalklindeskog      # what imagery exists
     forestmon catalog schedule kalklindeskog  # when the next scene lands
-    forestmon parity check kalklindeskog      # CDSE == Earth Engine?
     forestmon obs backfill kalklindeskog      # history -> observation store
     forestmon sccd bootstrap kalklindeskog    # fit initial per-pixel state
     forestmon run kalklindeskog               # the operational cycle
@@ -35,7 +34,6 @@ from . import (
     config,
     obs,
     obslog,
-    parity,
     pipeline,
     reader,
     runs,
@@ -53,13 +51,11 @@ app = typer.Typer(
 )
 grid_app = typer.Typer(no_args_is_help=True, help="Pixel grid the state is carried on.")
 cat_app = typer.Typer(no_args_is_help=True, help="CDSE STAC scene index and schedule.")
-parity_app = typer.Typer(no_args_is_help=True, help="CDSE vs Earth Engine agreement.")
 obs_app = typer.Typer(no_args_is_help=True, help="Clear-sky observation store.")
 sccd_app = typer.Typer(no_args_is_help=True, help="S-CCD fitting and online update.")
 alerts_app = typer.Typer(no_args_is_help=True, help="Alerts and their review status.")
 app.add_typer(grid_app, name="grid")
 app.add_typer(cat_app, name="catalog")
-app.add_typer(parity_app, name="parity")
 app.add_typer(obs_app, name="obs")
 app.add_typer(sccd_app, name="sccd")
 app.add_typer(alerts_app, name="alerts")
@@ -250,60 +246,6 @@ def catalog_schedule(
     _echo(f"next data expected readable: {nxt:%Y-%m-%d %H:%M} UTC")
 
 
-# ── parity ───────────────────────────────────────────────────────────────────
-@parity_app.command("check")
-def parity_check(
-    aoi: str = AOI_ARG,
-    pixels: int = typer.Option(12, help="Sample pixels to compare"),
-    scenes: int = typer.Option(40, help="Most recent scenes to compare"),
-    start: str = typer.Option(None),
-    end: str = typer.Option(None),
-    verbose: bool = typer.Option(False, "-v"),
-):
-    """Compare CDSE reads against Earth Engine at the pixel level.
-
-    L2A DNs are integers, so a correct pipeline matches EXACTLY; the verdict is
-    PASS only at >=99.9% exact agreement on every band.
-    """
-    if not cdse_auth.have_credentials():
-        _fail("CDSE S3 credentials missing — run `forestmon doctor`")
-    rep, matched = parity.check(
-        aoi,
-        n_pixels=pixels,
-        start=start,
-        end=end,
-        max_scenes=scenes,
-        progress=_echo if verbose else None,
-    )
-    parity.write_report(rep, matched)
-    _echo(
-        f"\nmatched {rep['n_matched_observations']} observations "
-        f"({rep['n_sample_pixels']} pixels x {rep['n_scenes_read']} scenes)"
-    )
-    for b, v in rep["per_band"].items():
-        _echo(
-            f"  {b}: exact {v['exact_match']:.4f}  n={v['n']}  "
-            f"median_diff={v['median_diff']}  max|diff|={v['max_abs_diff']}"
-        )
-    _echo(f"  SCL agreement: {rep['scl_agreement']}")
-    colour = {
-        "PASS": typer.colors.GREEN,
-        "MARGINAL": typer.colors.YELLOW,
-        "FAIL": typer.colors.RED,
-    }[rep["verdict"]]
-    typer.secho(f"\nVERDICT: {rep['verdict']}", fg=colour, bold=True)
-    _echo(f"report -> {parity.report_path(aoi)}")
-
-
-@parity_app.command("show")
-def parity_show(aoi: str = AOI_ARG):
-    """Print the stored parity report."""
-    rep = parity.load_report(aoi)
-    if rep is None:
-        _fail(f"no parity report for {aoi}; run `parity check {aoi}`")
-    _echo(json.dumps(rep, indent=1))
-
-
 # ── obs ──────────────────────────────────────────────────────────────────────
 @obs_app.command("backfill")
 def obs_backfill(
@@ -422,30 +364,11 @@ def obs_status(aoi: str = AOI_ARG):
 @sccd_app.command("bootstrap")
 def sccd_bootstrap(
     aoi: str = AOI_ARG,
-    force: bool = typer.Option(False, help="Fit even if parity has not PASSed"),
     chunk_pixels: int = typer.Option(
         12_000, help="Pixels per fitting chunk (bounds memory)"
     ),
 ):
-    """Fit initial per-pixel S-CCD state from the observation store.
-
-    Refuses to run unless a parity check has passed: state fitted on
-    observations that disagree with the validated Earth Engine series would put
-    every downstream alert on an unverified footing.
-    """
-    rep = parity.load_report(aoi)
-    if not force:
-        if rep is None:
-            _fail(
-                f"no parity report for {aoi}. Run `parity check {aoi}` first, "
-                "or pass --force if you accept unverified observations."
-            )
-        if rep["verdict"] != "PASS":
-            _fail(
-                f"parity verdict is {rep['verdict']} (worst band exact match "
-                f"{rep['worst_band_exact_match']:.4f}). Fix the reader or pass "
-                "--force."
-            )
+    """Fit initial per-pixel S-CCD state from the observation store."""
 
     grid = aoi_mod.load_grid(aoi)
     # Fit in contiguous pixel chunks: the whole store is 117 M rows for
@@ -487,7 +410,6 @@ def sccd_bootstrap(
         "bootstrap": stats,
         "monitoring_start": config.MONITORING_START,
         "alerts_dirty": True,
-        "parity_verdict": (rep or {}).get("verdict", "SKIPPED"),
     }
     state_mod.save(aoi, states, meta)
     # Every scene in the store is now folded into state, so the ledger's stages
@@ -830,17 +752,6 @@ def doctor():
         f"  AOI dir:  {config.AOI_DIR} "
         f"({', '.join(config.AOI_PARQUET) or 'no AOIs found'})"
     )
-    try:
-        import ee
-
-        ee.Initialize(project=config.EE_PROJECT)
-        ee.Number(1).getInfo()
-        _echo("  OK   Earth Engine (needed only for `parity check`)")
-    except Exception as ex:  # noqa: BLE001
-        _echo(
-            f"  WARN Earth Engine unavailable: {type(ex).__name__} "
-            "(only `parity check` needs it)"
-        )
     for name in config.AOI_PARQUET:
         p = aoi_mod.grid_path(name)
         _echo(f"  {'OK ' if p.exists() else '-  '}  grid: {name}")

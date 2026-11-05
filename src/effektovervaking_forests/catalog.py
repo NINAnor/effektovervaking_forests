@@ -472,8 +472,8 @@ def dedupe_versions(df: pd.DataFrame) -> pd.DataFrame:
 
     The last field of a CDSE product id is its processing datetime, so sorting
     on (baseline, processing time) and keeping the last gives the newest
-    version. Found by `parity check`, which had matched both versions against a
-    single Earth Engine observation.
+    version. Found when both versions matched a single Earth Engine
+    observation.
     """
     if df.empty:
         return df

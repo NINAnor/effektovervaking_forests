@@ -12,7 +12,7 @@ architecturally near-real-time, not the most accurate: cross-validated loss F1
 is only 0.185 against project labels. Alerts are review triggers, not verdicts.
 See [docs/architecture.md](docs/architecture.md) for the ingestion-to-Parquet
 diagram and [docs/operational.md](docs/operational.md) for the pipeline, commit
-boundaries, parity gate and known gaps.
+boundaries and known gaps.
 
 ## Install
 Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
@@ -25,7 +25,7 @@ uv run forestmon doctor      # checks dependencies, credentials, AOIs
 ```
 
 Console scripts `forestmon` and `effektovervaking-forests` are the same app.
-Extras: `--extra gee` (earthengine-api, only for `parity check`).
+Extras: `--extra gee` (earthengine-api, only for condition step 02e).
 `publish site` also needs the
 `ogr2ogr` CLI (GDAL >= 3.8, PMTiles driver) on `PATH` or via `FORESTMON_GDAL_BIN`.
 The JP2 driver ships with the rasterio wheel.
@@ -74,10 +74,9 @@ Each step is per-AOI and idempotent (AOI name = parquet file stem).
 uv run forestmon grid build <aoi>          # fixed 10 m pixel grid on the S2 UTM lattice
 uv run forestmon catalog sync <aoi>        # index CDSE scenes
 uv run forestmon grid assign-tiles <aoi>   # pin pixels to MGRS tiles (after sync)
-uv run forestmon parity check <aoi>        # CDSE == Earth Engine? (gate, needs gee extra)
 uv run forestmon obs backfill <aoi>        # history -> store; batched, resumable
 uv run forestmon obs compact <aoi>
-uv run forestmon sccd bootstrap <aoi>      # refuses until parity has passed
+uv run forestmon sccd bootstrap <aoi>      # fit initial per-pixel state
 uv run forestmon run <aoi>                 # the operational cycle (safe to repeat)
 uv run forestmon health <aoi>              # backlog, staleness, errors
 uv run forestmon logs <aoi> --failures

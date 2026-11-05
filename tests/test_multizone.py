@@ -31,7 +31,6 @@ def sandbox(tmp_path, monkeypatch):
         "STATE_DIR",
         "OBS_DIR",
         "ALERTS_DIR",
-        "PARITY_DIR",
         "RUNS_DIR",
     ):
         d = tmp_path / name.lower()

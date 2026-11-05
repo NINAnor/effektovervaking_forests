@@ -245,7 +245,7 @@ def test_ensure_dirs_creates_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     names = ("OPS", "GRID_DIR", "CATALOG_DIR", "STATE_DIR", "OBS_DIR", "ALERTS_DIR")
-    names += ("PARITY_DIR", "RUNS_DIR")
+    names += ("RUNS_DIR",)
     for n in names:
         monkeypatch.setattr(config, n, tmp_path / "ops" / n)
     config.ensure_dirs()
