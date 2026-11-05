@@ -124,10 +124,7 @@ def main(argv: list[str] | None = None) -> None:
     failed: list[tuple[int, str, str]] = []
     if todo:
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
-            futs = {
-                ex.submit(run_tile, t, poly, args.all_touched): t
-                for t in todo
-            }
+            futs = {ex.submit(run_tile, t, poly, args.all_touched): t for t in todo}
             for f in as_completed(futs):
                 t = futs[f]
                 try:

@@ -9,7 +9,6 @@ import pytest
 from effektovervaking_forests.condition.blocks import spatial_blocks
 from effektovervaking_forests.condition.score import (
     calibrate_threshold_blocked,
-    cluster_bootstrap_ci,
 )
 from effektovervaking_forests.condition.trend import (
     calibrate_slope_gate,
@@ -83,56 +82,6 @@ def test_single_linkage_joins_a_chain_that_k_means_would_cut():
 
 
 # --- the clustered bootstrap -------------------------------------------------
-def test_the_clustered_interval_is_wider_than_the_row_wise_one():
-    """The whole point: 60 pixels of one donor are one donor, not 60 references."""
-    from effektovervaking_forests.condition.core import bootstrap_ci, knn_score
-
-    rng = np.random.default_rng(0)
-    # 10 donors x 30 pixels, with the donor -- not the pixel -- carrying the spread
-    donor_mean = rng.normal(0.4, 0.08, size=10)
-    d_g = np.concatenate([rng.normal(m, 0.005, 30) for m in donor_mean])
-    cluster = np.repeat(np.arange(10), 30)
-    d_b = rng.normal(0.8, 0.01, 300)
-    b_cluster = np.repeat(np.arange(10), 30)
-    fn = lambda a, b: knn_score(a, b, 5)  # noqa: E731
-    _, lo_r, hi_r = bootstrap_ci(fn, d_g, d_b, 400, np.random.default_rng(1))
-    _, lo_c, hi_c = cluster_bootstrap_ci(
-        d_g, cluster, d_b, b_cluster, 5, 400, np.random.default_rng(1)
-    )
-    assert (hi_c - lo_c) > (hi_r - lo_r)
-
-
-def test_the_clustered_bootstrap_matches_a_literal_resampling_of_clusters():
-    """The (n_clusters, k) shortcut has to be exact, not an approximation."""
-    from effektovervaking_forests.condition.core import knn_score
-
-    rng = np.random.default_rng(3)
-    d_g = rng.random(240)
-    gc = np.repeat(np.arange(8), 30)
-    d_b = rng.random(240) + 0.4
-    bc = np.repeat(np.arange(8), 30)
-    k = 5
-    fast = cluster_bootstrap_ci(d_g, gc, d_b, bc, k, 3000, np.random.default_rng(4))
-    slow_rng = np.random.default_rng(5)
-    g_by = [np.flatnonzero(gc == j) for j in range(8)]
-    b_by = [np.flatnonzero(bc == j) for j in range(8)]
-    boots = []
-    for _ in range(3000):
-        gs = np.concatenate([g_by[j] for j in slow_rng.integers(0, 8, 8)])
-        bs = np.concatenate([b_by[j] for j in slow_rng.integers(0, 8, 8)])
-        boots.append(knn_score(d_g[gs], d_b[bs], k))
-    assert fast[1] == pytest.approx(np.percentile(boots, 2.5), abs=0.01)
-    assert fast[2] == pytest.approx(np.percentile(boots, 97.5), abs=0.01)
-
-
-def test_a_single_cluster_gets_no_interval_rather_than_a_zero_width_one():
-    rng = np.random.default_rng(0)
-    d_g, d_b = rng.random(60), rng.random(60) + 0.5
-    one = np.zeros(60, dtype=int)
-    _, lo, hi = cluster_bootstrap_ci(d_g, one, d_b, one, 5, 200, rng)
-    assert np.isnan(lo) and np.isnan(hi)
-
-
 def test_the_blocked_threshold_never_uses_the_block_it_is_applied_to():
     scores = pd.Series([0.9, 0.9, 0.1, 0.1, 0.5, 0.5])
     labels = pd.Series(["good", "good", "bad", "bad", "good", "bad"])

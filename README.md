@@ -92,15 +92,15 @@ olivinskog and kalklindeskog, from AlphaEarth 2017–2025 embeddings. Separate
 from the loss monitor; it shares only the configuration. ~30 min, ~50 GB read.
 
 ```bash
-uv run forestmon condition doctor            # stand gpkg, GDAL, numba/ee, data root
+uv run forestmon condition doctor            # stand gpkg, GDAL, ee, data root
 uv run forestmon condition steps             # the 14 steps
-uv run forestmon condition run               # all but 09; fail-fast, logged; --from/--to/--dry-run
+uv run forestmon condition run               # fail-fast, logged; --from/--to/--dry-run
 uv run forestmon condition step 04 -- --help # one step; args after -- are the step's own
 ```
 
 Config: `CONDITION_ROOT` (data + outputs, default `<FORESTMON_DATA_DIR>/condition`),
-`FORESTS_KARTLEGGING_GPKG` (stand polygons). `uv sync --extra fast` (numba,
-threadpoolctl) speeds up step 04; `--extra gee` is needed for 02e/09 only.
+`FORESTS_KARTLEGGING_GPKG` (stand polygons). `--extra gee` is needed for step
+02e only.
 Details, outputs and the production-takeover recipe:
 [docs/condition/README.md](docs/condition/README.md); method and evidence:
 [docs/condition/METHODS.md](docs/condition/METHODS.md).
