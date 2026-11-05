@@ -28,17 +28,9 @@ OUT_DATA = OUT / "data"
 # ---------------------------------------------------------------------------
 # Inputs
 # ---------------------------------------------------------------------------
-# The mapped polygons for both forest types. Overridable so the pipeline can be
-# pointed at a copy without editing code.
-# Site default: the NINA project share this pipeline was deployed on. It is the
-# only absolute path in the package, and it is a default rather than a
-# requirement -- set FORESTS_KARTLEGGING_GPKG to run anywhere else.
-DEFAULT_KARTLEGGING_GPKG = Path(
-    "/data/P-Prosjekter2/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling"
-    "/Data/Olivinskog_kalklindeskog/skog_kartlegginger.gpkg"
-)
-KARTLEGGING_GPKG = Path(
-    os.environ.get("FORESTS_KARTLEGGING_GPKG", DEFAULT_KARTLEGGING_GPKG)
+# The mapped stand polygons for both forest types (six layers, see LAYER_TYPE).
+KARTLEGGING_GPKG = _env_path(
+    "FORESTS_KARTLEGGING_GPKG", DATA / "skog_kartlegginger.gpkg"
 )
 
 # The six polygon layers, and which forest type each belongs to.

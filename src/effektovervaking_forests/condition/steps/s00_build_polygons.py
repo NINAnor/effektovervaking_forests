@@ -84,7 +84,9 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
 
     if not KARTLEGGING_GPKG.exists():
-        raise SystemExit(f"input not found: {KARTLEGGING_GPKG}")
+        raise SystemExit(
+            f"input not found: {KARTLEGGING_GPKG} (set FORESTS_KARTLEGGING_GPKG)"
+        )
 
     frames = []
     for layer, ftype in LAYER_TYPE.items():
