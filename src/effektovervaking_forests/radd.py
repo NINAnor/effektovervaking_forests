@@ -13,10 +13,10 @@ file it reads is old. Needs the `gee` extra and an authenticated account.
 
 from __future__ import annotations
 
-import json
 import time
 
 import geopandas as gpd
+import shapely
 
 RADD_IC = "projects/wurnrt-raddeurope/assets/01_NRT/00_Operational/V1_IC"
 APP_URL = "https://wurnrt-raddeurope.projects.earthengine.app/view/radd-europe"
@@ -66,13 +66,11 @@ def mint_tiles(polys: gpd.GeoDataFrame, project: str | None = None) -> dict:
 
     ee.Initialize(project=project)
     img = latest_image(ee)
-    # Simplified to keep the request small; 1e-5 deg is about 1 m.
-    stands = ee.FeatureCollection(
-        json.loads(
-            polys.to_crs(4326)[["geometry"]].simplify(1e-5).to_json(drop_id=True)
-        )
-    )
-    inside = ee.Image(0).paint(stands, 1).selfMask()
+    # One dissolved, 1e-5 deg (~1 m) geometry keeps the request small.
+    geom = shapely.set_precision(polys.to_crs(4326).union_all(), 1e-5)
+    stands = ee.FeatureCollection([ee.Feature(ee.Geometry(geom.__geo_interface__))])
+    # Masked before visualize: updateMask after it would reset the 0.75 opacity.
+    img = img.updateMask(ee.Image(0).paint(stands, 1).selfMask())
     props = img.toDictionary(["system:index", "version_date"]).getInfo()
     now = int(time.time() * 1000)
     out = {
@@ -87,6 +85,6 @@ def mint_tiles(polys: gpd.GeoDataFrame, project: str | None = None) -> dict:
         ("alert", alert_rgb(ee, img)),
         ("alert_date", alert_date_rgb(img, now)),
     ):
-        m = ee.data.getMapId({"image": vis.updateMask(inside)})
+        m = ee.data.getMapId({"image": vis})
         out["layers"][name] = {"tiles": m["tile_fetcher"].url_format}
     return out

@@ -134,11 +134,11 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
         page.select_option("#stand-color", "trajectory")
         assert "declining" in page.inner_text("#stand-legend")
         assert page.locator("#toggle-cells").is_hidden()
-        page.check('input[name="basemap"][value="satellite"]')
+        page.check('input[name="basemap"][value="osm"]')
         assert page.evaluate(
             "() => ['osm', 'satellite']"
             ".map(i => map.getLayoutProperty('base-' + i, 'visibility'))"
-        ) == ["none", "visible"]
+        ) == ["visible", "none"]
         page.uncheck("#toggle-alerts")
         assert page.evaluate(
             "() => [...pointLayers.keys()]"

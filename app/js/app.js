@@ -80,7 +80,8 @@ function pointsToGeojson(cols, aoi, kind) {
     features[i] = {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [cols.lon[i], cols.lat[i]] },
-      properties: { aoi, kind, month: cols.month[i], conf: cols.conf[i], n: cols.n[i] }
+      // lon/lat kept exact: rendered geometry is snapped to the tile grid.
+      properties: { aoi, kind, lon: cols.lon[i], lat: cols.lat[i], month: cols.month[i], conf: cols.conf[i], n: cols.n[i] }
     };
   }
   return { type: 'FeatureCollection', features };
@@ -283,16 +284,23 @@ function applyRadd() {
       attribution: '<a href="https://www.wur.nl/en/research-results/research-institutes/environmental-research/radd-forest-disturbance-alert.htm">RADD</a> / Wageningen University'
     });
     map.addLayer({ id: 'radd', type: 'raster', source: 'radd', paint: { 'raster-opacity': 0.9 } }, 'forest-pts');
-    map.on('error', (e) => {
-      if (e.sourceId === 'radd') {
-        document.getElementById('radd-note').textContent =
-          'RADD tiles failed to load. Earth Engine map IDs expire: re-run forestmon publish radd.';
-      }
-    });
-  } else if (map.getSource('radd').tiles?.[0] !== tiles[0]) {
+    checkRaddTiles();
+  } else if (state.radd && map.getSource('radd').tiles?.[0] !== tiles[0]) {
     map.getSource('radd').setTiles(tiles);
   }
   map.setLayoutProperty('radd', 'visibility', state.radd ? 'visible' : 'none');
+}
+
+/** MapLibre stays silent on tile 404s, so probe one tile per layer once. */
+function checkRaddTiles() {
+  for (const { tiles } of Object.values(raddTiles.layers)) {
+    fetch(tiles.replace('{z}', 0).replace('{x}', 0).replace('{y}', 0))
+      .then((r) => { if (!r.ok) throw new Error(r.status); })
+      .catch(() => {
+        document.getElementById('radd-note').textContent =
+          'RADD tiles failed to load. Earth Engine map IDs expire: re-run forestmon publish radd.';
+      });
+  }
 }
 
 function describeRadd() {
@@ -323,7 +331,7 @@ function trajChart(series, threshold, years, markYear) {
   for (const yr of [years[0], years[4], years[years.length - 1]]) {
     g += `<text x="${x(yr)}" y="${H - 5}" text-anchor="middle">${yr}</text>`;
   }
-  if (markYear) g += `<line class="mark" x1="${x(markYear)}" x2="${x(markYear)}" y1="${m.t}" y2="${H - m.b}"><title>surveyed ${markYear}</title></line>`;
+  if (markYear >= years[0] && markYear <= years[years.length - 1]) g += `<line class="mark" x1="${x(markYear)}" x2="${x(markYear)}" y1="${m.t}" y2="${H - m.b}"><title>surveyed ${markYear}</title></line>`;
   if (threshold !== null && threshold !== undefined) {
     g += `<line class="thr" x1="${m.l}" x2="${W - m.r}" y1="${y(threshold)}" y2="${y(threshold)}"><title>threshold ${fmt(threshold, 3)}</title></line>`;
   }
@@ -368,11 +376,12 @@ function chip(text, color) {
 function cellSection(p) {
   const series = index.years.map((yr) => p[`dor_global_${yr}`] ?? null);
   const traj = p.trajectory_class || '—';
+  const above = Number(p.dor_global_2025) >= Number(p.threshold_global);
   return '<section><h4>10 m cell condition</h4>' +
     trajChart(series, p.threshold_global, index.years) +
     '<div class="chips">' +
-    chip(`2025: ${Number(p.dor_global_2025) >= Number(p.threshold_global) ? 'above' : 'below'} threshold`,
-      Number(p.dor_global_2025) >= Number(p.threshold_global) ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition) +
+    (p.dor_global_2025 == null ? chip('2025: no score', CLASS_COLORS.no_data)
+      : chip(`2025: ${above ? 'above' : 'below'} threshold`, above ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition)) +
     chip(`trajectory: ${traj}`, TRAJ_COLORS[traj] || CLASS_COLORS.no_data) + '</div>' +
     `<dl><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd><dt>Threshold</dt><dd>${fmt(p.threshold_global, 3)}</dd>` +
     `<dt>Trend 2017–2025</dt><dd>${trend(series)}</dd><dt>Inside stand</dt><dd>${fmt(p.edge_m, 0)} m</dd></dl></section>`;
@@ -401,7 +410,7 @@ function showDetail(e) {
     const p = f.properties;
     html += `<section><h4>S-CCD ${esc(p.kind)} pixel</h4><div class="chips">${chip(p.kind, KIND_COLORS[p.kind])}</div>` +
       `<dl><dt>Latest break</dt><dd>${esc(p.month)}</dd><dt>Confidence</dt><dd>${fmt(p.conf, 2)}</dd>` +
-      `<dt>Events</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink(f.geometry.coordinates)}</section>`;
+      `<dt>Events</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
   }
   if (cell) html += cellSection(cell.properties);
   if (stand) html += standSection(standById.get(stand.properties.poly_id) || stand.properties);
