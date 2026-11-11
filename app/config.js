@@ -9,7 +9,17 @@ window.DASHBOARD_CONFIG = {
   // Empty hides the layer.
   conditionCells: 'https://s3-int-1.nina.no/miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/pmtiles/condition_pixels.pmtiles',
 
-  // Basemap tiles.
-  basemap: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  basemapAttribution: '&copy; OpenStreetMap contributors'
+  // Basemaps offered in the layer panel; the first is the default.
+  basemaps: {
+    osm: {
+      tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      maxzoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    },
+    satellite: {
+      tiles: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      maxzoom: 19,
+      attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
+    }
+  }
 };

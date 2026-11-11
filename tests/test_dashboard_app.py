@@ -77,6 +77,7 @@ def _open(browser, url):
         lambda m: "Content Security Policy" in m.text and errors.append(m.text),
     )
     page.route("**/tile.openstreetmap.org/**", lambda r: r.fulfill(status=204))
+    page.route("**/server.arcgisonline.com/**", lambda r: r.fulfill(status=204))
     page.goto(url)
     # Loaded = data status set (OK or error) and the charts drawn or given up on.
     page.wait_for_function(
@@ -118,6 +119,16 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
         page.select_option("#stand-color", "trajectory")
         assert "declining" in page.inner_text("#stand-legend")
         assert page.locator("#toggle-cells").is_hidden()
+        page.check('input[name="basemap"][value="satellite"]')
+        assert page.evaluate(
+            "() => ['osm', 'satellite']"
+            ".map(i => map.getLayoutProperty('base-' + i, 'visibility'))"
+        ) == ["none", "visible"]
+        page.uncheck("#toggle-alerts")
+        assert page.evaluate(
+            "() => [...pointLayers.keys()]"
+            ".every(k => map.getLayoutProperty(k, 'visibility') === 'none')"
+        )
         page.uncheck("#toggle-stands")
         assert (
             page.evaluate("() => map.getLayoutProperty('forest-fill', 'visibility')")

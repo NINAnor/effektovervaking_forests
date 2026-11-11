@@ -8,6 +8,9 @@ const SCHEMA = 2; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 const KIND_COLORS = { loss: '#e06666', gain: '#4dd0a7' };
 const KINDS = ['loss', 'gain'];
+const BASEMAPS = CFG.basemaps || {
+  osm: { tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; OpenStreetMap contributors' }
+};
 // Condition colours, as in the old inspector (ColorBrewer BrBG).
 const CLASS_COLORS = {
   good_condition: '#35978f', indistinguishable: '#9aa39c', poor_condition: '#bf812d', no_data: '#d7dad3'
@@ -27,6 +30,8 @@ const state = {
   from: '',
   to: '',
   resolution: 'annual',
+  basemap: 'osm',
+  alerts: true,
   stands: true,
   standColor: 'forest_type',
   cells: false
@@ -81,15 +86,13 @@ function createMap() {
     container: 'map',
     style: {
       version: 8,
-      sources: {
-        base: {
-          type: 'raster',
-          tiles: [CFG.basemap || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-          tileSize: 256,
-          attribution: CFG.basemapAttribution || '&copy; OpenStreetMap contributors'
-        }
-      },
-      layers: [{ id: 'base', type: 'raster', source: 'base' }]
+      sources: Object.fromEntries(Object.entries(BASEMAPS).map(([id, b]) => [`base-${id}`, {
+        type: 'raster', tiles: [b.tiles], tileSize: 256, maxzoom: b.maxzoom || 19, attribution: b.attribution || ''
+      }])),
+      layers: Object.keys(BASEMAPS).map((id) => ({
+        id: `base-${id}`, type: 'raster', source: `base-${id}`,
+        layout: { visibility: id === state.basemap ? 'visible' : 'none' }
+      }))
     },
     center: [9.5, 60.5],
     zoom: 5.5
@@ -157,7 +160,7 @@ function addPolygons(geojson) {
 function addConditionCells() {
   if (!CFG.conditionCells || typeof pmtiles === 'undefined') {
     if (CFG.conditionCells) console.error('pmtiles.js failed to load; condition cells are off');
-    /** @type {HTMLElement} */ (document.getElementById('toggle-cells').parentElement).hidden = true;
+    document.getElementById('cells-section').hidden = true;
     return;
   }
   const protocol = new pmtiles.Protocol();
@@ -274,13 +277,14 @@ function applyMapState() {
     map.setFilter('cells', forest);
     map.setLayoutProperty('cells', 'visibility', state.cells ? 'visible' : 'none');
   }
+  for (const id of Object.keys(BASEMAPS)) {
+    map.setLayoutProperty(`base-${id}`, 'visibility', id === state.basemap ? 'visible' : 'none');
+  }
   if (popup) popup.remove();
-  const item = (name, style) => `<span class="legend__item"><i class="dot" style="${style}"></i> ${esc(name)}</span>`;
   document.getElementById('stand-legend').innerHTML =
-    (state.stands ? standLegend(state.standColor).map(([name, c]) => item(name, `background:${c}`)).join('') +
-      item('declining (outline)', 'border:2px solid #8c510a;background:transparent') : '') +
-    (state.cells ? item('cell below / above threshold',
-      `background:linear-gradient(90deg,${CELL_RAMP[0][0]},${CELL_RAMP[3][0]},${CELL_RAMP[7][0]})`) : '');
+    standLegend(state.standColor).map(([name, c]) =>
+      `<li><i class="sw" style="background:${c}"></i> ${esc(name)}</li>`).join('') +
+    '<li><i class="sw sw--outline"></i> declining (outline)</li>';
   const n = state.forestType === 'all' ? index.polygon_count
     : index.polygon_counts?.[state.forestType] ?? index.polygon_count;
   document.getElementById('stand-count').textContent = String(n);
@@ -291,7 +295,7 @@ function applyMapState() {
     ['>=', ['get', 'conf'], state.minConf]];
   for (const key of pointLayers.keys()) {
     if (!map.getLayer(key)) continue;
-    map.setLayoutProperty(key, 'visibility', wanted.has(key) ? 'visible' : 'none');
+    map.setLayoutProperty(key, 'visibility', state.alerts && wanted.has(key) ? 'visible' : 'none');
     map.setFilter(key, filter);
   }
 }
@@ -490,7 +494,15 @@ function setupControls() {
   bind('filter-date-to', 'to');
   bind('cover-resolution', 'resolution');
   bind('stand-color', 'standColor');
-  for (const [id, key] of [['toggle-stands', 'stands'], ['toggle-cells', 'cells']]) {
+  document.getElementById('cell-ramp').style.background =
+    `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
+  for (const el of document.querySelectorAll('input[name="basemap"]')) {
+    el.addEventListener('change', (e) => {
+      state.basemap = /** @type {HTMLInputElement} */ (e.target).value;
+      applyMapState();
+    });
+  }
+  for (const [id, key] of [['toggle-alerts', 'alerts'], ['toggle-stands', 'stands'], ['toggle-cells', 'cells']]) {
     document.getElementById(id).addEventListener('change', (e) => {
       state[key] = /** @type {HTMLInputElement} */ (e.target).checked;
       applyMapState();
