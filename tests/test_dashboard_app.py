@@ -168,6 +168,11 @@ def test_schema_mismatch_shows_error(browser, site) -> None:
         status = page.locator("#data-status")
         assert "error" in status.get_attribute("class")
         assert "schema 999" in status.inner_text()
+        assert "could not be loaded" in page.inner_text(".map-error")
+        page.click("#theme-toggle")  # the buttons work without data
+        assert page.get_attribute("html", "data-theme") == "dark"
+        page.click('[data-info="guide"]')
+        assert page.locator("#info").is_visible()
         ctx.close()
     finally:
         restore()

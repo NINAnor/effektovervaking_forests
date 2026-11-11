@@ -951,8 +951,7 @@ function setupTheme() {
     if (dark) document.documentElement.dataset.theme = 'dark';
     else delete document.documentElement.dataset.theme;
     try { localStorage.setItem('forestmon:theme', dark ? 'dark' : 'light'); } catch { /* private mode */ }
-    sync();
-    renderCharts();
+    sync(); // chart colours are CSS variables: nothing to redraw
   });
   sync();
 }
@@ -1083,7 +1082,6 @@ function setupInfo() {
 
 function setupControls() {
   setupPeriod();
-  setupInfo();
   const bind = (id, key, parse = (v) => v) => {
     document.getElementById(id).addEventListener('change', (e) => {
       state[key] = parse(/** @type {HTMLInputElement} */ (e.target).value);
@@ -1108,7 +1106,6 @@ function setupControls() {
       applyRadd();
     });
   }
-  setupTheme();
   // Browsers may restore form state on reload; the controls are the truth.
   const val = (id) => /** @type {HTMLInputElement} */ (document.getElementById(id));
   state.forestType = val('filter-forest-type').value;
@@ -1167,7 +1164,34 @@ function refresh() {
   refreshMap().catch((e) => showError(`Map update failed: ${e.message}`));
 }
 
+/** A failed start: a plain sentence on the map, the technical cause in the status pill and console. */
+function showFatal(e) {
+  showError(`Error loading data: ${e.message}`);
+  const p = document.createElement('p');
+  p.className = 'map-error';
+  p.textContent = 'The map data could not be loaded. Try reloading the page; if it keeps happening, ' +
+    'tell whoever runs this dashboard.';
+  document.querySelector('.map-wrap').append(p);
+}
+
+/** Tile layers read from S3 fail quietly in MapLibre: say so in their section. */
+function setupLayerErrors() {
+  map.on('error', (e) => {
+    const section = { c2c: 'c2c-section', cells: 'cells-section' }[e.sourceId];
+    const el = section && document.getElementById(section);
+    if (!el || el.querySelector('.layer-error')) return;
+    const p = document.createElement('p');
+    p.className = 'hint layer-error';
+    p.textContent = 'This layer could not be loaded; try again later.';
+    el.append(p);
+    console.error(e.error);
+  });
+}
+
 async function init() {
+  // The buttons work even if the data never arrive.
+  setupTheme();
+  setupInfo();
   if (typeof maplibregl === 'undefined') throw new Error('MapLibre failed to load (vendor/ and unpkg both unavailable)');
   index = await loadIndex();
   const [polygons, rows, radd] = await Promise.all([
@@ -1180,6 +1204,7 @@ async function init() {
   raddTiles = raddFile = radd;
   setupStatus();
   setupControls();
+  setupLayerErrors();
   addPolygons(polygons);
   addConditionCells();
   addC2c();
@@ -1193,4 +1218,4 @@ async function init() {
   }).observe(document.querySelector('.panel--charts'));
 }
 
-init().catch((e) => showError(`Error loading data: ${e.message}`));
+init().catch(showFatal);
