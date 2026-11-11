@@ -32,6 +32,13 @@ const TRAJ_COLORS = { improving: '#35978f', stable: '#9aa39c', fluctuating: '#c8
 const C2C_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025];
 const C2C_COLORS = ['#efedf5', '#dadaeb', '#bcbddc', '#9e9ac8', '#807dba', '#6a51a3', '#54278f', '#3f007d'];
 const C2C_GATE = 0.175; // |NBR drop| tuned against the labelled pixels (old inspector)
+// Dot size by zoom: large when zoomed out, so scattered pixels are findable;
+// smallest at mid zoom; from z16 the true 10 m footprint (at ~60° N: 5 m radius
+// = 78271 / 2^z m per screen pixel), so dots grow into their ground pixel.
+const DOT_STOPS = [[4, 7], [8, 6], [11, 4.5], [14, 3.5], [16, 4.2], [17, 8.4], [18, 16.8], [19, 33.5]];
+const dotRadius = (k = 1, add = 0) => ['interpolate', ['exponential', 2], ['zoom'], ...DOT_STOPS.flatMap(([z, r]) => [z, r * k + add])];
+// Up close the dots cover their pixel: let the imagery show through.
+const DOT_OPACITY = ['interpolate', ['linear'], ['zoom'], 15, 0.95, 18, 0.6];
 const CELL_RAMP = [['#8c510a', -90], ['#bf812d', -60], ['#dfc27d', -30], ['#f6e8c3', 0],
   ['#c7eae5', 30], ['#80cdc1', 60], ['#35978f', 90], ['#01665e', null]];
 
@@ -168,7 +175,7 @@ function addPolygons(geojson) {
     id: 'forest-pts', type: 'circle', source: 'forest-pts', maxzoom: 10,
     paint: {
       'circle-color': color,
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 3, 10, 5],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 10, 6],
       'circle-stroke-color': '#0f1620',
       'circle-stroke-width': 1
     }
@@ -237,8 +244,8 @@ function addC2c() {
     layout: { visibility: 'none' },
     paint: {
       'circle-color': color,
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 2, 12, 3.5, 16, 6.5],
-      'circle-stroke-color': '#1d1030', 'circle-stroke-width': 0.8, 'circle-opacity': 0.95
+      'circle-radius': dotRadius(0.9),
+      'circle-stroke-color': '#1d1030', 'circle-stroke-width': 0.8, 'circle-opacity': DOT_OPACITY
     }
   });
 }
@@ -321,10 +328,11 @@ function ensurePoints(aoi, kind) {
         source: key,
         paint: {
           'circle-color': KIND_COLORS[kind],
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 2.5, 12, 4, 16, 7],
+          'circle-radius': dotRadius(),
           'circle-stroke-color': ['case', isNew(), NEW_COLOR, '#ffffff'],
           'circle-stroke-width': ['case', isNew(), 2.5, 1],
-          'circle-opacity': 0.95
+          'circle-opacity': DOT_OPACITY,
+          'circle-stroke-opacity': 1
         }
       });
       applyMapState(); // filter and show it per the state now, not on the next refresh
@@ -561,23 +569,47 @@ function showDetail(e) {
   if (stand) html += standSection(standById.get(stand.properties.poly_id) || stand.properties);
   const card = document.getElementById('detail');
   if (!html) { card.hidden = true; setMarker(null); return; }
+  // On the dot that was picked (rendered coordinates are snapped to the tile grid).
+  const dot = sccd[0] || c2c;
+  const standId = !dot && !cell && stand ? stand.properties.poly_id : null;
   document.getElementById('detail-title').textContent =
     `${fmt(e.lngLat.lat, 5)}° N, ${fmt(e.lngLat.lng, 5)}° E`;
   document.getElementById('detail-body').innerHTML = html;
   card.hidden = false;
   if (popup) popup.remove();
-  setMarker(e.lngLat);
+  setMarker(dot ? [Number(dot.properties.lon), Number(dot.properties.lat)] : [e.lngLat.lng, e.lngLat.lat], standId);
 }
 
-function setMarker(lngLat) {
-  const data = { type: 'FeatureCollection', features: lngLat
-    ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lngLat.lng, lngLat.lat] } }] : [] };
-  if (map.getSource('sel')) { map.getSource('sel').setData(data); return; }
-  map.addSource('sel', { type: 'geojson', data });
-  map.addLayer({
-    id: 'sel', type: 'circle', source: 'sel',
-    paint: { 'circle-radius': 9, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 }
-  });
+let pulse = 0;
+
+/** The selection: a dark-and-white ring around the picked dot (pulsing once), or the stand's outline. */
+function setMarker(coords, standId = null) {
+  const data = { type: 'FeatureCollection', features: coords && standId === null
+    ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: coords } }] : [] };
+  if (!map.getSource('sel')) {
+    map.addSource('sel', { type: 'geojson', data });
+    for (const [id, color, width] of [['sel-halo', '#111', 6], ['sel', '#fff', 3]]) {
+      map.addLayer({
+        id, type: 'circle', source: 'sel',
+        paint: { 'circle-radius': dotRadius(1, 6), 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': color, 'circle-stroke-width': width }
+      });
+    }
+    for (const [id, color, width] of [['sel-stand-halo', '#111', 6], ['sel-stand', '#fff', 3]]) {
+      map.addLayer({ id, type: 'line', source: 'forest', filter: ['==', ['get', 'poly_id'], -1], paint: { 'line-color': color, 'line-width': width } });
+    }
+  } else map.getSource('sel').setData(data);
+  for (const id of ['sel-stand-halo', 'sel-stand']) map.setFilter(id, ['==', ['get', 'poly_id'], standId ?? -1]);
+  // Alert layers load later: keep the selection on top.
+  for (const id of ['sel-stand-halo', 'sel-stand', 'sel-halo', 'sel']) map.moveLayer(id);
+  cancelAnimationFrame(pulse);
+  if (!coords || standId !== null || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const t0 = performance.now();
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / 700);
+    for (const id of ['sel-halo', 'sel']) map.setPaintProperty(id, 'circle-radius', dotRadius(1, 6 + 24 * (1 - k) ** 2));
+    if (k < 1) pulse = requestAnimationFrame(step);
+  };
+  pulse = requestAnimationFrame(step);
 }
 
 function setupDetail(polygons) {

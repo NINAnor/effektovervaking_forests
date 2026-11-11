@@ -19,6 +19,8 @@ export default [
         fetch: "readonly",
         requestAnimationFrame: "readonly",
         cancelAnimationFrame: "readonly",
+        performance: "readonly",
+        matchMedia: "readonly",
         ResizeObserver: "readonly",
         maplibregl: "readonly",
         pmtiles: "readonly",

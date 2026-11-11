@@ -217,6 +217,9 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
         body = page.inner_text("#detail-body")
         assert "Stand" in body and "trajectory: stable" in body
         assert page.locator("#detail .traj-chart circle").count() == 9
+        # The selected stand is outlined (no ring: nothing smaller was hit).
+        assert page.evaluate("() => map.getFilter('sel-stand')[2]") != -1
+        assert page.evaluate("() => map.getSource('sel')._data.features.length") == 0
         page.click("#detail-close")
         assert page.locator("#detail").is_hidden()
 
@@ -227,6 +230,12 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
         page.wait_for_function("() => !document.getElementById('detail').hidden")
         href = page.locator("#detail .ext-link").first.get_attribute("href")
         assert "lon=15.00010;lat=59.60000" in href
+        # The ring sits on the pixel itself, on top of every layer.
+        assert page.evaluate(
+            "() => map.getSource('sel')._data.features[0].geometry.coordinates"
+        ) == [15.0001, 59.6]
+        assert page.evaluate("() => map.getStyle().layers.at(-1).id") == "sel"
+        assert page.evaluate("() => map.getFilter('sel-stand')[2]") == -1
         assert not errors
     finally:
         ctx.close()
