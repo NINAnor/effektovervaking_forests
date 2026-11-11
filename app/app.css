@@ -313,6 +313,10 @@ label.inline {
 .traj-chart text { fill: var(--muted); font-size: 12px; }
 .traj-chart .thr { stroke: var(--ink); stroke-dasharray: 4 3; fill: none; }
 .traj-chart .mark { stroke: var(--faint); stroke-dasharray: 1 3; }
+.traj-key { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.traj-key span { display: inline-block; width: 18px; margin: 0 2px 3px 8px; border-top: 2px dashed var(--ink); }
+.traj-key span:first-child { margin-left: 0; }
+.traj-key .dot { border-top: 2px dotted var(--faint); }
 .traj-chart .traj { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 
 /* ── charts and summary ─────────────────────────────────────────────── */

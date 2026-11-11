@@ -527,7 +527,9 @@ function trajChart(series, threshold, years, markYear) {
   for (const yr of [years[0], years[years.length >> 1], years[years.length - 1]]) {
     g += `<text x="${x(yr)}" y="${H - 5}" text-anchor="middle">${yr}</text>`;
   }
-  if (markYear >= years[0] && markYear <= years[years.length - 1]) g += `<line class="mark" x1="${x(markYear)}" x2="${x(markYear)}" y1="${m.t}" y2="${H - m.b}"><title>surveyed ${markYear}</title></line>`;
+  const marked = markYear >= years[0] && markYear <= years[years.length - 1];
+  const hasThr = threshold !== null && threshold !== undefined;
+  if (marked) g += `<line class="mark" x1="${x(markYear)}" x2="${x(markYear)}" y1="${m.t}" y2="${H - m.b}"><title>surveyed ${markYear}</title></line>`;
   if (threshold !== null && threshold !== undefined) {
     g += `<line class="thr" x1="${m.l}" x2="${W - m.r}" y1="${y(threshold)}" y2="${y(threshold)}"><title>threshold ${fmt(threshold, 3)}</title></line>`;
   }
@@ -537,7 +539,10 @@ function trajChart(series, threshold, years, markYear) {
     g += `<circle cx="${x(yr)}" cy="${y(v)}" r="3.5" fill="${good ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition}">` +
       `<title>${yr}: ${fmt(v, 3)} (${good ? 'above' : 'below'} threshold)</title></circle>`;
   }
-  return `<svg class="traj-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Condition score by year against the threshold">${g}</svg>`;
+  const key = (hasThr ? '<span class="dash"></span> good/poor threshold ' : '') +
+    (marked ? '<span class="dot"></span> field survey year' : '');
+  return `<svg class="traj-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Condition score by year against the threshold">${g}</svg>` +
+    (key ? `<p class="traj-key">${key}</p>` : '');
 }
 
 /** Theil-Sen slope per year, in score units (the tiles' sen_slope is standardised). */
