@@ -184,7 +184,7 @@ select:hover, .pill-btn:hover {
   max-width: calc(100% - 70px);
   max-height: calc(100% - 50px);
   overflow-y: auto;
-  font-size: 13px;
+  font-size: 14px;
 }
 .layer-panel[open] { width: 260px; }
 .layer-panel summary {
@@ -366,7 +366,7 @@ label.inline {
   border: 1px solid var(--glass-edge);
   border-radius: 16px;
   box-shadow: var(--shadow);
-  font-size: 13px;
+  font-size: 14px;
 }
 .maplibregl-popup-tip {
   border-top-color: var(--glass-2) !important;

@@ -160,7 +160,8 @@ function createMap() {
     zoom: 5.5
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
-  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+  // Beside the attribution, so the two stack instead of overlapping on a phone.
+  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
   // The style, not 'load': that waits for the first basemap tiles, so a slow tile
   // server would hold up the whole app.
   return new Promise((resolve) => map.once('style.load', resolve));
