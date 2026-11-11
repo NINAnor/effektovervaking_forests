@@ -105,7 +105,9 @@ const pointCols = new Map();
 // ── data ─────────────────────────────────────────────────────────────────────
 async function fetchJson(name) {
   const url = BASE + name;
-  const r = await fetch(url, { cache: 'no-store' });
+  // index.json is always fresh; the files it lists are cached until a new bake changes generated_at.
+  const r = name === 'index.json' ? await fetch(url, { cache: 'no-store' })
+    : await fetch(`${url}?v=${encodeURIComponent(index.generated_at)}`);
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
   try {
     return await r.json();
