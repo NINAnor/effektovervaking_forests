@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
-OUT = HERE.parent                               # docs/
+OUT = HERE.parent / "report-src"                # docs/report-src: the Quarto sources and their inputs
+DOCS = HERE.parent                              # docs/: the renders
 OUT.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE))
 from fix_docx_tables import main as fix_docx  # noqa: E402
@@ -155,8 +156,8 @@ def main() -> None:
         shutil.copyfile(HERE / "assets" / f, OUT / f)
     shutil.copytree(HERE / "src" / "methods" / "media", OUT / "media", dirs_exist_ok=True, copy_function=shutil.copyfile)
     subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=OUT, check=True)
-    fix_docx(QMD.with_suffix(".docx"))
-    print("rendered:", ", ".join(p.name for p in sorted(OUT.glob(QMD.stem + ".*"))))
+    fix_docx(DOCS / f"{QMD.stem}.docx")
+    print("rendered:", ", ".join(p.name for p in sorted(DOCS.glob(QMD.stem + ".*"))))
 
 
 if __name__ == "__main__":

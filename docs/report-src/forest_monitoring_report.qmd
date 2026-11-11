@@ -502,6 +502,6 @@ Field data: MI, NiN 1:5000 and HB13 field surveys; the MI surveys were commissio
 - shapely 2.1.2
 - duckdb 1.5.3
 - pillow 12.3.0
-- Quarto 1.4.554
+- Quarto 1.8.27
 - pandoc 3.1.3
 :::
