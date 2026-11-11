@@ -4,7 +4,7 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 4; // must match dashboard.SCHEMA in Python
+const SCHEMA = 5; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 // Bright, with a white ring on the map, so the alerts stand out on imagery.
 const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
@@ -36,9 +36,37 @@ const C2C_GATE = 0.175; // |NBR drop| tuned against the labelled pixels (old ins
 // smallest at mid zoom; from z16 the true 10 m footprint (at ~60° N: 5 m radius
 // = 78271 / 2^z m per screen pixel), so dots grow into their ground pixel.
 const DOT_STOPS = [[4, 7], [8, 6], [11, 4.5], [14, 3.5], [16, 4.2], [17, 8.4], [18, 16.8], [19, 33.5]];
-const dotRadius = (k = 1, add = 0) => ['interpolate', ['exponential', 2], ['zoom'], ...DOT_STOPS.flatMap(([z, r]) => [z, r * k + add])];
+// k scales the dot: a number, or a data expression (see bySize).
+const dotRadius = (k = 1, add = 0) => ['interpolate', ['exponential', 2], ['zoom'],
+  ...DOT_STOPS.flatMap(([z, r]) => [z, typeof k === 'number' ? r * k + add : ['+', ['*', r, k], add]])];
+/** Dot scale from a change's size: half at zero, 0.75 at the cut-off, 1.4 at `full` and above. */
+const bySize = (prop, gate, full) =>
+  ['interpolate', ['linear'], ['abs', ['coalesce', ['get', prop], 0]], 0, 0.5, gate, 0.75, full, 1.4];
+const SCCD_GATE = 0.075; // |dB08 - dB12|, the candidate cut-off; certainty saturates at 3x
 // Up close the dots cover their pixel: let the imagery show through.
 const DOT_OPACITY = ['interpolate', ['linear'], ['zoom'], 15, 0.95, 18, 0.6];
+const STAND_FILL = ['interpolate', ['linear'], ['zoom'], 8, 0.6, 14, 0.2];
+const CELL_FILL = ['interpolate', ['linear'], ['zoom'], 12, 0.5, 14, 0.85];
+/** The base opacity of every layer behind each slider; the slider scales it. */
+const FADE = {
+  alerts: () => [...pointLayers.keys()].map((id) => [id, { 'circle-opacity': DOT_OPACITY, 'circle-stroke-opacity': 1 }]),
+  c2c: () => [['c2c', { 'circle-opacity': DOT_OPACITY, 'circle-stroke-opacity': 1 }]],
+  radd: () => [['radd', { 'raster-opacity': 0.9 }]],
+  stands: () => [['forest-fill', { 'fill-opacity': STAND_FILL }], ['forest-line', { 'line-opacity': 1 }],
+    ['forest-pts', { 'circle-opacity': 1, 'circle-stroke-opacity': 1 }]],
+  cells: () => [['cells', { 'fill-opacity': CELL_FILL }]]
+};
+/** A number, or a zoom interpolation's outputs, times k. */
+const fade = (v, k) => (typeof v === 'number' ? v * k : v.map((x, i) => (i > 3 && i % 2 === 0 ? x * k : x)));
+
+function applyOpacity() {
+  for (const [key, layers] of Object.entries(FADE)) {
+    for (const [id, paint] of layers()) {
+      if (!map.getLayer(id)) continue;
+      for (const [prop, v] of Object.entries(paint)) map.setPaintProperty(id, prop, fade(v, state.opacity[key]));
+    }
+  }
+}
 const CELL_RAMP = [['#8c510a', -90], ['#bf812d', -60], ['#dfc27d', -30], ['#f6e8c3', 0],
   ['#c7eae5', 30], ['#80cdc1', 60], ['#35978f', 90], ['#01665e', null]];
 
@@ -57,7 +85,8 @@ const state = {
   standColor: 'forest_type',
   cells: false,
   c2c: false,
-  c2cWeak: false
+  c2cWeak: false,
+  opacity: { alerts: 1, c2c: 1, radd: 1, stands: 1, cells: 1 }
 };
 
 /** @type {any} */ let index;
@@ -91,7 +120,7 @@ async function loadIndex() {
 /** Columnar points -> GeoJSON, once per file. */
 function pointsToGeojson(cols, aoi, kind) {
   const n = cols.lon.length;
-  for (const k of ['lat', 'date', 'conf', 'n']) {
+  for (const k of ['lat', 'date', 'conf', 'n', 'mag']) {
     if (!cols[k] || cols[k].length !== n) throw new Error(`points ${aoi}/${kind}: column ${k} has the wrong length`);
   }
   const features = new Array(n);
@@ -100,7 +129,7 @@ function pointsToGeojson(cols, aoi, kind) {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [cols.lon[i], cols.lat[i]] },
       // lon/lat kept exact: rendered geometry is snapped to the tile grid.
-      properties: { aoi, kind, lon: cols.lon[i], lat: cols.lat[i], date: cols.date[i], conf: cols.conf[i], n: cols.n[i] }
+      properties: { aoi, kind, lon: cols.lon[i], lat: cols.lat[i], date: cols.date[i], conf: cols.conf[i], n: cols.n[i], mag: cols.mag[i] }
     };
   }
   return { type: 'FeatureCollection', features };
@@ -160,7 +189,7 @@ function addPolygons(geojson) {
   const color = standColor(state.standColor);
   map.addLayer({
     id: 'forest-fill', type: 'fill', source: 'forest',
-    paint: { 'fill-color': color, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.6, 14, 0.2] }
+    paint: { 'fill-color': color, 'fill-opacity': STAND_FILL }
   });
   map.addLayer({
     id: 'forest-line', type: 'line', source: 'forest',
@@ -216,7 +245,7 @@ function addConditionCells() {
     layout: { visibility: state.cells ? 'visible' : 'none' },
     paint: {
       'fill-color': ['case', ['has', 'dor_global_2025'], ramp, CLASS_COLORS.no_data],
-      'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 14, 0.85]
+      'fill-opacity': CELL_FILL
     }
   }, 'forest-line');
 }
@@ -244,28 +273,26 @@ function addC2c() {
     layout: { visibility: 'none' },
     paint: {
       'circle-color': color,
-      'circle-radius': dotRadius(0.9),
+      'circle-radius': dotRadius(bySize('magnitude', C2C_GATE, 0.5)),
       'circle-stroke-color': '#1d1030', 'circle-stroke-width': 0.8, 'circle-opacity': DOT_OPACITY
     }
   });
 }
 
-/** C2C reports the change's end (change_year) and its length in years. */
-function c2cWhen(p) {
-  const end = Math.round(p.change_year), start = Math.round(p.change_year - p.duration);
-  return { end, start, abrupt: end - start <= 1 };
-}
+/** C2C dates a loss to the first yearly image after it (change_year X.996 = loss in X+1). */
+const c2cYear = (p) => Math.round(Number(p.change_year));
 
 function c2cSection(p) {
-  const { end, start, abrupt } = c2cWhen(p);
-  const drop = Math.abs(Number(p.magnitude));
-  const kind = abrupt ? 'Abrupt loss' : 'Gradual decline';
-  return `<section><h4>Yearly change map (C2C)</h4><div class="chips">` +
-    chip(kind, C2C_COLORS[Math.max(0, C2C_YEARS.indexOf(end))]) +
-    (drop < C2C_GATE ? chip('weak', CLASS_COLORS.no_data) : '') + '</div>' +
-    `<dl><dt>When</dt><dd>${abrupt ? `between the ${start} and ${end} images` : `${start} to ${end} (${end - start} years)`}</dd>` +
-    `<dt>Size of the drop</dt><dd>${fmt(drop, 2)} NBR</dd>` +
-    `<dt>Global Forest Watch</dt><dd>${p.hansen_lossyear ? `loss in ${Math.round(p.hansen_lossyear)}` : 'no loss mapped'}</dd></dl>` +
+  const year = c2cYear(p), drop = Math.abs(Number(p.magnitude));
+  const late = year >= 2024 ? ' (last years are undercounted)' : '';
+  return `<section><h4>Forest-loss map (C2C)</h4><div class="chips">` +
+    chip(`loss in ${year}`, C2C_COLORS[Math.max(0, C2C_YEARS.indexOf(year))]) +
+    (drop < C2C_GATE ? chip('weak: below the 0.175 cut-off', CLASS_COLORS.no_data) : '') + '</div>' +
+    `<dl><dt>Loss year</dt><dd>${year}${late}</dd>` +
+    `<dt>NBR drop</dt><dd>${fmt(drop, 2)} (cut-off 0.175)</dd>` +
+    `<dt>Steady before the drop</dt><dd>${fmt(p.duration, 0)} yr</dd>` +
+    `<dt>Drops found</dt><dd>${fmt(p.n_breaks, 0)}</dd>` +
+    `<dt>Hansen (Global Forest Watch)</dt><dd>${p.hansen_lossyear ? `loss in ${Math.round(p.hansen_lossyear)}` : 'no loss mapped'}</dd></dl>` +
     `${timeseriesLink([Number(p.lon), Number(p.lat)])}</section>`;
 }
 
@@ -277,12 +304,9 @@ function score(v) {
 const POPUPS = [
   [(id) => pointLayers.has(id), (p) =>
     `<strong>${esc(KIND_LABELS[p.kind])}</strong> &mdash; ${esc(p.aoi)}<br>detected ${fmtDate(p.date)}<br>` +
-    `certainty ${certainty(p.conf)} &middot; click for details`],
-  [(id) => id === 'c2c', (p) => {
-    const { end, start, abrupt } = c2cWhen(p);
-    return `<strong>${abrupt ? 'Abrupt loss' : 'Gradual decline'}</strong> (C2C)<br>` +
-      `${abrupt ? `between ${start} and ${end}` : `${start}–${end}`}, drop ${fmt(Math.abs(p.magnitude), 2)} NBR`;
-  }],
+    `certainty ${certainty(p.conf)}, size ${fmt(p.mag, 2)} &middot; click for details`],
+  [(id) => id === 'c2c', (p) =>
+    `<strong>Forest loss in ${c2cYear(p)}</strong> (C2C)<br>NBR drop ${fmt(Math.abs(p.magnitude), 2)} &middot; click for details`],
   [(id) => id === 'cells', (p) =>
     `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
     `(threshold ${fmt(p.threshold_global, 3)})<br>` +
@@ -292,7 +316,7 @@ const POPUPS = [
     `<strong>${esc(p.forest_type)}</strong> &mdash; ${esc(p.layer)}<br>` +
     `${fmt(p.area_ha, 2)} ha, surveyed ${esc(p.survey_year ?? '—')} (${esc(p.tilstand || 'no field condition')})<br>` +
     `condition 2025: ${score(p.dor_global_2025)}, ${esc(CLASS_LABELS[p.condition_local] || 'no score')} (local) / ` +
-    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (global)<br>trajectory ${esc(p.trajectory || '—')}`]
+    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (nature type)<br>trajectory ${esc(p.trajectory || '—')}`]
 ];
 
 /** @type {any} */ let popup;
@@ -328,7 +352,7 @@ function ensurePoints(aoi, kind) {
         source: key,
         paint: {
           'circle-color': KIND_COLORS[kind],
-          'circle-radius': dotRadius(),
+          'circle-radius': dotRadius(bySize('mag', SCCD_GATE, 3 * SCCD_GATE)),
           'circle-stroke-color': ['case', isNew(), NEW_COLOR, '#ffffff'],
           'circle-stroke-width': ['case', isNew(), 2.5, 1],
           'circle-opacity': DOT_OPACITY,
@@ -429,7 +453,7 @@ function checkRaddTiles() {
 function describeRadd() {
   const note = document.getElementById('radd-note');
   document.getElementById('radd-modes').hidden = !raddTiles || raddTiles.pasted;
-  for (const el of document.querySelectorAll('#radd-section .key')) el.hidden = !raddTiles;
+  for (const el of document.querySelectorAll('#radd-section .key, #radd-section label.opacity')) el.hidden = !raddTiles;
   if (!raddTiles) { note.textContent = 'No radar layer yet: paste a map link below.'; return; }
   const days = (Date.now() - raddTiles.minted_at) / 864e5;
   note.textContent = raddTiles.pasted
@@ -543,7 +567,7 @@ function standSection(p) {
     trajChart(p.series || [], p.threshold_global, index.years, p.survey_year) +
     '<div class="chips">' +
     chip(`local: ${CLASS_LABELS[local]}`, CLASS_COLORS[local]) +
-    chip(`global: ${CLASS_LABELS[global]}`, CLASS_COLORS[global]) +
+    chip(`nature type: ${CLASS_LABELS[global]}`, CLASS_COLORS[global]) +
     chip(`trajectory: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
     `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Surveyed</dt><dd>${esc(p.survey_year ?? '—')}</dd>` +
     `<dt>Field condition</dt><dd>${esc(p.tilstand || '—')}</dd><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd>` +
@@ -562,7 +586,8 @@ function showDetail(e) {
     html += `<section><h4>Tree-cover alert (Sentinel-2)</h4><div class="chips">${chip(KIND_LABELS[p.kind], KIND_COLORS[p.kind])}` +
       `${p.date >= newCutoff() ? chip('new', NEW_COLOR) : ''}</div>` +
       `<dl><dt>Detected</dt><dd>${fmtDate(p.date)}</dd><dt>Certainty</dt><dd>${certainty(p.conf)}</dd>` +
-      `<dt>Changes at this spot</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
+      `<dt>Size of change</dt><dd>${fmt(p.mag, 3)} (cut-off ${SCCD_GATE})</dd>` +
+      `<dt>Breaks at this spot</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
   }
   if (c2c) html += c2cSection(c2c.properties);
   if (cell) html += cellSection(cell.properties);
@@ -686,6 +711,7 @@ function applyMapState() {
   }
   document.getElementById('alert-count').textContent = `(${shown.toLocaleString()})`;
   applyRadd();
+  applyOpacity();
 }
 
 let mapGeneration = 0;
@@ -1105,6 +1131,13 @@ function setupControls() {
     el.addEventListener('change', (e) => {
       state.basemap = /** @type {HTMLInputElement} */ (e.target).value;
       applyMapState();
+    });
+  }
+  for (const el of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[data-opacity]'))) {
+    state.opacity[el.dataset.opacity] = Number(el.value) / 100; // restored on reload
+    el.addEventListener('input', () => {
+      state.opacity[el.dataset.opacity] = Number(el.value) / 100;
+      applyOpacity();
     });
   }
   for (const [id, key] of [['toggle-alerts', 'alerts'], ['toggle-radd', 'radd'], ['toggle-stands', 'stands'], ['toggle-cells', 'cells'],

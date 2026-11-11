@@ -287,13 +287,13 @@ def test_layer_info_dialog(browser, site) -> None:
         page.click('[data-info="alerts"]')
         dlg = page.locator("#info")
         assert dlg.is_visible()
-        assert page.inner_text("#info-title") == "Tree-cover alerts"
+        assert page.inner_text("#info-title") == "Tree-cover alerts (S-CCD)"
         assert "Tree cover lost" in page.inner_text("#info-body .info-legend")
         assert "Sentinel-2" in page.inner_text("#info-body")
         page.click("#info-close")
         assert dlg.is_hidden()
         page.click('[data-info="guide"]')
-        assert "early warnings" in page.inner_text("#info-body")
+        assert "Candidates, not proof" in page.inner_text("#info-body")
         page.keyboard.press("Escape")
         assert dlg.is_hidden()
         assert not errors
@@ -343,12 +343,34 @@ def test_c2c_card_text(browser, site) -> None:
             " c2cSection({change_year: 2024.9962, duration: 8, magnitude: -0.1,"
             " hansen_lossyear: null, lon: 15, lat: 59.6})]"
         )
-        assert (
-            "Abrupt loss" in html[0] and "between the 2019 and 2020 images" in html[0]
-        )
-        assert "loss in 2020" in html[0] and "weak" not in html[0]
-        assert "Gradual decline" in html[1] and "2017 to 2025 (8 years)" in html[1]
+        # Loss is dated to the first yearly image after the drop (X.996 -> X+1).
+        assert "loss in 2020" in html[0] and "Loss year</dt><dd>2020<" in html[0]
+        assert "Hansen" in html[0] and "weak" not in html[0]
+        assert "loss in 2025" in html[1] and "undercounted" in html[1]
         assert "weak" in html[1] and "no loss mapped" in html[1]
+        assert "Steady before the drop</dt><dd>8 yr" in html[1]
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_opacity_slider_and_size_by_change(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        page.wait_for_function("() => pointCols.size === 2")
+        key = page.evaluate("() => [...pointLayers.keys()][0]")
+        # Dots scale with the size of the change, from the baked magnitude.
+        radius = page.evaluate(f"() => map.getPaintProperty('{key}', 'circle-radius')")
+        assert "mag" in json.dumps(radius)
+        page.fill('input[data-opacity="alerts"]', "50")
+        op = page.evaluate(f"() => map.getPaintProperty('{key}', 'circle-opacity')")
+        assert op[3:] == [15, 0.475, 18, 0.3]
+        page.fill('input[data-opacity="stands"]', "0")
+        assert (
+            page.evaluate("() => map.getPaintProperty('forest-line', 'line-opacity')")
+            == 0
+        )
         assert not errors
     finally:
         ctx.close()
