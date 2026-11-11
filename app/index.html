@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- No inline script, so script-src needs no hashes. worker-src blob: is
+     required: MapLibre decodes tiles in a blob: worker. connect-src is left
+     open because config.js may point dataBase at another host. -->
+<meta http-equiv="Content-Security-Policy"
+      content="object-src 'none'; base-uri 'self'; form-action 'none';
+               script-src 'self' https://unpkg.com;
+               worker-src blob:; child-src blob:">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Forest Monitor · loss and gain alerts</title>
+<link rel="preconnect" href="https://tile.openstreetmap.org" crossorigin>
+<link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/pmtiles.js"></script>
+<link href="vendor/maplibre-gl.css" rel="stylesheet">
+<script src="js/boot.js"></script>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="topbar__title">
+      <h1>Forest Monitor</h1>
+      <p>Loss and gain alerts &amp; forest cover &mdash; olivinskog &amp; kalklindeskog</p>
+    </div>
+    <div class="topbar__status" id="data-status" role="status">Loading data&hellip;</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel panel--map">
+      <div class="panel__header">
+        <h2>Alert map</h2>
+        <div class="controls">
+          <label>Forest type
+            <select id="filter-forest-type">
+              <option value="all">All</option>
+              <option value="olivinskog">Olivinskog</option>
+              <option value="kalklindeskog">Kalklindeskog</option>
+            </select>
+          </label>
+          <label>Alert type
+            <select id="filter-alert-type">
+              <option value="loss" selected>Loss</option>
+              <option value="gain">Gain</option>
+              <option value="all">Both</option>
+            </select>
+          </label>
+          <label>Map: min. confidence
+            <select id="filter-confidence">
+              <option value="0" selected>Any</option>
+              <option value="0.5">0.5</option>
+              <option value="0.8">0.8</option>
+            </select>
+          </label>
+          <label>From <input type="month" id="filter-date-from"></label>
+          <label>To <input type="month" id="filter-date-to"></label>
+        </div>
+      </div>
+      <div class="map-wrap">
+        <!-- Before #map, so keyboard focus reaches the panel first. -->
+        <details id="layer-panel" class="layer-panel" open>
+          <summary>Layers</summary>
+
+          <fieldset>
+            <legend>Basemap</legend>
+            <div id="basemap-options"></div>
+          </fieldset>
+
+          <div class="layer-group" role="group" aria-labelledby="alerts-title">
+            <label class="check title" id="alerts-title"><input type="checkbox" id="toggle-alerts" checked> <span>S-CCD alerts</span></label>
+            <ul class="key">
+              <li><i class="sw sw--dot" style="background:#e06666"></i> Loss pixel (10 m)</li>
+              <li><i class="sw sw--dot" style="background:#4dd0a7"></i> Gain pixel (10 m)</li>
+            </ul>
+            <p class="hint">Type, dates and confidence: filters above.</p>
+          </div>
+
+          <div class="layer-group" role="group" aria-label="Stands">
+            <label class="check title"><input type="checkbox" id="toggle-stands" checked> <span>Stands (<span id="stand-count">…</span>)</span></label>
+            <label class="inline">Colour by
+              <select id="stand-color">
+                <option value="forest_type" selected>Forest type</option>
+                <option value="condition_local">Condition 2025 (local)</option>
+                <option value="condition_global">Condition 2025 (global)</option>
+                <option value="trajectory">Trajectory 2017&ndash;2025</option>
+              </select>
+            </label>
+            <ul class="key" id="stand-legend" aria-label="Stand colours"></ul>
+          </div>
+
+          <div class="layer-group" role="group" aria-label="Condition cells" id="cells-section">
+            <label class="check title"><input type="checkbox" id="toggle-cells"> <span>Condition: 10 m cells</span></label>
+            <div class="ramp" id="cell-ramp" role="img"
+                 aria-label="Colour scale from brown, below the stand threshold, through cream at the threshold, to dark teal, above it"></div>
+            <div class="ramp-labels" aria-hidden="true"><span>below threshold</span><span>above</span></div>
+            <p class="hint">2025 score minus the stand threshold. Zoom in past 12 to see cells.</p>
+          </div>
+        </details>
+        <div id="map"></div>
+      </div>
+    </section>
+
+    <section class="panel panel--charts">
+      <div class="panel__header">
+        <h2>Forest cover over time</h2>
+        <div class="controls">
+          <label>Resolution
+            <select id="cover-resolution">
+              <option value="annual" selected>Annual</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div id="chart-cover" class="chart"></div>
+
+      <div class="panel__header"><h2>Alert area over time</h2></div>
+      <div id="chart-alerts" class="chart"></div>
+
+      <div class="panel__header"><h2>Summary</h2></div>
+      <div id="summary-cards" class="summary-cards"></div>
+    </section>
+  </main>
+
+  <footer class="footer" id="footer-note"></footer>
+</div>
+<script src="js/app.js"></script>
+</body>
+</html>

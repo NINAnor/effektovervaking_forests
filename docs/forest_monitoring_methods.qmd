@@ -20,10 +20,10 @@ date-format: "D MMMM YYYY"
 code-links:
   - text: Code repository
     icon: github
-    href: https://github.com/NINAnor/effektovervaaking-2026-2030
+    href: https://github.com/NINAnor/effektovervaking_forests
 lang: en-GB
-bibliography: references.bib
-csl: ambio.csl
+bibliography: report-assets/references.bib
+csl: report-assets/ambio.csl
 fig-cap-location: bottom
 format:
   html:
@@ -37,14 +37,14 @@ format:
     lightbox: true
     anchor-sections: true
   docx:
-    reference-doc: reference_a4.docx
+    reference-doc: report-assets/reference_a4.docx
     columns: 1000
     toc: true
     toc-depth: 2
     toc-title: Contents
   typst:
     filters:
-      - typst_wrap_code.lua
+      - report-assets/typst_wrap_code.lua
     citeproc: true
     papersize: a4
     margin:
@@ -69,7 +69,7 @@ Companion to the report of the same name. The report cites this document as "Met
 
 The method gives four products for the 737 mapped olivinskog and kalklindeskog stands. They are a condition score per 10 m cell and per stand for each year 2017-2025, a condition trajectory per stand, a forest-loss map for 2018-2025, and a near-real-time list of change candidates for both forest types. This document describes each product as it was run for the report. The report gives the results; this document describes the methods, the parameters and the evaluation.
 
-![Pipeline overview · 4 products from 3 data streams](media/image1.png){#fig-pipeline width=100%}
+![Pipeline overview · 4 products from 3 data streams](report-assets/media/image1.png){#fig-pipeline width=100%}
 
 The two upper rows use the same embedding and the same reference pools; the two lower rows use Sentinel-2 directly and do not use the field-assigned condition.
 
@@ -205,7 +205,7 @@ $$
 J = \text{share of good stands above the threshold} + \text{share of poor stands below it} - 1
 $$
 
-At 0.511, 73.5 % of good stands are above and 82.9 % of poor stands are below, so J = 0.564 (s3://miljodata-test/156004\_08\_effektovervaking\_2026\_2030\_opsjon\_2\_fjernmaling/condition/parquet`/threshold.json`).
+At 0.511, 73.5 % of good stands are above and 82.9 % of poor stands are below, so J = 0.564 (S3\_PREFIX/condition/parquet`/threshold.json`).
 
 **Fitted outside the stand's own block.** For each spatial block (section 3.6) the threshold is fitted again without the stands of that block, and the stands of the block are classified with that threshold. Every stand, with or without a field label, is classed with its own block's threshold: 0.511 in most blocks, 0.499 and 0.503 in two large blocks.
 
@@ -344,7 +344,7 @@ An automatic service checks each new clear Sentinel-2 scene over the stands of b
 2. **Catalogue.** The service lists new Sentinel-2 Level-2A scenes from the EOPF catalogue for the Sentinel-2 tiles that cover the stands.
 3. **Reading.** For each new scene it reads only the image blocks that contain stand cells, bands B02, B03, B04, B08, B11 and B12, and masks cells with the scene classification (section 2.3).
 4. **Model update.** Each cell has a stored time-series model. Stochastic continuous change detection [S-CCD, @ye2021] updates that model with each new clear observation and tests the observation against it. A break is confirmed after 6 consecutive observations that do not fit the model (change probability 0.90). Settings: `src/effektovervaking_forests/config.py and src/effektovervaking_forests``/sccd.py`.
-5. **Candidates.** Each confirmed break becomes one candidate, written to `s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/kalklindeskog_alerts.parquet` and olivinskog\_alerts.parquet.
+5. **Candidates.** Each confirmed break becomes one candidate, written to `S3_PREFIX/sccd/operational/alerts/kalklindeskog_alerts.parquet` and olivinskog\_alerts.parquet.
 
 ## 8.2 Magnitude and the cut-off {#section-8-2 .unnumbered}
 
@@ -479,16 +479,16 @@ File and column names use "pixel" where this document says "cell"; the two words
 
 | File | Contents | Rows |
 | --- | --- | --: |
-| s3://miljodata-test/156004\_08\_effektovervaking\_2026\_2030\_opsjon\_2\_fjernmaling/condition/parquet`/condition.parquet` | one row per stand and year: stand score and interval for both scopes, class, threshold, cell-score median, quartiles and share below threshold, field-assigned condition, survey year, area | 6,633 |
-| s3://miljodata-test/156004\_08\_effektovervaking\_2026\_2030\_opsjon\_2\_fjernmaling/condition/parquet`/pixel_condition.parquet` | one row per cell, stand and year: AE score for both scopes, m\_good, m\_poor, distance to stand edge | 2,005,866 |
-| s3://miljodata-test/156004\_08\_effektovervaking\_2026\_2030\_opsjon\_2\_fjernmaling/condition/parquet`/trajectory.parquet` | one row per stand: Theil-Sen slope, Mann-Kendall statistics, standard deviation, class, yearly nature type AE scores `c_2017`-`c_2025` | 737 |
-| `s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/parquet/threshold.json, data/condition/outputs/data/trajectory_gate.json, data/condition/outputs/data/``whitener.json` | fitted threshold and its block values, trajectory cut-offs and stable/fluctuating cut-offs, whitening parameters | - |
+| S3\_PREFIX/condition/parquet`/condition.parquet` | one row per stand and year: stand score and interval for both scopes, class, threshold, cell-score median, quartiles and share below threshold, field-assigned condition, survey year, area | 6,633 |
+| S3\_PREFIX/condition/parquet`/pixel_condition.parquet` | one row per cell, stand and year: AE score for both scopes, m\_good, m\_poor, distance to stand edge | 2,005,866 |
+| S3\_PREFIX/condition/parquet`/trajectory.parquet` | one row per stand: Theil-Sen slope, Mann-Kendall statistics, standard deviation, class, yearly nature type AE scores `c_2017`-`c_2025` | 737 |
+| `S3_PREFIX/condition/parquet/threshold.json, data/condition/outputs/data/trajectory_gate.json, data/condition/outputs/data/``whitener.json` | fitted threshold and its block values, trajectory cut-offs and stable/fluctuating cut-offs, whitening parameters | - |
 | data/`condition/outputs/condition_results.gpkg` | the same results for GIS: `condition_pixels` (168,832 cells in EPSG:25833) and `condition_stands` (737 stands) | - |
-| s3://miljodata-test/156004\_08\_effektovervaking\_2026\_2030\_opsjon\_2\_fjernmaling/condition/cog`/` | the cell results as 66 GeoTIFFs on the AlphaEarth grid, one per spatial block, with 5 VRT mosaics, one per UTM zone | - |
+| S3\_PREFIX/condition/cog`/` | the cell results as 66 GeoTIFFs on the AlphaEarth grid, one per spatial block, with 5 VRT mosaics, one per UTM zone | - |
 | `data/c2c_pixels.geojson` | C2C results per cell: `change_year`, `magnitude`, `duration`, `rate`, `recoveryIndicator`, `regrowth80`, `n_breaks`, `hansen_lossyear` | - |
 | `data/c2c_labels.csv` | labelled cells (section 7) | - |
-| `s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/kalklindeskog_alerts.parquet` | S-CCD candidates: `alert_id`, `pix_id`, `lon`, `lat`, `break_date`, `magnitude`, `kind`, `gate`, `status`, `detected_at`, `detection_lag_days`, `n_confirm`, `conf_score`, `confidence` | 68,696 |
-| `s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/olivinskog_alerts.parquet` | S-CCD candidates for olivinskog, same columns as the kalklindeskog file |  |
+| `S3_PREFIX/sccd/operational/alerts/kalklindeskog_alerts.parquet` | S-CCD candidates: `alert_id`, `pix_id`, `lon`, `lat`, `break_date`, `magnitude`, `kind`, `gate`, `status`, `detected_at`, `detection_lag_days`, `n_confirm`, `conf_score`, `confidence` | 68,696 |
+| `S3_PREFIX/sccd/operational/alerts/olivinskog_alerts.parquet` | S-CCD candidates for olivinskog, same columns as the kalklindeskog file |  |
 
 **Main columns of `condition.parquet`.** `ae_local` and `ae_global` are the stand AE scores (local and nature type scope), `ci_lo_*` and `ci_hi_*` the 95 % interval, `condition_*` the class, `threshold_*` the threshold used for the stand's block, `ae_*_median` and `ae_*_frac_poor` the median cell score (equal to the stand score) and the share of cells below the threshold. `label_age` is the scored year minus the survey year.
 

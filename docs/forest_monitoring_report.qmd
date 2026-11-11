@@ -18,14 +18,14 @@ author:
 date: 2026-11-11
 date-format: "D MMMM YYYY"
 lang: en-GB
-bibliography: references.bib
-csl: ambio.csl
+bibliography: report-assets/references.bib
+csl: report-assets/ambio.csl
 callout-icon: false            # as in the ecRxiv template
 code-links:
   - text: Code repository
     icon: github
-    href: https://github.com/NINAnor/effektovervaaking-2026-2030
-repo-url: https://github.com/NINAnor/effektovervaaking-2026-2030
+    href: https://github.com/NINAnor/effektovervaking_forests
+repo-url: https://github.com/NINAnor/effektovervaking_forests
 # The methods appendix is rendered next to the report, so it is linked relatively
 methods-url: forest_monitoring_methods.html
 number-sections: true
@@ -33,6 +33,7 @@ fig-cap-location: bottom
 tbl-cap-location: top
 format:
   html:
+    output-file: index.html
     embed-resources: true
     toc: true
     toc-title: Contents
@@ -41,14 +42,14 @@ format:
     smooth-scroll: true
     lightbox: true
   docx:
-    reference-doc: reference_a4.docx
+    reference-doc: report-assets/reference_a4.docx
     columns: 1000             # pipe tables then autofit to their content in Word
     toc: true
     toc-depth: 2
     toc-title: Contents
   typst:
     template-partials:
-      - typst-template.typ    # Quarto's own, plus a gutter between the author columns
+      - report-assets/typst-template.typ    # Quarto's own, plus a gutter between the author columns
     citeproc: true
     papersize: a4
     margin:
@@ -63,7 +64,7 @@ format:
 
 ::: {.content-visible when-format="html"}
 ```{=html}
-<div style="display:flex;gap:6px;flex-wrap:wrap"><a href="https://github.com/NINAnor/ecRxiv/wiki#status-badge" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_status_under_development.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#naming-convention" target="_blank" rel="noopener noreferrer"><img src="figures/badge_version_0.1.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#data-availability" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_data_bronze.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#code-reproducibility" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_code_bronze.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#open-science-badges" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_overall_bronze.svg" height="20px"></a><a href="https://www.gnu.org/licenses/gpl-3.0" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_gplv3.svg" height="20px"></a></div>
+<div style="display:flex;gap:6px;flex-wrap:wrap"><a href="https://github.com/NINAnor/ecRxiv/wiki#status-badge" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_status_under_development.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#naming-convention" target="_blank" rel="noopener noreferrer"><img src="report-assets/figures/badge_version_0.1.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#data-availability" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_data_bronze.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#code-reproducibility" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_code_bronze.svg" height="20px"></a><a href="https://github.com/NINAnor/ecRxiv/wiki#open-science-badges" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_overall_bronze.svg" height="20px"></a><a href="https://www.gnu.org/licenses/gpl-3.0" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/NINAnor/ecRxiv/main/docs/badge_gplv3.svg" height="20px"></a></div>
 ```
 :::
 
@@ -190,7 +191,7 @@ This section gives only the information that is necessary to read the results. T
 
 @fig-1 shows where the stands are and their condition class in 2025. @tbl-2 summarises the results for each forest type.
 
-![All 737 mapped stands by forest type (left), and the condition class in 2025 of the stands in the two main areas: kalklindeskog around the Oslofjord (middle) and olivinskog in Møre (right). The assigned class uses the local scope; a dark outline marks the stands with no local score (44 overall), which use the broader nature type scope. Source: condition.parquet; stand centres from the scored cells; land and coast © Kartverket, N250 Kartdata (CC BY 4.0).](figures/fig1_map.png){#fig-1 width=100%}
+![All 737 mapped stands by forest type (left), and the condition class in 2025 of the stands in the two main areas: kalklindeskog around the Oslofjord (middle) and olivinskog in Møre (right). The assigned class uses the local scope; a dark outline marks the stands with no local score (44 overall), which use the broader nature type scope. Source: condition.parquet; stand centres from the scored cells; land and coast © Kartverket, N250 Kartdata (CC BY 4.0).](report-assets/figures/fig1_map.png){#fig-1 width=100%}
 
 : Summary results for all mapped stands, per forest type: number, area and scored cells; condition class in 2025 (local scope, 44 stands nature type scope); trajectory class 2017-2025; forest loss 2018-2025 from C2C and Hansen; and new S-CCD loss candidates. Stands use the union of overlapping polygons. {#tbl-2}
 
@@ -225,7 +226,7 @@ We tested the AE score against the field survey of each stand in its survey year
 - **Clear cut ground:** cells that Hansen shows as cleared in 2018-2024 have steeper downward trajectories than cells in never-clear cut stands (AUC 0.73). 33 % of them are assigned a declining class, against 2 % of the others. The poor pool does not use Hansen data, so for that pool this is an independent test.
 - **Olivinskog in 2025:** 2025 makes olivinskog look worse than it is. Of the 50 olivinskog stands that a field survey called good and that have a local score, the score calls 26 poor in 2025, against 10 to 19 in each year from 2018 to 2024. These stands probably did not change. This is likely the effect of a dry year and a temporary decline as opposed to a permanent decline in forest condition.
 
-![Condition score (local scope) of the stands in their survey year, by field-assigned condition and forest type. Dot: median. Bar: middle half of the stands. Line: 10th to 90th percentile. Dashed line: threshold 0.511. Source: condition.parquet, condition run of 23 October 2026.](figures/fig2_score_by_tilstand.png){#fig-2 width=100%}
+![Condition score (local scope) of the stands in their survey year, by field-assigned condition and forest type. Dot: median. Bar: middle half of the stands. Line: 10th to 90th percentile. Dashed line: threshold 0.511. Source: condition.parquet, condition run of 23 October 2026.](report-assets/figures/fig2_score_by_tilstand.png){#fig-2 width=100%}
 
 : Field-assigned condition (rows) against AE condition class in 2025 (columns), number of stands. 44 stands have too few good stands nearby to be assessed for a local score. Their class comes from the nature type scope (@sec-data-and-methods). {#tbl-3}
 
@@ -264,9 +265,9 @@ The trajectory prevents this in two ways. It fits one slope to all nine years, a
 
 **Example.** @fig-4 shows a declining kalklindeskog stand of 0.40 ha (43 cells) in Porsgrunn. Its score was between 0.52 and 0.57 from 2017 to 2021. The trees were felled in 2022, and the score fell to 0.45. In 2023 the ground was excavated for a road, and the score fell to 0.24. The score did not recover in 2024 or 2025. The aerial photos of 2026 show a road and tunnel entrances. Thus this decline is a permanent conversion, and the method found it from satellite data alone.
 
-![Yearly share of cells in the poor band (more than 0.03 below the threshold) on ground that Hansen never shows as cleared, local scope. The forest on this ground did not change, so the movement between years shows why one year alone is not a reliable measure of change. y axis: share of cells more than 0.03 below the threshold; x axis: year. Source: pixel_condition.parquet and hansen_pixels.parquet, condition run of 23 October 2026.](figures/fig3_year_effect.png){#fig-3 width=100%}
+![Yearly share of cells in the poor band (more than 0.03 below the threshold) on ground that Hansen never shows as cleared, local scope. The forest on this ground did not change, so the movement between years shows why one year alone is not a reliable measure of change. y axis: share of cells more than 0.03 below the threshold; x axis: year. Source: pixel_condition.parquet and hansen_pixels.parquet, condition run of 23 October 2026.](report-assets/figures/fig3_year_effect.png){#fig-3 width=100%}
 
-![The declining kalklindeskog stand in Porsgrunn (0.40 ha). Top: yearly condition score. Bottom: aerial photos of the same 260 × 260 m frame; the white line is the mapped stand. Photos: Norge i bilder (Kartverket). Source: condition.parquet.](figures/fig4_porsgrunn.png){#fig-4 width=100%}
+![The declining kalklindeskog stand in Porsgrunn (0.40 ha). Top: yearly condition score. Bottom: aerial photos of the same 260 × 260 m frame; the white line is the mapped stand. Photos: Norge i bilder (Kartverket). Source: condition.parquet.](report-assets/figures/fig4_porsgrunn.png){#fig-4 width=100%}
 
 : Trajectory 2017-2025 (rows) against condition class in 2025 (columns), number of stands. 44 stands have too few good stands nearby for a local score. Their class comes from the nature type scope (@sec-data-and-methods). {#tbl-4}
 
@@ -316,7 +317,7 @@ C2C finds loss on 26.9 ha of kalklindeskog and 52.6 ha of olivinskog from 2018 t
 
 **Other layers.** C2C is the main loss map. Three other alert layers can be used beside it as supporting information. Where one agrees with C2C, the loss is more certain. Where one flags a spot that C2C does not, this flags an area for further investigation. OPERA DIST-ALERT (2023-present) flags any drop in vegetation cover, not only clearing. 24 % of the C2C loss cells in these years have an OPERA alert within 21 m, and most OPERA alerts are in olivinskog (1,048 of 1,243). RADD-Europe uses radar (Sentinel-1), which sees through most cloud. It confirms 86-93 cells (about 0.9 ha) a year in kalklindeskog in 2021-2023 and 142 cells (1.4 ha) in olivinskog in 2022. The GFW DIST-ALERT layer adds 42 alerts in the stands, from 2025 only.
 
-![Area of tree-cover loss per year, 2018-2025, one panel per forest type. Bars: C2C (cut-off 0.175). Black lines: Hansen loss for the same cells and years. Source: c2c_pixels.geojson and hansen_pixels.parquet; each cell counted once.](figures/fig5_loss_per_year.png){#fig-5 width=100%}
+![Area of tree-cover loss per year, 2018-2025, one panel per forest type. Bars: C2C (cut-off 0.175). Black lines: Hansen loss for the same cells and years. Source: c2c_pixels.geojson and hansen_pixels.parquet; each cell counted once.](report-assets/figures/fig5_loss_per_year.png){#fig-5 width=100%}
 
 : Accuracy for loss against labelled cells (41 loss, 19 degradation, 1,517 no change). 95 % intervals in brackets. {#tbl-5}
 
@@ -397,7 +398,7 @@ Among the 408 stands where the field survey recorded the alien-species variable 
 @fig-1 shows all 737 stands coloured by condition class in 2025. The separate data viewer (the folder app/ of the project repository) shows the forest polygons and the S-CCD loss and gain alerts. Its area-cover series are placeholder data until the real series are connected.
 
 ::: {.content-visible when-format="html"}
-{{< include map/stand_map.md >}}
+{{< include report-assets/map/stand_map.md >}}
 :::
 
 # Discussion {#sec-discussion}
@@ -460,7 +461,7 @@ We propose these steps for 2027:
 
 # Data and code availability {#sec-data-and-code-availability}
 
-The project repository ([github.com/NINAnor/effektovervaking_forests](https://github.com/NINAnor/effektovervaking_forests)) holds all code. The folder src/effektovervaking_forests/condition/ calculates the condition score and the trajectories. The data viewer is in the folder app/. The folder src/effektovervaking_forests/ holds the S-CCD service. The file data/condition/outputs/condition_results.gpkg holds the results for all stands and cells. The S-CCD candidate table is s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/kalklindeskog_alerts.parquet. All input data are public: AlphaEarth Foundations embeddings, Sentinel-2 (Copernicus), Hansen Global Forest Change, ESA WorldCover.
+The project repository ([github.com/NINAnor/effektovervaking_forests](https://github.com/NINAnor/effektovervaking_forests)) holds all code. The folder src/effektovervaking_forests/condition/ calculates the condition score and the trajectories. The data viewer is in the folder app/. The folder src/effektovervaking_forests/ holds the S-CCD service. The file data/condition/outputs/condition_results.gpkg holds the results for all stands and cells. The S-CCD candidate table is S3_PREFIX/sccd/operational/alerts/kalklindeskog_alerts.parquet. All input data are public: AlphaEarth Foundations embeddings, Sentinel-2 (Copernicus), Hansen Global Forest Change, ESA WorldCover.
 
 # References {.unnumbered}
 
@@ -501,6 +502,6 @@ Field data: MI, NiN 1:5000 and HB13 field surveys; the MI surveys were commissio
 - shapely 2.1.2
 - duckdb 1.5.3
 - pillow 12.3.0
-- Quarto 1.4.554
+- Quarto 1.8.27
 - pandoc 3.1.3
 :::

@@ -386,7 +386,7 @@ We propose these steps for 2027:
 
 ## 6 Data and code availability
 
-The project repository ([github.com/NINAnor/effektovervaking_forests](https://github.com/NINAnor/effektovervaking_forests)) holds all code. The folder src/effektovervaking_forests/condition/ calculates the condition score and the trajectories. The data viewer is in the folder app/. The folder src/effektovervaking_forests/ holds the S-CCD service. The file data/condition/outputs/condition_results.gpkg holds the results for all stands and cells. The S-CCD candidate table is s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/kalklindeskog_alerts.parquet. All input data are public: AlphaEarth Foundations embeddings, Sentinel-2 (Copernicus), Hansen Global Forest Change, ESA WorldCover.
+The project repository ([github.com/NINAnor/effektovervaking_forests](https://github.com/NINAnor/effektovervaking_forests)) holds all code. The folder src/effektovervaking_forests/condition/ calculates the condition score and the trajectories. The data viewer is in the folder app/. The folder src/effektovervaking_forests/ holds the S-CCD service. The file data/condition/outputs/condition_results.gpkg holds the results for all stands and cells. The S-CCD candidate table is S3_PREFIX/sccd/operational/alerts/kalklindeskog_alerts.parquet. All input data are public: AlphaEarth Foundations embeddings, Sentinel-2 (Copernicus), Hansen Global Forest Change, ESA WorldCover.
 
 ## References
 
