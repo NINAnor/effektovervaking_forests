@@ -1216,7 +1216,7 @@ async function init() {
   // The buttons work even if the data never arrive.
   setupTheme();
   setupInfo();
-  if (typeof maplibregl === 'undefined') throw new Error('MapLibre failed to load (vendor/ and unpkg both unavailable)');
+  if (typeof maplibregl === 'undefined') throw new Error('MapLibre failed to load (vendor/ missing)');
   index = await loadIndex();
   const [polygons, rows, radd] = await Promise.all([
     fetchJson(index.files.polygons),

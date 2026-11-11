@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- No inline script, so script-src needs no hashes. worker-src blob: is
+<!-- No inline script and no CDN (libraries are vendored), so script-src is
+     'self' only. worker-src blob: is
      required: MapLibre decodes tiles in a blob: worker. connect-src is left
      open because config.js may point dataBase at another host. -->
 <meta http-equiv="Content-Security-Policy"
       content="object-src 'none'; base-uri 'self'; form-action 'none';
-               script-src 'self' https://unpkg.com;
+               script-src 'self';
                worker-src blob:; child-src blob:">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Forest Monitor · possible tree loss and regrowth</title>

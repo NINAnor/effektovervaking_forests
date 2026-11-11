@@ -119,9 +119,8 @@ python -m http.server 8000 --directory app   # open http://localhost:8000/
 ## Vendored libraries
 
 `vendor/` holds MapLibre and pmtiles.js 3.0.6 (reads PMTiles from S3 with
-range requests), keeping the map off the critical path of a CDN. `js/boot.js` falls
-back to unpkg with SRI if the files are missing. To refresh (and update both
-digests in `js/boot.js`: `openssl dgst -sha384 -binary <file> | openssl base64 -A`):
+range requests), keeping the map off the critical path of a CDN. There is no CDN
+fallback: the CSP allows `script-src 'self'` only. To refresh:
 
 ```bash
 curl -fsSL https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js  -o app/vendor/maplibre-gl.js
