@@ -1,0 +1,8 @@
+# Python packages for docs/report-build (plus Quarto >= 1.4 with Typst, and pandoc, on the PATH)
+pillow
+pyyaml
+pandas
+ipython
+# only to rebuild the interactive stand map from the condition outputs (optional)
+geopandas
+pyarrow

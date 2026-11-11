@@ -1,0 +1,48 @@
+# Building the report and its methods appendix
+
+The report ("Remote sensed monitoring of olivinskog and kalklindeskog, 2017-2025") and its methods
+appendix are written as Claude Docs. This folder turns their exports into Quarto sources and renders
+HTML, PDF and Word. Nothing outside this repository is needed.
+
+```bash
+pip install -r docs/report-build/requirements.txt      # Quarto (>= 1.4, with Typst) and pandoc must be on the PATH
+python docs/report-build/publish.py                    # rebuild everything into docs/
+```
+
+| Output | What |
+|---|---|
+| `docs/index.html` | the report (the GitHub Pages entry) |
+| `docs/forest_monitoring_methods.html` | the methods appendix; the report links to its sections |
+| `docs/forest_monitoring_{report,methods}.{pdf,docx}` | the same in PDF and Word |
+| `docs/source/` | the Quarto sources, rebuilt each run, to host in `NINAnor/effektovervaaking-2026-2030` |
+
+## Updating from the Claude Docs
+
+Export each doc again and replace the files in `src/`:
+
+- **Report** (`src/report/`): export the Word file as `claude_doc_export.docx`, then
+  `pandoc claude_doc_export.docx -t markdown-smart-multiline_tables-grid_tables-simple_tables --wrap=none --extract-media=. -o claude_doc_export.md`
+  (run inside `src/report/`; the figures land in `src/report/media/`).
+- **Methods** (`src/methods/`): export the Markdown as `claude_doc_export.md`. The pipeline figure is
+  `src/methods/media/image1.png` (from the doc's Word export).
+
+The scripts only reshape the text for Quarto (title block, numbered sections, figure and table captions,
+citations, links to the appendix). The findings are not changed. `REPLACE`, `DOC_SYNC` and `CITES` in
+`build_report.py` and `CITES` in `build_methods.py` list every substitution; a note is printed for
+those no longer needed.
+
+## Files
+
+| File | Role |
+|---|---|
+| `publish.py` | runs the two builds, moves the renders into `docs/` |
+| `build_report.py` | report: `.qmd`, figures, ecRxiv badges and metadata, render, tidy the Word tables |
+| `build_methods.py` | methods appendix: `.qmd` with `section-N` anchors and citeproc references, render |
+| `make_stand_map.py` | interactive stand map (HTML only). Rebuilt when `CONDITION_OUT_DATA` (default `data/condition/outputs/data`) holds `condition.parquet`, `trajectory.parquet` and `polygons_geo.parquet` (also in the S3 bucket under `condition/parquet/`); otherwise the committed `assets/map/stand_map.md` is used |
+| `fix_docx_tables.py` | gives Word tables the full text width |
+| `assets/` | `references.bib`, `ambio.csl`, the Typst template and filter, the Leaflet files |
+| `callouts/` | the "Analysis code" panels of the report |
+| `ecrxiv/` | ecRxiv badge helper and the metadata the report's table is read from |
+
+The metadata table, status note, version (`VERSION`) and log in `build_report.py` are written by hand.
+Update them with each release.

@@ -1,0 +1,85 @@
+---
+title: "Remote sensed monitoring of olivinskog and kalklindeskog, 2017-2025"
+subtitle: |
+  NO_FSAT_001 (condition score and trajectory) \
+  NO_FSAT_002 (annual forest loss)
+indicatorID:
+  - NO_FSAT_001
+  - NO_FSAT_002
+indicatorName:
+  - Forest condition score and trajectory from satellite embeddings
+  - Annual forest loss from Sentinel-2
+verbatimName:
+  - Skogtilstand fra satellittinnbygginger # TODO: native-speaker check
+  - Årlig skogtap fra Sentinel-2 # TODO: native-speaker check
+folderName: NO_FSAT_001_002 # Leave to be filled out by ecRxiv during typesetting
+country: Norway
+continent: Europe
+ECT:
+  - B2 Structural state characteristics
+  - C1 Landscape and Seascape Characteristics
+Realm:
+  - Terrestrial (T)
+Biome:
+  - T2 Temperate-boreal forests and woodlands biome
+Ecosystem:
+  - T2.2 Deciduous temperate forests
+  - T2.1 Boreal/montane forests
+verbatimEcosystem:
+  - Kalklindeskog
+  - Olivinskog
+yearAdded: 2026
+yearLastUpdate: 2026
+status: incomplete # options are complete, incomplete, or deprecated
+Version: "0.3.0"
+VersionComment: Median stand score with a shared-draw cluster-bootstrap interval; trajectory from the nature type AE score, with the stable/fluctuating cut calibrated on Hansen-clean stands (2026-10-23).
+url: https://github.com/NINAnor/ecRxiv/tree/main/indicators/NO_FSAT_001_002
+Normalised:
+  - "Yes"
+  - "No"
+SpatialAggregationPathway:
+  - Scale (10 m cell-year, AE score between a good and a poor reference pool) - Aggregate (stand median of the cell scores) - Classify (stand interval against threshold)
+  - Classify (10 m cell-year, C2C break with an NBR drop of 0.175 or more) - Aggregate (stand and forest-type loss area)
+Precision:
+  - 95% interval around each stand score, from 2,000 resamples of whole reference stands (good pool) and whole 500 m areas (poor pool), with every cell of the stand rescored under each resample (inferential)
+  - Recall, precision and F1 against 1,577 labelled cells (40 loss, 20 degradation, 1,517 no change), with 95% intervals
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    toc: true
+    toc-title: Contents
+    toc-depth: 3
+    smooth-scroll: true
+jupyter: python3
+execute:
+  cache: false
+author:
+  - name: Geethen Singh
+    email: geethen.singh@nina.no
+    affiliations:
+      - id: nina
+        name: Norwegian Institute for Nature Research (NINA)
+  - name: Andrew Møller Gray
+    email: andrew.gray@nina.no
+    affiliations:
+      - ref: nina
+  - name: Ida Marielle Mienna
+    email: ida.mienna@nina.no
+    affiliations:
+      - ref: nina
+AuthorList: Singh, G., Gray, A. M., Mienna, I. M. # TODO: confirm author order
+date: October 22, 2026
+data_availability: bronze # silver needs a persistent identifier: mint a Zenodo DOI for the repo release
+code_reproducibility: bronze # calculations are in the external repo, not in this qmd
+open_science_badge: bronze # minimum of the two
+callout-icon: false
+lightbox: true
+css: ../../../style.css
+code-links:
+      - text: Add a review
+        icon: github
+        href: https://github.com/NINAnor/ecRxiv
+hide: TRUE # Change to FALSE
+bibliography: references.bib
+---
