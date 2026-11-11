@@ -52,9 +52,7 @@ def _alerts(rows: list[tuple]) -> pd.DataFrame:
     )
 
 
-def make_source(
-    root: Path, forest_types=("olivinskog", "kalklindeskog"), radd: bool = False
-) -> Path:
+def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Path:
     """Write the synthetic alerts + polygons under root, like the real prefix."""
     (root / "alerts/parquet").mkdir(parents=True)
     (root / "condition/parquet").mkdir(parents=True)
@@ -92,18 +90,6 @@ def make_source(
             **{f"dor_global_{y}": 0.5 + (y - 2017) / 100 for y in range(2017, 2026)},
         }
     ).to_parquet(root / "condition/parquet/condition_stands.parquet")
-    if radd:
-        (root / "radd/parquet").mkdir(parents=True)
-        pd.DataFrame(
-            {
-                "aoi": ["olivinskog", "olivinskog", "kalklindeskog"],
-                "lon": [15.00005, 15.0001, 15.0002],
-                "lat": [59.6, 59.6, 59.6],
-                "alert": [3, 2, 3],
-                "date": pd.to_datetime(["2024-05-01", "2025-07-15", "2023-01-31"]),
-                "image_id": "europe_test",
-            }
-        ).to_parquet(root / "radd/parquet/radd_alerts.parquet")
     return root
 
 
@@ -215,18 +201,3 @@ def test_stand_series_and_no_radd(baked):
     assert p["series"] == pytest.approx([0.5 + i / 100 for i in range(9)])
     assert p["threshold_global"] == 0.51
     assert idx["years"] == list(range(2017, 2026))
-    assert idx["radd"] is None and "radd" not in idx["files"]
-
-
-def test_radd_is_baked_when_present(tmp_path: Path):
-    idx = dashboard.bake(str(make_source(tmp_path / "src", radd=True)), tmp_path / "o")
-    assert idx["radd"] == {"olivinskog": 2, "kalklindeskog": 1}
-    pts = json.loads((tmp_path / "o" / idx["files"]["radd"]["olivinskog"]).read_text())
-    assert pts["date"] == ["2024-05-01", "2025-07-15"] and pts["conf"] == [3, 2]
-
-
-def test_decode_yydoy():
-    from effektovervaking_forests.radd import decode_yydoy
-
-    assert str(decode_yydoy(26031)) == "2026-01-31"
-    assert str(decode_yydoy(24366)) == "2024-12-31"  # leap year

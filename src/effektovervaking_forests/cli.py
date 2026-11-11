@@ -550,9 +550,6 @@ def publish_dashboard(
         "(default: FORESTMON_DASHBOARD_SOURCE).",
     ),
     out: str = typer.Option("app/data", help="Where the dashboard reads its JSON."),
-    radd: str = typer.Option(
-        None, help="Local RADD table (default: <source>/radd/parquet, if there)."
-    ),
 ):
     """Bake the dashboard's JSON from the published alert and condition parquet."""
     from . import dashboard
@@ -560,9 +557,8 @@ def publish_dashboard(
     source = source or dashboard.default_source()
     if not source:
         _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
-    idx = dashboard.bake(source, out, radd_path=radd)
+    idx = dashboard.bake(source, out)
     _echo(f"{out}/index.json: {idx['pixels']} pixels, {idx['period_range']}")
-    _echo(f"RADD pixels: {idx['radd'] or 'none (no RADD table)'}")
 
 
 @publish_app.command("radd")
@@ -570,11 +566,12 @@ def publish_radd(
     source: str = typer.Option(
         None, help="Where condition/parquet/polygons_geo.parquet is (as dashboard)."
     ),
-    out: str = typer.Option(
-        "data/radd/parquet/radd_alerts.parquet", help="RADD table to write."
-    ),
+    out: str = typer.Option("app/data/radd_tiles.json", help="Tile file to write."),
 ):
-    """Sample RADD Europe alerts inside the stands (needs Earth Engine)."""
+    """Mint RADD Europe alert tiles masked to the stands (needs Earth Engine).
+
+    Map IDs expire within days: run this nightly, next to the dashboard bake.
+    """
     import tempfile
     from pathlib import Path
 
@@ -590,12 +587,12 @@ def publish_radd(
         polys = gpd.read_parquet(
             dashboard._local(source, "condition/parquet/polygons_geo.parquet", Path(t))
         )
-    df = radd_mod.sample(
+    tiles = radd_mod.mint_tiles(
         polys[polys["forest_type"].isin(dashboard.AOIS)], config.EE_PROJECT
     )
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(out)
-    _echo(f"{out}: {len(df)} RADD pixels {df.groupby('aoi').size().to_dict()}")
+    store.write_json(tiles, out)
+    _echo(f"{out}: RADD {tiles['image_id']} (v{tiles['version_date']})")
 
 
 # ── observability ────────────────────────────────────────────────────────────

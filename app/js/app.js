@@ -37,6 +37,7 @@ const state = {
   basemap: Object.keys(BASEMAPS)[0], // the first configured is the default
   alerts: true,
   radd: false,
+  raddMode: 'alert',
   stands: true,
   standColor: 'forest_type',
   cells: false
@@ -202,8 +203,6 @@ const POPUPS = [
   [(id) => pointLayers.has(id), (p) =>
     `<strong>${esc(p.kind)}</strong> &mdash; ${esc(p.aoi)}<br>latest break ${esc(p.month)}<br>` +
     `confidence ${fmt(p.conf, 2)}, ${p.n} event${p.n === 1 ? '' : 's'}`],
-  [(id) => raddLayers.has(id), (p) =>
-    `<strong>RADD ${p.conf === 3 ? 'confirmed' : 'unconfirmed'}</strong><br>${esc(p.date)}`],
   [(id) => id === 'cells', (p) =>
     `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
     `(threshold ${fmt(p.threshold_global, 3)})<br>` +
@@ -223,8 +222,7 @@ function setupPopup() {
   map.getCanvas().addEventListener('mouseleave', () => popup.remove());
   map.on('mousemove', (e) => {
     if (!document.getElementById('detail').hidden) { popup.remove(); return; }
-    const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys(), ...raddLayers.keys()]
-      .filter((id) => map.getLayer(id));
+    const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys()].filter((id) => map.getLayer(id));
     const feats = map.queryRenderedFeatures(e.point, { layers });
     let html = null;
     for (const [match, render] of POPUPS) {
@@ -263,38 +261,45 @@ function ensurePoints(aoi, kind) {
   return pointLayers.get(key);
 }
 
-// ── RADD (optional; baked only when a RADD table exists) ─────────────────────
-const RADD_COLORS = { 3: '#ea7e7d', 2: '#00ffff' };
-/** RADD layers, keyed `radd|${aoi}`, as promises so each loads once. */
-const raddLayers = new Map();
+// ── RADD: Earth Engine XYZ tiles, masked to the stands (forestmon publish radd) ──
+/** radd_tiles.json, or null when it has not been minted. */
+let raddTiles = null;
 
-function ensureRadd(aoi) {
-  const key = `radd|${aoi}`;
-  if (!raddLayers.has(key)) {
-    raddLayers.set(key, fetchJson(index.files.radd[aoi]).then((c) => {
-      const features = c.lon.map((lon, i) => ({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [lon, c.lat[i]] },
-        properties: { aoi, date: c.date[i], conf: c.conf[i] }
-      }));
-      map.addSource(key, { type: 'geojson', data: { type: 'FeatureCollection', features } });
-      map.addLayer({
-        id: key, type: 'circle', source: key,
-        layout: { visibility: 'none' },
-        paint: {
-          'circle-color': ['match', ['get', 'conf'], 3, RADD_COLORS[3], RADD_COLORS[2]],
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 12, 3, 16, 6],
-          'circle-stroke-color': '#000', 'circle-stroke-width': 0.5
-        }
-      });
-      applyMapState();
-      return key;
-    }).catch((e) => {
-      raddLayers.delete(key);
-      throw e;
-    }));
+async function loadRaddTiles() {
+  try {
+    return await fetchJson('radd_tiles.json');
+  } catch {
+    return null; // optional layer
   }
-  return raddLayers.get(key);
+}
+
+function applyRadd() {
+  if (!raddTiles) return;
+  const tiles = [raddTiles.layers[state.raddMode].tiles];
+  if (!map.getSource('radd')) {
+    if (!state.radd) return; // nothing is fetched until it is switched on
+    map.addSource('radd', {
+      type: 'raster', tiles, tileSize: 256, maxzoom: 15,
+      attribution: '<a href="https://www.wur.nl/en/research-results/research-institutes/environmental-research/radd-forest-disturbance-alert.htm">RADD</a> / Wageningen University'
+    });
+    map.addLayer({ id: 'radd', type: 'raster', source: 'radd', paint: { 'raster-opacity': 0.9 } }, 'forest-pts');
+    map.on('error', (e) => {
+      if (e.sourceId === 'radd') {
+        document.getElementById('radd-note').textContent =
+          'RADD tiles failed to load. Earth Engine map IDs expire: re-run forestmon publish radd.';
+      }
+    });
+  } else if (map.getSource('radd').tiles?.[0] !== tiles[0]) {
+    map.getSource('radd').setTiles(tiles);
+  }
+  map.setLayoutProperty('radd', 'visibility', state.radd ? 'visible' : 'none');
+}
+
+function describeRadd() {
+  const days = (Date.now() - raddTiles.minted_at) / 864e5;
+  document.getElementById('radd-note').textContent =
+    `Image ${raddTiles.image_id} (v${raddTiles.version_date}), tiles made ${fmt(days, 0)} d ago` +
+    (days > 3 ? ' — they may have expired; re-run forestmon publish radd.' : '.');
 }
 
 // ── the click card: everything under the clicked point ───────────────────────
@@ -349,6 +354,13 @@ function trend(series) {
   return s === null ? '—' : `${s >= 0 ? '+' : ''}${fmt(s, 4)} / yr`;
 }
 
+/** The pixel in an external Sentinel-2 time-series viewer (config.js). */
+function timeseriesLink([lon, lat]) {
+  if (!CFG.timeseriesUrl) return '';
+  const url = CFG.timeseriesUrl.replace('{lon}', lon.toFixed(5)).replace('{lat}', lat.toFixed(5));
+  return `<a class="ext-link" href="${esc(url)}" target="_blank" rel="noopener">Sentinel-2 NBR time series &#8599;</a>`;
+}
+
 function chip(text, color) {
   return `<span class="chip"><i style="background:${color}"></i>${esc(text)}</span>`;
 }
@@ -381,21 +393,15 @@ function standSection(p) {
 
 function showDetail(e) {
   const at = (ids) => map.queryRenderedFeatures(e.point, { layers: ids.filter((id) => map.getLayer(id)) });
-  const radd = at([...raddLayers.keys()]);
   const sccd = at([...pointLayers.keys()]);
   const cell = at(['cells'])[0];
   const stand = at(['forest-fill', 'forest-pts'])[0];
   let html = '';
-  for (const f of radd.slice(0, 3)) {
-    const p = f.properties;
-    html += `<section><h4>RADD alert</h4><div class="chips">${chip(p.conf === 3 ? 'confirmed' : 'unconfirmed', RADD_COLORS[p.conf] || RADD_COLORS[2])}</div>` +
-      `<dl><dt>Date</dt><dd>${esc(p.date)}</dd></dl></section>`;
-  }
   for (const f of sccd.slice(0, 3)) {
     const p = f.properties;
     html += `<section><h4>S-CCD ${esc(p.kind)} pixel</h4><div class="chips">${chip(p.kind, KIND_COLORS[p.kind])}</div>` +
       `<dl><dt>Latest break</dt><dd>${esc(p.month)}</dd><dt>Confidence</dt><dd>${fmt(p.conf, 2)}</dd>` +
-      `<dt>Events</dt><dd>${esc(p.n)}</dd></dl></section>`;
+      `<dt>Events</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink(f.geometry.coordinates)}</section>`;
   }
   if (cell) html += cellSection(cell.properties);
   if (stand) html += standSection(standById.get(stand.properties.poly_id) || stand.properties);
@@ -482,14 +488,7 @@ function applyMapState() {
     map.setLayoutProperty(key, 'visibility', state.alerts && wanted.has(key) ? 'visible' : 'none');
     map.setFilter(key, filter);
   }
-  const month = ['slice', ['get', 'date'], 0, 7];
-  for (const key of raddLayers.keys()) {
-    if (!map.getLayer(key)) continue;
-    const aoi = key.slice(5);
-    const show = state.radd && (state.forestType === 'all' || state.forestType === aoi);
-    map.setLayoutProperty(key, 'visibility', show ? 'visible' : 'none');
-    map.setFilter(key, ['all', ['>=', month, state.from], ['<=', month, state.to]]);
-  }
+  applyRadd();
 }
 
 let mapGeneration = 0;
@@ -497,9 +496,7 @@ let mapGeneration = 0;
 async function refreshMap() {
   const gen = ++mapGeneration;
   applyMapState();
-  const loads = wantedLayers().map(({ aoi, kind }) => ensurePoints(aoi, kind));
-  if (state.radd && index.files.radd) loads.push(...index.forest_types.map(ensureRadd));
-  const results = await Promise.allSettled(loads);
+  const results = await Promise.allSettled(wantedLayers().map(({ aoi, kind }) => ensurePoints(aoi, kind)));
   // The state may have changed while files loaded; apply the current one.
   applyMapState();
   if (gen !== mapGeneration) return; // a newer refresh owns the status line
@@ -711,9 +708,14 @@ function setupControls() {
   document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
     `<label class="seg__opt"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}>` +
     `<span>${esc(b.short || b.label || id)}</span></label>`).join('');
-  if (!index.files.radd) document.getElementById('radd-section').hidden = true;
-  else document.getElementById('radd-note').textContent =
-    `Wageningen RADD Europe, inside the stands: ${index.forest_types.reduce((n, a) => n + (index.radd[a] || 0), 0).toLocaleString()} pixels.`;
+  if (!raddTiles) document.getElementById('radd-section').hidden = true;
+  else describeRadd();
+  for (const el of document.querySelectorAll('input[name="radd-mode"]')) {
+    el.addEventListener('change', (e) => {
+      state.raddMode = /** @type {HTMLInputElement} */ (e.target).value;
+      applyRadd();
+    });
+  }
   setupTheme();
   // Browsers may restore form state on reload; the controls are the truth.
   const val = (id) => /** @type {HTMLInputElement} */ (document.getElementById(id));
@@ -726,6 +728,7 @@ function setupControls() {
   state.stands = val('toggle-stands').checked;
   state.cells = val('toggle-cells').checked;
   state.radd = val('toggle-radd').checked;
+  state.raddMode = /** @type {HTMLInputElement} */ (document.querySelector('input[name="radd-mode"]:checked')).value;
   if (window.innerWidth < 700) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
   document.getElementById('cell-ramp').style.background =
     `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
@@ -757,12 +760,14 @@ function refresh() {
 async function init() {
   if (typeof maplibregl === 'undefined') throw new Error('MapLibre failed to load (vendor/ and unpkg both unavailable)');
   index = await loadIndex();
-  const [polygons, rows] = await Promise.all([
+  const [polygons, rows, radd] = await Promise.all([
     fetchJson(index.files.polygons),
     fetchJson(index.files.monthly),
+    loadRaddTiles(),
     createMap()
   ]);
   monthly = rows;
+  raddTiles = radd;
   setupStatus();
   setupControls();
   addPolygons(polygons);

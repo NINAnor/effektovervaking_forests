@@ -50,8 +50,6 @@ STAND_COLS = [
     *[f"dor_global_{y}" for y in range(2017, 2026)],
 ]
 YEARS = list(range(2017, 2026))
-# Optional: RADD alerts sampled inside the stands (`forestmon publish radd`).
-RADD_PATH = "radd/parquet/radd_alerts.parquet"
 
 
 def default_source() -> str | None:
@@ -69,27 +67,6 @@ def _local(source: str, rel: str, tmp: Path) -> Path:
             for chunk in r.iter_content(1 << 20):
                 f.write(chunk)
     return out
-
-
-def _optional(source: str, rel: str, tmp: Path) -> Path | None:
-    """Like `_local`, but None when the file is not there."""
-    try:
-        path = _local(source, rel, tmp)
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code in (403, 404):
-            return None
-        raise
-    return path if path.exists() else None
-
-
-def radd_points(df: pd.DataFrame) -> dict:
-    """Columnar RADD pixels: date as YYYY-MM-DD, confidence 3 high / 2 low."""
-    return {
-        "lon": df["lon"].round(5).tolist(),
-        "lat": df["lat"].round(5).tolist(),
-        "date": pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d").tolist(),
-        "conf": df["alert"].astype(int).tolist(),
-    }
 
 
 def _month(s: pd.Series) -> pd.Series:
@@ -158,8 +135,7 @@ def _write(obj, path: Path) -> str:
     return path.name
 
 
-def bake(source: str, out_dir: Path | str, radd_path: Path | str | None = None) -> dict:
-    """`radd_path` overrides the RADD table at `<source>/radd/parquet`."""
+def bake(source: str, out_dir: Path | str) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="forestmon_dash_") as t:
@@ -183,8 +159,6 @@ def bake(source: str, out_dir: Path | str, radd_path: Path | str | None = None) 
             _local(source, "condition/parquet/condition_stands.parquet", tmp),
             columns=STAND_COLS,
         )
-        radd_file = Path(radd_path) if radd_path else _optional(source, RADD_PATH, tmp)
-        radd = pd.read_parquet(radd_file) if radd_file else None
 
     polys = polys[polys["forest_type"].isin(AOIS)]
     if polys.crs is None or not polys.crs.is_projected:
@@ -237,13 +211,6 @@ def bake(source: str, out_dir: Path | str, radd_path: Path | str | None = None) 
     feats = json.loads(web.to_json(drop_id=True, na="null"))
     files["polygons"] = _write(feats, out_dir / "polygons.geojson")
     files["monthly"] = _write(monthly(px, baseline), out_dir / "monthly.json")
-    radd_counts = {}
-    if radd is not None:
-        files["radd"] = {}
-        for aoi in AOIS:
-            sel = radd[radd["aoi"] == aoi]
-            radd_counts[aoi] = int(len(sel))
-            files["radd"][aoi] = _write(radd_points(sel), out_dir / f"radd_{aoi}.json")
 
     counts = px.groupby(["aoi", "kind"]).size()
     index = {
@@ -260,7 +227,6 @@ def bake(source: str, out_dir: Path | str, radd_path: Path | str | None = None) 
         "pixels": {a: {k: int(counts.get((a, k), 0)) for k in KINDS} for a in AOIS},
         "period_range": [_month(px["first"]).min(), _month(px["last"]).max()],
         "years": YEARS,
-        "radd": radd_counts or None,
         "files": files,
     }
     _write(index, out_dir / "index.json")  # last: the app reads it first

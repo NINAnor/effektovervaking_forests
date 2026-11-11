@@ -71,24 +71,49 @@
           <div class="layer-group" role="group" aria-labelledby="basemap-title">
             <div class="group-title" id="basemap-title">Basemap</div>
             <div class="seg" id="basemap-options" role="radiogroup" aria-labelledby="basemap-title"></div>
+            <p class="desc">Satellite: Esri World Imagery, a mosaic of recent aerial and
+              satellite images. Its capture date varies from place to place and is often
+              older than the newest alerts.</p>
           </div>
 
           <div class="layer-group" role="group" aria-label="S-CCD alerts">
-            <label class="switch"><span>S-CCD alerts</span><input type="checkbox" role="switch" id="toggle-alerts" checked></label>
+            <label class="switch"><span>S-CCD alerts (Sentinel-2)</span><input type="checkbox" role="switch" id="toggle-alerts" checked></label>
             <ul class="key">
               <li><i class="sw sw--dot" style="background:#e06666"></i> Loss pixel (10 m)</li>
               <li><i class="sw sw--dot" style="background:#4dd0a7"></i> Gain pixel (10 m)</li>
             </ul>
-            <p class="hint">Type, dates and confidence: filters above.</p>
+            <p class="desc">This project's near-real-time monitor. Each dot is a 10 m pixel
+              where the Sentinel-2 signal broke from its seasonal pattern: loss when tree
+              cover fell (felling, windthrow, dieback), gain when it grew back.</p>
+            <details class="about"><summary>More</summary>
+              <p>Only breaks larger than the magnitude gate are shown, minus any a
+                reviewer rejected. A dot is dated by its latest break. Confidence (0–1)
+                grows as later images confirm the break. Click a pixel for its details
+                and a link to its Sentinel-2 time series. Type, dates and confidence are
+                set by the filters above the map.</p>
+            </details>
           </div>
 
           <div class="layer-group" role="group" aria-label="RADD alerts" id="radd-section">
             <label class="switch"><span>RADD alerts (Sentinel-1)</span><input type="checkbox" role="switch" id="toggle-radd"></label>
+            <div class="seg seg--small" role="radiogroup" aria-label="RADD colouring">
+              <label class="seg__opt"><input type="radio" name="radd-mode" value="alert" checked><span>Confidence</span></label>
+              <label class="seg__opt"><input type="radio" name="radd-mode" value="alert_date"><span>Date</span></label>
+            </div>
             <ul class="key">
-              <li><i class="sw sw--dot" style="background:#ea7e7d"></i> Confirmed</li>
-              <li><i class="sw sw--dot" style="background:#00ffff"></i> Unconfirmed</li>
+              <li><i class="sw" style="background:#ea7e7d"></i> Confirmed</li>
+              <li><i class="sw" style="background:#00ffff"></i> Unconfirmed</li>
+              <li><i class="sw sw--wide" style="background:linear-gradient(90deg,#ffffcc,#fed976,#fd8d3c,#e31a1c,#800026)"></i> Date: 2020 &rarr; now</li>
             </ul>
-            <p class="hint" id="radd-note">Wageningen RADD Europe, inside the stands.</p>
+            <p class="desc">Forest-disturbance alerts from Wageningen University (RADD
+              Europe), from Sentinel-1 radar at 10 m since 2020. Radar sees through cloud,
+              so alerts can come earlier than optical ones. Shown inside the stands only.</p>
+            <details class="about"><summary>More</summary>
+              <p>Confirmed: the disturbance held in later radar images. Unconfirmed: a
+                first detection. Drawn as Earth Engine tiles; zoom in to see single
+                pixels. An independent check on the S-CCD alerts.</p>
+            </details>
+            <p class="hint" id="radd-note"></p>
           </div>
 
           <div class="layer-group" role="group" aria-label="Stands">
@@ -102,6 +127,17 @@
               </select>
             </label>
             <ul class="key" id="stand-legend" aria-label="Stand colours"></ul>
+            <p class="desc">The mapped olivinskog and kalklindeskog stands from three field
+              surveys (MI, NiN 1:5000, HB13). Surveys overlap in places. Small stands show
+              as dots when zoomed out.</p>
+            <details class="about"><summary>More</summary>
+              <p><b>Condition 2025</b> compares the stand's AlphaEarth satellite embedding
+                with good-condition stands of its forest type: good, poor, or not decided
+                when the uncertainty interval spans the threshold (about 0.51).
+                <i>Local</i> compares with nearby good stands, <i>global</i> with all of
+                them. <b>Trajectory</b> is the direction of the yearly score 2017–2025.
+                Click a stand to see its yearly scores.</p>
+            </details>
           </div>
 
           <div class="layer-group" role="group" aria-label="Condition cells" id="cells-section">
@@ -109,7 +145,15 @@
             <div class="ramp" id="cell-ramp" role="img"
                  aria-label="Colour scale from brown, below the stand threshold, through cream at the threshold, to dark teal, above it"></div>
             <div class="ramp-labels" aria-hidden="true"><span>below threshold</span><span>above</span></div>
-            <p class="hint">2025 score minus the stand threshold. Zoom in past 12 to see cells.</p>
+            <p class="desc">The 2025 condition score of each 10 m cell, minus its stand's
+              threshold. Brown cells look less like good forest of their type, teal ones
+              more. Zoom in past 12 to see them.</p>
+            <details class="about"><summary>More</summary>
+              <p>Cells within 20 m of a stand edge partly mix in their surroundings.
+                Click a cell for its scores 2017–2025. Within one locality the score is
+                close to chance: it ranks a population of stands, and often cannot
+                resolve one stand on its own.</p>
+            </details>
           </div>
         </details>
         <!-- What was clicked: alerts, the cell and the stand under the pointer. -->

@@ -52,15 +52,15 @@ requests (`conditionCells` in `config.js`; empty takes it from the S3 prefix the
 baked from, and hides the layer when they were baked from a folder). It draws from
 zoom 12 and is coloured by the 2025 score minus the stand threshold.
 
-**RADD** (Wageningen RADD Europe, Sentinel-1, 10 m) is optional. The old
-inspector drew it as Earth Engine map tiles, but those IDs expire within hours,
-so a static page samples it instead: `forestmon publish radd` (needs the `gee`
-extra and `earthengine authenticate`) writes the alert pixels inside the stands
-to `data/radd/parquet/radd_alerts.parquet`; the bake picks it up from
-`<source>/radd/parquet/` or `--radd <file>`. Without it the RADD layer is hidden.
+**RADD** (Wageningen RADD Europe, Sentinel-1, 10 m) is drawn from Earth
+Engine XYZ tiles, as in the old inspector, masked to the stands:
+`forestmon publish radd` (needs the `gee` extra and `earthengine authenticate`)
+mints them into `app/data/radd_tiles.json`. Map IDs expire within days, so run
+it nightly; the panel shows the tiles' age. Without the file the layer is hidden.
 
-**Clicking the map** opens a card with everything under the point: RADD and
-S-CCD alerts, the 10 m cell's condition 2017–2025 against its threshold, and
+**Clicking the map** opens a card with everything under the point: S-CCD
+alerts (with a link to the pixel's Sentinel-2 NBR time series, `timeseriesUrl`
+in `config.js`), the 10 m cell's condition 2017–2025 against its threshold, and
 the stand's yearly condition (survey year marked) with its classes and
 trajectory.
 

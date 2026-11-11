@@ -42,8 +42,22 @@ def site(tmp_path_factory):
     cfg.write_text(
         re.sub(r"conditionCells: '[^']*'", "conditionCells: ''", cfg.read_text())
     )
-    src = make_source(tmp_path_factory.mktemp("src"), radd=True)
+    src = make_source(tmp_path_factory.mktemp("src"))
     dashboard.bake(str(src), root / "data")
+    # Minting needs Earth Engine; a stub tile host stands in (routed in _open).
+    (root / "data" / "radd_tiles.json").write_text(
+        json.dumps(
+            {
+                "image_id": "europe_test",
+                "version_date": "2026-11-01",
+                "minted_at": 0,
+                "layers": {
+                    m: {"tiles": f"https://radd.test/{m}/{{z}}/{{x}}/{{y}}"}
+                    for m in ("alert", "alert_date")
+                },
+            }
+        )
+    )
     handler = functools.partial(
         http.server.SimpleHTTPRequestHandler, directory=str(root)
     )
@@ -78,6 +92,7 @@ def _open(browser, url):
     )
     page.route("**/tile.openstreetmap.org/**", lambda r: r.fulfill(status=204))
     page.route("**/server.arcgisonline.com/**", lambda r: r.fulfill(status=204))
+    page.route("**/radd.test/**", lambda r: r.fulfill(status=204))
     page.goto(url)
     # Loaded = data status set (OK or error) and the charts drawn or given up on.
     page.wait_for_function(
@@ -174,28 +189,44 @@ def test_missing_points_file_errors_but_charts_render(browser, site) -> None:
         path.write_bytes(saved)
 
 
-def test_radd_toggle_and_click_card(browser, site) -> None:
+def test_radd_tiles_and_click_card(browser, site) -> None:
     _, url = site
     ctx, page, errors = _open(browser, url)
     try:
+        # Satellite is the default basemap.
+        assert (
+            page.evaluate("() => map.getLayoutProperty('base-satellite', 'visibility')")
+            == "visible"
+        )
+        assert "may have expired" in page.inner_text("#radd-note")
         page.check("#toggle-radd")
         page.wait_for_function(
-            "() => raddLayers.size === 2"
-            " && [...raddLayers.keys()].every(k => map.getLayer(k)"
-            " && map.getLayoutProperty(k, 'visibility') === 'visible')"
+            "() => map.getLayer('radd')"
+            " && map.getLayoutProperty('radd', 'visibility') === 'visible'"
         )
-        # Click the middle of the first olivinskog stand: the card shows its
-        # trajectory and classification.
+        page.locator('.seg__opt:has(input[value="alert_date"])').click()
+        assert "/alert_date/" in page.evaluate("() => map.getSource('radd').tiles[0]")
+
+        # A stand: its trajectory and classification.
         page.evaluate("() => map.jumpTo({center: [11.46823, 59.4911], zoom: 16})")
         page.wait_for_timeout(1500)
         box = page.locator("#map").bounding_box()
-        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        centre = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.click(*centre)
         page.wait_for_function("() => !document.getElementById('detail').hidden")
         body = page.inner_text("#detail-body")
         assert "Stand" in body and "trajectory: stable" in body
         assert page.locator("#detail .traj-chart circle").count() == 9
         page.click("#detail-close")
         assert page.locator("#detail").is_hidden()
+
+        # An S-CCD pixel: a link to its Sentinel-2 time series.
+        page.evaluate("() => map.jumpTo({center: [15.0001, 59.6], zoom: 17})")
+        page.wait_for_timeout(1500)
+        page.mouse.click(*centre)
+        page.wait_for_function("() => !document.getElementById('detail').hidden")
+        href = page.locator("#detail .ext-link").first.get_attribute("href")
+        assert "lon=15.00010;lat=59.60000" in href
         assert not errors
     finally:
         ctx.close()

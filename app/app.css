@@ -351,3 +351,16 @@ label.inline {
 [hidden] { display: none !important; }
 
 label.inline select { flex: 1 1 auto; min-width: 0; max-width: 150px; }
+
+/* Layer descriptions: one visible line of what it is, the rest behind "More". */
+.desc { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.about { margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.about summary { cursor: pointer; color: var(--accent); width: max-content; }
+.about p { margin: 4px 0 0; }
+.about b { font-weight: 500; color: var(--ink); }
+.hint:empty { display: none; }
+.seg--small { margin: 6px 0 2px; }
+.seg--small .seg__opt { padding: 3px 10px; font-size: 12px; }
+.sw--wide { width: 40px; }
+.ext-link { display: inline-block; margin-top: 6px; color: var(--accent); text-decoration: none; font-weight: 450; }
+.ext-link:hover { text-decoration: underline; }
