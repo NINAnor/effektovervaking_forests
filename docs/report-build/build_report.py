@@ -7,7 +7,7 @@ from the doc's own Word export. This script only reshapes that text for Quarto
 (title block, numbered sections, figure and table captions) and removes
 authoring notes; it does not change the findings.
 
-    python docs/report-build/build_report.py   # .qmd + figures into docs/, render html/docx/pdf, tidy the docx
+    python docs/report-build/build_report.py   # .qmd + figures into docs/report-src/, renders into docs/, tidy the docx
 """
 import importlib.metadata
 import platform
@@ -24,7 +24,8 @@ import make_stand_map
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
 ASSETS = HERE / "assets"
-OUT = HERE.parent                               # docs/: the Quarto sources and their renders
+OUT = HERE.parent / "report-src"                # docs/report-src: the Quarto sources and their inputs
+DOCS = HERE.parent                              # docs/: the renders
 OUT.mkdir(exist_ok=True)
 ECRXIV = HERE / "ecrxiv"
 sys.path.insert(0, str(ECRXIV))
@@ -502,8 +503,8 @@ def main() -> None:
     print(f"wrote {QMD.name}: {nfig + 1} figures, {ntab} tables")
 
     subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=OUT, check=True)
-    fix_docx(QMD.with_suffix(".docx"))
-    print("rendered:", ", ".join(p.name for p in sorted(OUT.glob(QMD.stem + ".*"))))
+    fix_docx(DOCS / f"{QMD.stem}.docx")
+    print("rendered:", ", ".join(p.name for p in sorted(DOCS.glob(QMD.stem + ".*"))))
 
 
 if __name__ == "__main__":
