@@ -7,7 +7,7 @@ from the doc's own Word export. This script only reshapes that text for Quarto
 (title block, numbered sections, figure and table captions) and removes
 authoring notes; it does not change the findings.
 
-    python docs/report-build/build_report.py   # .qmd + figures into docs/report-src/, renders into docs/, tidy the docx
+    python docs/report-build/build_report.py   # .qmd into docs/, figures into docs/report-assets/, renders into docs/, tidy the docx
 """
 import importlib.metadata
 import platform
@@ -24,8 +24,8 @@ import make_stand_map
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
 ASSETS = HERE / "assets"
-OUT = HERE.parent / "report-src"                # docs/report-src: the Quarto sources and their inputs
-DOCS = HERE.parent                              # docs/: the renders
+OUT = HERE.parent / "report-assets"             # docs/report-assets: what the .qmd sources read
+DOCS = HERE.parent                              # docs/: the .qmd sources and their renders
 OUT.mkdir(exist_ok=True)
 ECRXIV = HERE / "ecrxiv"
 sys.path.insert(0, str(ECRXIV))
@@ -34,7 +34,7 @@ import _common as ecrxiv  # ecRxiv badge and metadata helpers (Python port of _c
 SRC = HERE / "src" / "report"
 MEDIA = SRC / "media"
 FIG = OUT / "figures"
-QMD = OUT / "forest_monitoring_report.qmd"
+QMD = DOCS / "forest_monitoring_report.qmd"
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
@@ -58,8 +58,8 @@ author:
 date: 2026-11-11
 date-format: "D MMMM YYYY"
 lang: en-GB
-bibliography: references.bib
-csl: ambio.csl
+bibliography: report-assets/references.bib
+csl: report-assets/ambio.csl
 callout-icon: false            # as in the ecRxiv template
 code-links:
   - text: Code repository
@@ -82,14 +82,14 @@ format:
     smooth-scroll: true
     lightbox: true
   docx:
-    reference-doc: reference_a4.docx
+    reference-doc: report-assets/reference_a4.docx
     columns: 1000             # pipe tables then autofit to their content in Word
     toc: true
     toc-depth: 2
     toc-title: Contents
   typst:
     template-partials:
-      - typst-template.typ    # Quarto's own, plus a gutter between the author columns
+      - report-assets/typst-template.typ    # Quarto's own, plus a gutter between the author columns
     citeproc: true
     papersize: a4
     margin:
@@ -124,7 +124,7 @@ def ecrxiv_front() -> tuple[str, str]:
     wiki, badges = ecrxiv.WIKI, ecrxiv.BADGES
     items = [
         ecrxiv._link(ecrxiv.STATUS_BADGE[ecrxiv.flatten_to_string(y["status"]).lower()], f"{wiki}#status-badge"),
-        ecrxiv._link(f"figures/{vb.name}", f"{wiki}#naming-convention"),
+        ecrxiv._link(f"report-assets/figures/{vb.name}", f"{wiki}#naming-convention"),
         ecrxiv._link(f"{badges}/badge_data_{level('data_availability')}.svg", f"{wiki}#data-availability"),
         ecrxiv._link(f"{badges}/badge_code_{level('code_reproducibility')}.svg", f"{wiki}#code-reproducibility"),
         ecrxiv._link(f"{badges}/badge_overall_{level('open_science_badge')}.svg", f"{wiki}#open-science-badges"),
@@ -370,7 +370,7 @@ def main() -> None:
                      r"\*\*Figure (\d)\.\*\* (.+?)\n")
     def fig(m):
         img, src, n, cap = m.groups()
-        return f"![{cap} Source: {src}](figures/{figs[img]}.png){{#fig-{n} width=100%}}\n"
+        return f"![{cap} Source: {src}](report-assets/figures/{figs[img]}.png){{#fig-{n} width=100%}}\n"
     text, nfig = pat.subn(fig, text)
     assert nfig == 4, nfig
 
@@ -379,7 +379,7 @@ def main() -> None:
                       r"(?:\|.*\n)+\n\*\*Figure 4\.\*\* (.+?)\n")
     m = pat4.search(text)
     assert m, "figure 4"
-    text = (text[:m.start()] + f"![{m.group(2)} Source: {m.group(1)}](figures/fig4_porsgrunn.png)"
+    text = (text[:m.start()] + f"![{m.group(2)} Source: {m.group(1)}](report-assets/figures/fig4_porsgrunn.png)"
             f"{{#fig-4 width=100%}}\n" + text[m.end():])
 
     # Tables: "**Table N.** caption" -> a Quarto table caption before the table.
@@ -496,13 +496,13 @@ def main() -> None:
     anchor = "until the real series are connected."
     assert body.count(anchor) == 1, anchor
     body = body.replace(anchor, anchor + "\n\n::: {.content-visible when-format=\"html\"}\n"
-                        "{{< include map/stand_map.md >}}\n:::")
+                        "{{< include report-assets/map/stand_map.md >}}\n:::")
     make_stand_map.main()
 
     QMD.write_text(YAML + "\n" + body.strip() + "\n", encoding="utf-8")
     print(f"wrote {QMD.name}: {nfig + 1} figures, {ntab} tables")
 
-    subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=OUT, check=True)
+    subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=DOCS, check=True)
     fix_docx(DOCS / f"{QMD.stem}.docx")
     print("rendered:", ", ".join(p.name for p in sorted(DOCS.glob(QMD.stem + ".*"))))
 

@@ -22,8 +22,8 @@ code-links:
     icon: github
     href: https://github.com/NINAnor/effektovervaaking-2026-2030
 lang: en-GB
-bibliography: references.bib
-csl: ambio.csl
+bibliography: report-assets/references.bib
+csl: report-assets/ambio.csl
 fig-cap-location: bottom
 format:
   html:
@@ -37,14 +37,14 @@ format:
     lightbox: true
     anchor-sections: true
   docx:
-    reference-doc: reference_a4.docx
+    reference-doc: report-assets/reference_a4.docx
     columns: 1000
     toc: true
     toc-depth: 2
     toc-title: Contents
   typst:
     filters:
-      - typst_wrap_code.lua
+      - report-assets/typst_wrap_code.lua
     citeproc: true
     papersize: a4
     margin:
@@ -69,7 +69,7 @@ Companion to the report of the same name. The report cites this document as "Met
 
 The method gives four products for the 737 mapped olivinskog and kalklindeskog stands. They are a condition score per 10 m cell and per stand for each year 2017-2025, a condition trajectory per stand, a forest-loss map for 2018-2025, and a near-real-time list of change candidates for both forest types. This document describes each product as it was run for the report. The report gives the results; this document describes the methods, the parameters and the evaluation.
 
-![Pipeline overview · 4 products from 3 data streams](media/image1.png){#fig-pipeline width=100%}
+![Pipeline overview · 4 products from 3 data streams](report-assets/media/image1.png){#fig-pipeline width=100%}
 
 The two upper rows use the same embedding and the same reference pools; the two lower rows use Sentinel-2 directly and do not use the field-assigned condition.
 

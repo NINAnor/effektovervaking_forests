@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-docs_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)   # the renders land here
-src_dir=$docs_dir/report-src                                          # the Quarto project
+docs_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)   # the Quarto project; the renders land here
 if ! command -v quarto >/dev/null 2>&1; then
     printf '%s\n' 'Quarto is not installed or not on PATH. Install Quarto >= 1.4.' >&2
     exit 1
@@ -20,7 +19,7 @@ fi
 build_dir=$(mktemp -d "${TMPDIR:-/tmp}/forest-monitoring-quarto.XXXXXX")
 trap 'rm -rf -- "$build_dir"' EXIT
 
-cp -R -- "$src_dir/." "$build_dir/"
+cp -R -- "$docs_dir"/_quarto.yml "$docs_dir"/forest_monitoring_*.qmd "$docs_dir"/report-assets "$build_dir/"
 
 quarto render "$build_dir/$input" --to all "$@"
 

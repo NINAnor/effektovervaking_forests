@@ -15,12 +15,11 @@ bash docs/report-build/render.sh                      # HTML, PDF and Word
 bash docs/report-build/render.sh --to html            # HTML only (faster)
 ```
 
-The Quarto project is `docs/report-src/` and renders only the report and methods appendix, not the
-ecRxiv helper documents. The wrapper builds a copy of it in local temporary storage and copies the
-finished files into `docs/` (the report as `docs/index.html`). Rendering directly on the shared project drive fails with Quarto's
+The Quarto project is `docs/` (`docs/_quarto.yml`) and renders only the report and methods appendix,
+not the ecRxiv helper documents. The wrapper builds a copy of the sources and `report-assets/` in local
+temporary storage and copies the finished files into `docs/` (the report as `docs/index.html`). Rendering directly on the shared project drive fails with Quarto's
 `database is locked` project-cache error or `WouldBlock` during cleanup. Keep `TMPDIR` on a local
-filesystem, not the shared drive. On a local checkout, `quarto render docs/report-src --to all` also
-works, but leaves the renders in `docs/report-src/`.
+filesystem, not the shared drive. On a local checkout, `quarto render docs --to all` also works.
 
 To render just one document, pass its source filename before any options:
 
@@ -40,7 +39,8 @@ python docs/report-build/publish.py
 | `docs/index.html` | the report (the GitHub Pages entry) |
 | `docs/forest_monitoring_methods.html` | the methods appendix; the report links to its sections |
 | `docs/forest_monitoring_{report,methods}.{pdf,docx}` | the same in PDF and Word |
-| `docs/report-src/` | the Quarto project: `forest_monitoring_{report,methods}.qmd` with `_quarto.yml`, `references.bib`, `ambio.csl`, `figures/`, `map/`, `media/` and the Word and Typst templates; render with the wrapper above |
+| `docs/forest_monitoring_report.qmd`, `docs/forest_monitoring_methods.qmd` | the Quarto sources; render with the wrapper above |
+| `docs/report-assets/` | what they read: `references.bib`, `ambio.csl`, `figures/`, `map/`, `media/` and the Word and Typst templates |
 
 ## Updating from the Claude Docs
 
@@ -61,8 +61,8 @@ those no longer needed.
 
 | File | Role |
 |---|---|
-| `publish.py` | clears `docs/report-src/` (all but `_quarto.yml`) and runs the two builds |
-| `render.sh` | renders `docs/report-src/` in local temporary storage, then copies HTML, PDF and Word into `docs/` |
+| `publish.py` | removes the generated `.qmd` and `docs/report-assets/`, then runs the two builds |
+| `render.sh` | renders the `.qmd` in local temporary storage, then copies HTML, PDF and Word into `docs/` |
 | `build_report.py` | report: `.qmd`, figures, ecRxiv badges and metadata, render, tidy the Word tables |
 | `build_methods.py` | methods appendix: `.qmd` with `section-N` anchors and citeproc references, render |
 | `make_stand_map.py` | interactive stand map (HTML only). Rebuilt when `CONDITION_OUT_DATA` (default `data/condition/outputs/data`) holds `condition.parquet`, `trajectory.parquet` and `polygons_geo.parquet` (also in the S3 bucket under `condition/parquet/`); otherwise the committed `assets/map/stand_map.md` is used |
