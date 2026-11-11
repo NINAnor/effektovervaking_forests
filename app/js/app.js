@@ -4,7 +4,7 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 6; // must match dashboard.SCHEMA in Python
+const SCHEMA = 7; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 // Bright, with a white ring on the map, so the alerts stand out on imagery.
 const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
@@ -763,8 +763,14 @@ async function refreshMap() {
 }
 
 // ── charts (plain SVG) ───────────────────────────────────────────────────────
+/** Monthly rows at the chosen certainty: each area is baked per index.conf_tiers. */
+function monthlyAtCertainty() {
+  const t = Math.max(0, index.conf_tiers.indexOf(state.minConf));
+  return monthly.map((d) => ({ ...d, loss_ha: d.loss_ha[t], gain_ha: d.gain_ha[t] }));
+}
+
 function filteredMonthly() {
-  return monthly.filter((d) =>
+  return monthlyAtCertainty().filter((d) =>
     (state.forestType === 'all' || d.forest_type === state.forestType) &&
     d.period >= state.from.slice(0, 7) && d.period <= state.to.slice(0, 7));
 }
@@ -818,7 +824,7 @@ function renderAlerts() {
   const el = document.getElementById('chart-alerts');
   const kinds = state.kind === 'all' ? KINDS : [state.kind];
   const sums = new Map();
-  const rows = monthly.filter((d) => state.forestType === 'all' || d.forest_type === state.forestType);
+  const rows = monthlyAtCertainty().filter((d) => state.forestType === 'all' || d.forest_type === state.forestType);
   for (const d of byResolution(rows)) {
     const o = sums.get(d.x) || { loss_ha: 0, gain_ha: 0 };
     o.loss_ha += d.loss_ha;
@@ -927,7 +933,7 @@ function renderSummary() {
   // Candidates, not confirmed change: the monthly totals count every certainty.
   const cards = (state.kind === 'all' ? KINDS : [state.kind]).map((k) => ({
     label: KIND_LABELS[k], value: `${fmt(total(k), 2)} ha`,
-    sub: 'unreviewed candidates first seen in the months selected, all certainties'
+    sub: 'unreviewed candidates first seen in the months selected'
   }));
   document.getElementById('summary-cards').innerHTML = cards.map((c) =>
     `<div class="summary-card"><div class="summary-card__label">${esc(c.label)}</div>` +

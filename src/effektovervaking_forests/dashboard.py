@@ -26,7 +26,9 @@ from . import alerts as alerts_mod
 AOIS = ("olivinskog", "kalklindeskog")
 KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
-SCHEMA = 6  # bump when a file's shape changes; the app refuses other versions
+# The app's Certainty choices (all, medium and high, high): monthly areas per choice.
+CONF_TIERS = (0.0, 0.34, 0.67)
+SCHEMA = 7  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -90,26 +92,25 @@ def pixels(events: pd.DataFrame) -> pd.DataFrame:
 
 
 def monthly(px: pd.DataFrame) -> list[dict]:
-    """New pixels per month by first break."""
+    """New area per month by first break, one value per CONF_TIERS (as the map)."""
     # To the latest break, so the range matches index.date_range.
     months = pd.period_range(px["first"].min(), px["last"].max(), freq="M")
+    month = px["first"].dt.to_period("M")
+    conf = px["conf"].fillna(0).round(2)  # as points() hands it to the map filter
     rows = []
     for aoi in AOIS:
         new = {}
         for kind in KINDS:
-            sel = px[(px["aoi"] == aoi) & (px["kind"] == kind)]
-            new[kind] = sel["first"].dt.to_period("M").value_counts()
+            sel = (px["aoi"] == aoi) & (px["kind"] == kind)
+            for t in CONF_TIERS:
+                new[kind, t] = month[sel & (conf >= t)].value_counts()
         for m in months:
-            loss = int(new["loss"].get(m, 0))
-            gain = int(new["gain"].get(m, 0))
-            rows.append(
-                {
-                    "period": str(m),
-                    "forest_type": aoi,
-                    "loss_ha": round(loss * PIXEL_HA, 2),
-                    "gain_ha": round(gain * PIXEL_HA, 2),
-                }
-            )
+            row = {"period": str(m), "forest_type": aoi}
+            for kind in KINDS:
+                row[f"{kind}_ha"] = [
+                    round(int(new[kind, t].get(m, 0)) * PIXEL_HA, 2) for t in CONF_TIERS
+                ]
+            rows.append(row)
     return rows
 
 
@@ -220,6 +221,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
         "pixels": {a: {k: int(counts.get((a, k), 0)) for k in KINDS} for a in AOIS},
         "date_range": [f"{px['first'].min():%Y-%m-%d}", f"{px['last'].max():%Y-%m-%d}"],
         "years": YEARS,
+        "conf_tiers": list(CONF_TIERS),
         "files": files,
     }
     _write(index, out_dir / "index.json")  # last: the app reads it first

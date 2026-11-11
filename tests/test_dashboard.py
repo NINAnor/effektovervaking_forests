@@ -120,11 +120,29 @@ def test_monthly_counts_new_area_by_first_break(baked) -> None:
     idx, out = baked
     m = _monthly(out)
     # Olivinskog: pixel 1 first breaks in Jan (its March event is not new area).
-    assert m["olivinskog", "2024-01"]["loss_ha"] == 0.01
-    assert m["olivinskog", "2024-02"]["loss_ha"] == 0.0
-    assert m["olivinskog", "2024-02"]["gain_ha"] == 0.01
-    assert m["olivinskog", "2024-03"]["loss_ha"] == 0.01
-    assert m["kalklindeskog", "2024-02"]["loss_ha"] == 0.02
+    # One area per certainty choice (all, medium and high, high): all score 0.9.
+    assert m["olivinskog", "2024-01"]["loss_ha"] == [0.01] * 3
+    assert m["olivinskog", "2024-02"]["loss_ha"] == [0.0] * 3
+    assert m["olivinskog", "2024-02"]["gain_ha"] == [0.01] * 3
+    assert m["olivinskog", "2024-03"]["loss_ha"] == [0.01] * 3
+    assert m["kalklindeskog", "2024-02"]["loss_ha"] == [0.02] * 3
+    assert idx["conf_tiers"] == list(dashboard.CONF_TIERS)
+
+
+def test_monthly_splits_area_by_certainty() -> None:
+    px = pd.DataFrame(
+        {
+            "aoi": "olivinskog",
+            "kind": "loss",
+            "first": pd.to_datetime(["2024-01-05"] * 4),
+            "last": pd.to_datetime(["2024-01-05"] * 4),
+            # 0.335 rounds to 0.34, as the map sees it; None is unscored.
+            "conf": [0.1, 0.335, 0.7, None],
+        }
+    )
+    (row,) = [r for r in dashboard.monthly(px) if r["forest_type"] == "olivinskog"]
+    assert row["loss_ha"] == [0.04, 0.02, 0.01]
+    assert row["gain_ha"] == [0.0, 0.0, 0.0]
 
 
 def test_index_lists_existing_files_and_columns_align(baked) -> None:
