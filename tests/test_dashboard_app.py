@@ -115,9 +115,9 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
         status = page.locator("#data-status")
         assert "error" not in (status.get_attribute("class") or "")
         assert "Data generated" in status.inner_text()
-        for chart in ("#chart-cover", "#chart-alerts"):
-            assert page.locator(f"{chart} svg").count() >= 1
-        assert page.locator("#summary-cards .summary-card").count() == 4
+        assert page.locator("#chart-alerts svg").count() >= 1
+        # One card per kind shown: loss only by default.
+        assert page.locator("#summary-cards .summary-card").count() == 1
 
         page.select_option("#filter-alert-type", "all")
         page.wait_for_function(
@@ -182,8 +182,7 @@ def test_missing_points_file_errors_but_charts_render(browser, site) -> None:
         ctx, page, _ = _open(browser, url)
         page.wait_for_selector("#data-status.error")
         assert "points" in page.locator("#data-status").inner_text().lower()
-        for chart in ("#chart-cover", "#chart-alerts"):
-            assert page.locator(f"{chart} svg").count() >= 1
+        assert page.locator("#chart-alerts svg").count() >= 1
         ctx.close()
     finally:
         path.write_bytes(saved)
@@ -260,7 +259,7 @@ def test_period_calendar_presets_and_chart_markers(browser, site) -> None:
         assert count() == "(4)"
 
         # The markers on the alert chart, by keyboard and by dragging.
-        page.select_option("#cover-resolution", "monthly")
+        page.select_option("#chart-group", "monthly")
         page.focus('.brush-handle[data-end="from"]')
         page.keyboard.press("ArrowRight")
         assert state("from") == "2024-03-01"
@@ -288,7 +287,7 @@ def test_layer_info_dialog(browser, site) -> None:
         dlg = page.locator("#info")
         assert dlg.is_visible()
         assert page.inner_text("#info-title") == "Tree-cover alerts (S-CCD)"
-        assert "Tree cover lost" in page.inner_text("#info-body .info-legend")
+        assert "Possible tree loss" in page.inner_text("#info-body .info-legend")
         assert "Sentinel-2" in page.inner_text("#info-body")
         page.click("#info-close")
         assert dlg.is_hidden()

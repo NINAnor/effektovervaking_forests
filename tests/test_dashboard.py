@@ -20,8 +20,7 @@ from effektovervaking_forests.cli import app
 
 runner = CliRunner()
 
-# Olivinskog: two 100 m squares = 2 ha. Kalklindeskog: one 200 m square = 4 ha.
-OLIVIN_HA, KALK_HA = 2.0, 4.0
+# Olivinskog: two 100 m squares. Kalklindeskog: one 200 m square.
 
 _OLIVIN = [  # pix_id, break_date, kind[, status, magnitude]
     (1, "2024-01-15", "loss"),
@@ -117,7 +116,7 @@ def test_pixel_with_two_losses_counts_once_and_maps_latest(baked) -> None:
     assert pts["mag"] == [0.2, 0.2]  # |magnitude| of the latest break
 
 
-def test_monthly_cover_is_baseline_minus_cumulative_loss(baked) -> None:
+def test_monthly_counts_new_area_by_first_break(baked) -> None:
     idx, out = baked
     m = _monthly(out)
     # Olivinskog: pixel 1 first breaks in Jan (its March event is not new area).
@@ -125,11 +124,7 @@ def test_monthly_cover_is_baseline_minus_cumulative_loss(baked) -> None:
     assert m["olivinskog", "2024-02"]["loss_ha"] == 0.0
     assert m["olivinskog", "2024-02"]["gain_ha"] == 0.01
     assert m["olivinskog", "2024-03"]["loss_ha"] == 0.01
-    assert m["olivinskog", "2024-03"]["cumulative_loss_ha"] == 0.02
-    assert m["olivinskog", "2024-03"]["area_ha"] == OLIVIN_HA - 0.02
-    assert m["kalklindeskog", "2024-01"]["area_ha"] == KALK_HA
-    assert m["kalklindeskog", "2024-03"]["cumulative_loss_ha"] == 0.02
-    assert m["kalklindeskog", "2024-03"]["area_ha"] == KALK_HA - 0.02
+    assert m["kalklindeskog", "2024-02"]["loss_ha"] == 0.02
 
 
 def test_index_lists_existing_files_and_columns_align(baked) -> None:

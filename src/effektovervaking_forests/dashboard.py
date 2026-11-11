@@ -89,8 +89,8 @@ def pixels(events: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index()
 
 
-def monthly(px: pd.DataFrame, baseline_ha: dict[str, float]) -> list[dict]:
-    """New pixels per month by first break, and the cover left after loss."""
+def monthly(px: pd.DataFrame) -> list[dict]:
+    """New pixels per month by first break."""
     # To the latest break, so the range matches index.date_range.
     months = pd.period_range(px["first"].min(), px["last"].max(), freq="M")
     rows = []
@@ -99,19 +99,15 @@ def monthly(px: pd.DataFrame, baseline_ha: dict[str, float]) -> list[dict]:
         for kind in KINDS:
             sel = px[(px["aoi"] == aoi) & (px["kind"] == kind)]
             new[kind] = sel["first"].dt.to_period("M").value_counts()
-        cum_loss = 0.0
         for m in months:
             loss = int(new["loss"].get(m, 0))
             gain = int(new["gain"].get(m, 0))
-            cum_loss += loss * PIXEL_HA
             rows.append(
                 {
                     "period": str(m),
                     "forest_type": aoi,
                     "loss_ha": round(loss * PIXEL_HA, 2),
                     "gain_ha": round(gain * PIXEL_HA, 2),
-                    "cumulative_loss_ha": round(cum_loss, 2),
-                    "area_ha": round(baseline_ha[aoi] - cum_loss, 2),
                 }
             )
     return rows
@@ -167,11 +163,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
     if polys.crs is None or not polys.crs.is_projected:
         raise ValueError("polygons_geo.parquet must be in a projected CRS")
     polys = polys.assign(area_ha=polys.geometry.area / 1e4)
-    # The mapping layers overlap: dissolve, as the pixel grid does.
-    baseline = {
-        t: g.geometry.union_all().area / 1e4 for t, g in polys.groupby("forest_type")
-    }
-    missing = [a for a in AOIS if a not in baseline]
+    missing = [a for a in AOIS if a not in set(polys["forest_type"])]
     if missing:
         raise ValueError(f"no polygons for {missing}")
 
@@ -213,7 +205,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
     # na="null": the app reads a missing score as "no score".
     feats = json.loads(web.to_json(drop_id=True, na="null"))
     files["polygons"] = _write(feats, out_dir / "polygons.geojson")
-    files["monthly"] = _write(monthly(px, baseline), out_dir / "monthly.json")
+    files["monthly"] = _write(monthly(px), out_dir / "monthly.json")
 
     counts = px.groupby(["aoi", "kind"]).size()
     index = {

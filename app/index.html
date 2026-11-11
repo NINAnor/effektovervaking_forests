@@ -11,7 +11,7 @@
                script-src 'self' https://unpkg.com;
                worker-src blob:; child-src blob:">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Forest Monitor · loss and gain alerts</title>
+<title>Forest Monitor · possible tree loss and regrowth</title>
 <link rel="preconnect" href="https://tile.openstreetmap.org" crossorigin>
 <link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
 <script src="vendor/maplibre-gl.js"></script>
@@ -25,7 +25,7 @@
   <header class="topbar">
     <div class="topbar__title">
       <h1>Forest Monitor</h1>
-      <p>Loss and gain alerts &amp; forest cover &mdash; olivinskog &amp; kalklindeskog</p>
+      <p>Possible tree loss and regrowth in olivinskog &amp; kalklindeskog stands</p>
     </div>
     <div class="topbar__right">
       <div class="topbar__status" id="data-status" role="status">Loading data&hellip;</div>
@@ -94,8 +94,8 @@
               <button type="button" class="info-btn" data-info="alerts" aria-label="About tree-cover alerts">i</button>
             </div>
             <ul class="key">
-              <li><i class="sw sw--dot sw--loss"></i> Tree cover lost</li>
-              <li><i class="sw sw--dot sw--gain"></i> Tree cover regrowing</li>
+              <li><i class="sw sw--dot sw--loss"></i> Possible tree loss</li>
+              <li><i class="sw sw--dot sw--gain"></i> Possible regrowth</li>
               <li><i class="sw sw--dot sw--new"></i> New: latest 30 days</li>
               <li><span class="sizes"><i></i><i></i><i></i></span> Bigger dot: bigger change</li>
             </ul>
@@ -190,20 +190,18 @@
 
     <section class="panel panel--charts">
       <div class="panel__header">
-        <h2>Forest cover over time</h2>
+        <h2>Alert area over time</h2>
         <div class="controls">
-          <label>Resolution
-            <select id="cover-resolution">
-              <option value="annual" selected>Annual</option>
-              <option value="monthly">Monthly</option>
+          <label>Group by
+            <select id="chart-group">
+              <option value="annual" selected>Year</option>
+              <option value="monthly">Month</option>
             </select>
           </label>
         </div>
       </div>
-      <div id="chart-cover" class="chart"></div>
-
-      <div class="panel__header"><h2>Alert area over time</h2>
-        <span class="hint">Drag the two markers to choose the period shown.</span></div>
+      <p class="hint">Drag the two markers to choose the period shown. Bars count
+        candidates of every certainty, by the month they were first seen.</p>
       <div id="chart-alerts" class="chart"></div>
 
       <div class="panel__header"><h2>Summary</h2></div>

@@ -8,7 +8,7 @@ const SCHEMA = 6; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 // Bright, with a white ring on the map, so the alerts stand out on imagery.
 const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
-const KIND_LABELS = { loss: 'Tree cover lost', gain: 'Tree cover regrowing' };
+const KIND_LABELS = { loss: 'Possible tree loss', gain: 'Possible regrowth' };
 const NEW_COLOR = '#ffd60a'; // ring of alerts from the last NEW_DAYS
 const NEW_DAYS = 30;
 const KINDS = ['loss', 'gain'];
@@ -739,7 +739,7 @@ function filteredMonthly() {
     d.period >= state.from.slice(0, 7) && d.period <= state.to.slice(0, 7));
 }
 
-/** Months -> years when annual: cover is the December (or last) value, areas are summed. */
+/** Months -> years when grouped by year: areas are summed. */
 function byResolution(rows) {
   if (state.resolution === 'monthly') return rows.map((d) => ({ ...d, x: d.period }));
   const out = new Map();
@@ -748,7 +748,6 @@ function byResolution(rows) {
     const o = out.get(key) || { forest_type: d.forest_type, x: d.period.slice(0, 4), loss_ha: 0, gain_ha: 0 };
     o.loss_ha += d.loss_ha;
     o.gain_ha += d.gain_ha;
-    o.area_ha = d.area_ha; // rows are in month order, so this ends on the last month
     out.set(key, o);
   }
   return [...out.values()];
@@ -782,24 +781,6 @@ function chartFrame(el, xs, yMax, yLabel) {
 function legend(items) {
   return '<div class="chart-legend">' +
     items.map(([name, c]) => `<span><i style="background:${c}"></i>${esc(name)}</span>`).join('') + '</div>';
-}
-
-function renderCover() {
-  const el = document.getElementById('chart-cover');
-  const rows = byResolution(filteredMonthly());
-  const xs = [...new Set(rows.map((d) => d.x))].sort();
-  if (!xs.length) { el.innerHTML = '<p class="muted">No data in range.</p>'; return; }
-  const types = [...new Set(rows.map((d) => d.forest_type))];
-  const f = chartFrame(el, xs, Math.max(...rows.map((d) => d.area_ha)), 'area (ha)');
-  let g = f.g;
-  for (const t of types) {
-    const pts = rows.filter((d) => d.forest_type === t).map((d) => [f.x(xs.indexOf(d.x)), f.y(d.area_ha)]);
-    g += `<polyline fill="none" stroke="${FOREST_COLORS[t]}" stroke-width="2" points="${pts.join(' ')}"/>`;
-    // Dots too, so a one-point range still shows something.
-    if (pts.length <= 24) g += pts.map(([px, py]) => `<circle cx="${px}" cy="${py}" r="2.5" fill="${FOREST_COLORS[t]}"/>`).join('');
-  }
-  el.innerHTML = legend(types.map((t) => [t, FOREST_COLORS[t]])) +
-    `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Forest cover over time">${g}</svg>`;
 }
 
 /** The alert chart shows the whole record; the selected period sits between two markers. */
@@ -912,18 +893,12 @@ function setupBrush(svg, xs, f) {
 
 function renderSummary() {
   const rows = filteredMonthly();
-  const total = (k) => rows.reduce((s, d) => s + d[k], 0);
-  const latest = {};
-  for (const d of rows) latest[d.forest_type] = d;
-  const cover = (t) => latest[t]
-    ? { value: `${fmt(latest[t].area_ha, 1)} ha`, sub: `as of ${latest[t].period}` }
-    : { value: '—', sub: '' };
-  const cards = [
-    { label: 'Tree cover lost', value: `${fmt(total('loss_ha'), 2)} ha`, sub: 'first seen in the months selected, any certainty' },
-    { label: 'Tree cover regrowing', value: `${fmt(total('gain_ha'), 2)} ha`, sub: 'first seen in the months selected, any certainty' },
-    { label: 'Olivinskog cover', ...cover('olivinskog') },
-    { label: 'Kalklindeskog cover', ...cover('kalklindeskog') }
-  ];
+  const total = (k) => rows.reduce((s, d) => s + d[`${k}_ha`], 0);
+  // Candidates, not confirmed change: the monthly totals count every certainty.
+  const cards = (state.kind === 'all' ? KINDS : [state.kind]).map((k) => ({
+    label: KIND_LABELS[k], value: `${fmt(total(k), 2)} ha`,
+    sub: 'unreviewed candidates first seen in the months selected, all certainties'
+  }));
   document.getElementById('summary-cards').innerHTML = cards.map((c) =>
     `<div class="summary-card"><div class="summary-card__label">${esc(c.label)}</div>` +
     `<div class="summary-card__value">${esc(c.value)}</div><div class="summary-card__sub">${esc(c.sub)}</div></div>`).join('');
@@ -998,7 +973,7 @@ function setupStatus() {
   document.getElementById('footer-note').textContent =
     `${index.polygon_count} mapped stands · ${n('loss').toLocaleString()} tree-loss and ` +
     `${n('gain').toLocaleString()} regrowth alerts (10 m squares) · ${fmtDate(ymd(index.date_range[0]))} to ` +
-    `${fmtDate(ymd(index.date_range[1]))}. Cover is the mapped area minus the lost area; regrowth is not added back.`;
+    `${fmtDate(ymd(index.date_range[1]))}. Alerts are candidates for review, not confirmed change.`;
 }
 
 /** Write the period into the date fields; `preset` is the quick range to mark, null for a custom one. */
@@ -1030,8 +1005,8 @@ function setupPeriod() {
     el.addEventListener('change', (e) => {
       const v = /** @type {HTMLInputElement} */ (e.target).value;
       preset(v);
-      // A year or less is one or two bars by year: show months instead.
-      if (v !== 'all') /** @type {HTMLSelectElement} */ (document.getElementById('cover-resolution')).value = state.resolution = 'monthly';
+      // A year or less is one or two bars by year: show months; the whole record by year.
+      /** @type {HTMLSelectElement} */ (document.getElementById('chart-group')).value = state.resolution = v === 'all' ? 'annual' : 'monthly';
       refresh();
     });
   }
@@ -1089,7 +1064,7 @@ function setupControls() {
   bind('filter-forest-type', 'forestType');
   bind('filter-alert-type', 'kind');
   bind('filter-confidence', 'minConf', Number);
-  bind('cover-resolution', 'resolution');
+  bind('chart-group', 'resolution');
   bind('stand-color', 'standColor');
   document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
     `<label class="seg__opt"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}>` +
@@ -1110,7 +1085,7 @@ function setupControls() {
   state.forestType = val('filter-forest-type').value;
   state.kind = val('filter-alert-type').value;
   state.minConf = Number(val('filter-confidence').value);
-  state.resolution = val('cover-resolution').value;
+  state.resolution = val('chart-group').value;
   state.standColor = val('stand-color').value;
   state.alerts = val('toggle-alerts').checked;
   state.stands = val('toggle-stands').checked;
@@ -1154,7 +1129,6 @@ function setupControls() {
 }
 
 function renderCharts() {
-  renderCover();
   renderAlerts();
   renderSummary();
 }

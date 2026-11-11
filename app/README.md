@@ -1,6 +1,6 @@
 # Forest Monitor dashboard
 
-A static page showing S-CCD loss and gain alerts and forest cover for
+A static page showing S-CCD candidates of tree loss and regrowth for
 **olivinskog** and **kalklindeskog**: a MapLibre map, an SVG chart of alert area over time and a
 summary.
 
@@ -38,11 +38,10 @@ the same layout. `index.json` is written last and lists the other files:
 | --- | --- |
 | `index.json` | schema version, generation time, counts, period, file names |
 | `polygons.geojson` | the 737 mapped stands (EPSG:4326, lightly simplified), with their 2025 condition class (local and global), score, trajectory, field condition and survey year from `condition/parquet/condition_stands.parquet` |
-| `monthly.json` | per forest type and month: new loss/gain area, cumulative loss, cover |
+| `monthly.json` | per forest type and month: new loss/gain area |
 | `points_<aoi>_<kind>.json` | one point per 10 m pixel, columnar: lon, lat, latest break date (YYYYMMDD), certainty, event count, |magnitude| of the latest break (dot size) |
 
 Each pixel counts once: area by its first break, map date by its latest.
-Cover is the polygons' area minus cumulative loss; gain is not added back.
 The app refuses an `index.json` whose `schema` differs from `SCHEMA` in
 `js/app.js`; bump both (and `dashboard.SCHEMA`) when a file's shape changes.
 
