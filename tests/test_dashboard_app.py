@@ -114,7 +114,8 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
     try:
         status = page.locator("#data-status")
         assert "error" not in (status.get_attribute("class") or "")
-        assert "Data generated" in status.inner_text()
+        assert "Alerts up to" in status.inner_text()
+        assert "Data generated" in (status.get_attribute("title") or "")
         assert page.locator("#chart-alerts svg").count() >= 1
         # One card per kind shown: loss only by default.
         assert page.locator("#summary-cards .summary-card").count() == 1

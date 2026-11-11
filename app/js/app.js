@@ -1012,7 +1012,8 @@ function showError(msg) {
 
 function showStatus() {
   const el = document.getElementById('data-status');
-  el.textContent = `Data generated ${new Date(index.generated_at).toLocaleString()}`;
+  el.textContent = `Alerts up to ${fmtDate(ymd(index.date_range[1]))}`;
+  el.title = `Data generated ${new Date(index.generated_at).toLocaleString()}`;
   el.classList.remove('error');
 }
 
