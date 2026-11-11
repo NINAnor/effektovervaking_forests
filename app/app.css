@@ -221,6 +221,7 @@ label.switch input::after {
   transition: transform .16s ease, background .16s ease;
 }
 label.switch input:checked { background: var(--ink); }
+label.switch:has(input:disabled) { cursor: default; opacity: .55; }
 label.switch input:checked::after {
   background: var(--surface); transform: translateX(14px);
 }

@@ -202,7 +202,7 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
             page.evaluate("() => map.getLayoutProperty('base-satellite', 'visibility')")
             == "visible"
         )
-        assert "may have expired" in page.inner_text("#radd-note")
+        assert "may be out of date" in page.inner_text("#radd-note")
         page.check("#toggle-radd")
         page.wait_for_function(
             "() => map.getLayer('radd')"

@@ -466,12 +466,14 @@ function describeRadd() {
   const note = document.getElementById('radd-note');
   document.getElementById('radd-modes').hidden = !raddTiles || raddTiles.pasted;
   for (const el of document.querySelectorAll('#radd-section .key, #radd-section label.opacity')) el.hidden = !raddTiles;
-  if (!raddTiles) { note.textContent = 'No radar layer yet: paste a map link below.'; return; }
+  // No layer: nothing to switch on, only the advanced link form.
+  document.querySelector('#radd-section .switch input').disabled = !raddTiles;
+  if (!raddTiles) { note.textContent = 'Not available yet.'; return; }
   const days = (Date.now() - raddTiles.minted_at) / 864e5;
   note.textContent = raddTiles.pasted
     ? `Your pasted map link, added ${fmt(days * 24, 0)} h ago. Links expire; paste a new one if the layer goes blank.`
     : `Image ${raddTiles.image_id} (v${raddTiles.version_date}), tiles made ${fmt(days, 0)} d ago` +
-      (days > 3 ? ' — they may have expired; re-run forestmon publish radd.' : '.');
+      (days > 3 ? ' — the layer may be out of date.' : '.');
 }
 
 function setupRaddLink() {
