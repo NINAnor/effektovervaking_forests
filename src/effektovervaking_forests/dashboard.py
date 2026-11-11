@@ -26,7 +26,7 @@ from . import alerts as alerts_mod
 AOIS = ("olivinskog", "kalklindeskog")
 KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
-SCHEMA = 3  # bump when a file's shape changes; the app refuses other versions
+SCHEMA = 4  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -117,11 +117,11 @@ def monthly(px: pd.DataFrame, baseline_ha: dict[str, float]) -> list[dict]:
 
 
 def points(px: pd.DataFrame) -> dict:
-    """Columnar, rounded: ~1 m at 5 decimals, and month as an index."""
+    """Columnar, rounded: ~1 m at 5 decimals; the latest break as YYYYMMDD."""
     return {
         "lon": px["lon"].round(5).tolist(),
         "lat": px["lat"].round(5).tolist(),
-        "month": _month(px["last"]).tolist(),
+        "date": px["last"].dt.strftime("%Y%m%d").astype(int).tolist(),
         "conf": px["conf"].fillna(0).round(2).tolist(),  # unscored -> 0
         "n": px["n_events"].tolist(),
     }
@@ -226,6 +226,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
         "baseline_ha": {a: round(baseline[a], 2) for a in AOIS},
         "pixels": {a: {k: int(counts.get((a, k), 0)) for k in KINDS} for a in AOIS},
         "period_range": [_month(px["first"]).min(), _month(px["last"]).max()],
+        "date_range": [f"{px['first'].min():%Y-%m-%d}", f"{px['last'].max():%Y-%m-%d}"],
         "years": YEARS,
         "files": files,
     }

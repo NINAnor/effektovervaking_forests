@@ -109,12 +109,11 @@ def test_pixel_with_two_losses_counts_once_and_maps_latest(baked) -> None:
     idx, out = baked
     assert idx["pixels"]["olivinskog"] == {"loss": 2, "gain": 1}
     assert idx["pixels"]["kalklindeskog"] == {"loss": 2, "gain": 0}
+    assert idx["date_range"] == ["2024-01-15", "2024-03-10"]
     pts = json.loads((out / "points_olivinskog_loss.json").read_text())
-    by_lon = dict(
-        zip(pts["lon"], zip(pts["month"], pts["n"], strict=True), strict=True)
-    )
-    assert by_lon[15.0001] == ("2024-03", 2)  # latest month, both events
-    assert by_lon[15.0002] == ("2024-03", 1)
+    by_lon = dict(zip(pts["lon"], zip(pts["date"], pts["n"], strict=True), strict=True))
+    assert by_lon[15.0001] == (20240310, 2)  # latest break, both events
+    assert by_lon[15.0002] == (20240305, 1)
 
 
 def test_monthly_cover_is_baseline_minus_cumulative_loss(baked) -> None:

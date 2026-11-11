@@ -39,7 +39,7 @@ the same layout. `index.json` is written last and lists the other files:
 | `index.json` | schema version, generation time, counts, period, file names |
 | `polygons.geojson` | the 737 mapped stands (EPSG:4326, lightly simplified), with their 2025 condition class (local and global), score, trajectory, field condition and survey year from `condition/parquet/condition_stands.parquet` |
 | `monthly.json` | per forest type and month: new loss/gain area, cumulative loss, cover |
-| `points_<aoi>_<kind>.json` | one point per 10 m pixel, columnar: lon, lat, latest break month, confidence, event count |
+| `points_<aoi>_<kind>.json` | one point per 10 m pixel, columnar: lon, lat, latest break date (YYYYMMDD), certainty, event count |
 
 Each pixel counts once: area by its first break, map date by its latest.
 Cover is the polygons' area minus cumulative loss; gain is not added back.
