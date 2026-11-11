@@ -26,7 +26,7 @@ from . import alerts as alerts_mod
 AOIS = ("olivinskog", "kalklindeskog")
 KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
-SCHEMA = 4  # bump when a file's shape changes; the app refuses other versions
+SCHEMA = 5  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -83,6 +83,7 @@ def pixels(events: pd.DataFrame) -> pd.DataFrame:
         first=("break_date", "first"),
         last=("break_date", "last"),
         conf=("conf_score", "last"),
+        mag=("magnitude", "last"),
         n_events=("break_date", "size"),
     )
     return out.reset_index()
@@ -123,6 +124,8 @@ def points(px: pd.DataFrame) -> dict:
         "lat": px["lat"].round(5).tolist(),
         "date": px["last"].dt.strftime("%Y%m%d").astype(int).tolist(),
         "conf": px["conf"].fillna(0).round(2).tolist(),  # unscored -> 0
+        # Size of the latest break (|dB08 - dB12|), for the dot size.
+        "mag": px["mag"].abs().fillna(0).round(3).tolist(),
         "n": px["n_events"].tolist(),
     }
 

@@ -114,6 +114,7 @@ def test_pixel_with_two_losses_counts_once_and_maps_latest(baked) -> None:
     by_lon = dict(zip(pts["lon"], zip(pts["date"], pts["n"], strict=True), strict=True))
     assert by_lon[15.0001] == (20240310, 2)  # latest break, both events
     assert by_lon[15.0002] == (20240305, 1)
+    assert pts["mag"] == [0.2, 0.2]  # |magnitude| of the latest break
 
 
 def test_monthly_cover_is_baseline_minus_cumulative_loss(baked) -> None:
