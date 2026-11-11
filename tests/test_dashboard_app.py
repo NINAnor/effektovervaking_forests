@@ -230,3 +230,63 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
         assert not errors
     finally:
         ctx.close()
+
+
+def test_period_calendar_presets_and_chart_markers(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        state = lambda k: page.evaluate(f"() => state.{k}")  # noqa: E731
+        count = lambda: page.inner_text("#alert-count")  # noqa: E731
+        page.wait_for_function("() => pointCols.size === 2")
+        assert (state("from"), state("to")) == ("2024-01-15", "2024-03-10")
+        assert count() == "(4)"  # two loss pixels per forest type
+
+        page.fill("#filter-date-from", "2024-03-01")
+        page.dispatch_event("#filter-date-from", "change")
+        assert count() == "(2)"
+        assert not page.is_checked('input[name="period"][value="all"]')
+        page.locator('.seg__opt:has(input[name="period"][value="30"])').click()
+        assert state("from") == "2024-02-10"  # 30 days back from the newest alert
+        assert count() == "(4)"
+
+        # The markers on the alert chart, by keyboard and by dragging.
+        page.select_option("#cover-resolution", "monthly")
+        page.focus('.brush-handle[data-end="from"]')
+        page.keyboard.press("ArrowRight")
+        assert state("from") == "2024-03-01"
+        assert page.evaluate("() => document.activeElement.dataset.end") == "from"
+        grip = page.locator('.brush-handle[data-end="to"] .grip').bounding_box()
+        page.mouse.move(grip["x"] + 5, grip["y"] + 12)
+        page.mouse.down()
+        page.mouse.move(grip["x"] - 400, grip["y"] + 12, steps=5)
+        page.mouse.up()
+        assert state("to") == "2024-03-10"  # held one month after the start
+        page.focus('.brush-handle[data-end="from"]')
+        page.keyboard.press("ArrowLeft")
+        page.keyboard.press("ArrowLeft")
+        assert state("from") == "2024-01-15"  # clamped to the first alert
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_layer_info_dialog(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        page.click('[data-info="alerts"]')
+        dlg = page.locator("#info")
+        assert dlg.is_visible()
+        assert page.inner_text("#info-title") == "Tree-cover alerts"
+        assert "Tree cover lost" in page.inner_text("#info-body .info-legend")
+        assert "Sentinel-2" in page.inner_text("#info-body")
+        page.click("#info-close")
+        assert dlg.is_hidden()
+        page.click('[data-info="guide"]')
+        assert "early warnings" in page.inner_text("#info-body")
+        page.keyboard.press("Escape")
+        assert dlg.is_hidden()
+        assert not errors
+    finally:
+        ctx.close()

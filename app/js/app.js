@@ -4,9 +4,13 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 3; // must match dashboard.SCHEMA in Python
+const SCHEMA = 4; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
-const KIND_COLORS = { loss: '#e06666', gain: '#4dd0a7' };
+// Bright, with a white ring on the map, so the alerts stand out on imagery.
+const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
+const KIND_LABELS = { loss: 'Tree cover lost', gain: 'Tree cover regrowing' };
+const NEW_COLOR = '#ffd60a'; // ring of alerts from the last NEW_DAYS
+const NEW_DAYS = 30;
 const KINDS = ['loss', 'gain'];
 const BASEMAPS = CFG.basemaps || {
   osm: {
@@ -31,7 +35,7 @@ const state = {
   forestType: 'all',
   kind: 'loss',
   minConf: 0,
-  from: '',
+  from: '', // ISO dates, inclusive
   to: '',
   resolution: 'annual',
   basemap: Object.keys(BASEMAPS)[0], // the first configured is the default
@@ -48,6 +52,8 @@ const state = {
 /** @type {any} */ let map;
 /** Point layers, keyed `${aoi}|${kind}`, as promises so a key loads once. */
 const pointLayers = new Map();
+/** The loaded columns per point layer, for counting what the filters keep. */
+const pointCols = new Map();
 
 // ── data ─────────────────────────────────────────────────────────────────────
 async function fetchJson(name) {
@@ -72,7 +78,7 @@ async function loadIndex() {
 /** Columnar points -> GeoJSON, once per file. */
 function pointsToGeojson(cols, aoi, kind) {
   const n = cols.lon.length;
-  for (const k of ['lat', 'month', 'conf', 'n']) {
+  for (const k of ['lat', 'date', 'conf', 'n']) {
     if (!cols[k] || cols[k].length !== n) throw new Error(`points ${aoi}/${kind}: column ${k} has the wrong length`);
   }
   const features = new Array(n);
@@ -81,7 +87,7 @@ function pointsToGeojson(cols, aoi, kind) {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [cols.lon[i], cols.lat[i]] },
       // lon/lat kept exact: rendered geometry is snapped to the tile grid.
-      properties: { aoi, kind, lon: cols.lon[i], lat: cols.lat[i], month: cols.month[i], conf: cols.conf[i], n: cols.n[i] }
+      properties: { aoi, kind, lon: cols.lon[i], lat: cols.lat[i], date: cols.date[i], conf: cols.conf[i], n: cols.n[i] }
     };
   }
   return { type: 'FeatureCollection', features };
@@ -202,8 +208,8 @@ function score(v) {
 // One popup for the whole map: the topmost kind of feature under the cursor wins.
 const POPUPS = [
   [(id) => pointLayers.has(id), (p) =>
-    `<strong>${esc(p.kind)}</strong> &mdash; ${esc(p.aoi)}<br>latest break ${esc(p.month)}<br>` +
-    `confidence ${fmt(p.conf, 2)}, ${p.n} event${p.n === 1 ? '' : 's'}`],
+    `<strong>${esc(KIND_LABELS[p.kind])}</strong> &mdash; ${esc(p.aoi)}<br>detected ${fmtDate(p.date)}<br>` +
+    `certainty ${certainty(p.conf)} &middot; click for details`],
   [(id) => id === 'cells', (p) =>
     `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
     `(threshold ${fmt(p.threshold_global, 3)})<br>` +
@@ -241,6 +247,7 @@ function ensurePoints(aoi, kind) {
   if (!pointLayers.has(key)) {
     const file = index.files.points[aoi][kind];
     pointLayers.set(key, fetchJson(file).then((cols) => {
+      pointCols.set(key, cols);
       map.addSource(key, { type: 'geojson', data: pointsToGeojson(cols, aoi, kind) });
       map.addLayer({
         id: key,
@@ -248,8 +255,10 @@ function ensurePoints(aoi, kind) {
         source: key,
         paint: {
           'circle-color': KIND_COLORS[kind],
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 12, 3, 16, 6],
-          'circle-opacity': 0.8
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 2.5, 12, 4, 16, 7],
+          'circle-stroke-color': ['case', isNew(), NEW_COLOR, '#ffffff'],
+          'circle-stroke-width': ['case', isNew(), 2.5, 1],
+          'circle-opacity': 0.95
         }
       });
       applyMapState(); // filter and show it per the state now, not on the next refresh
@@ -366,7 +375,9 @@ function trend(series) {
 function timeseriesLink([lon, lat]) {
   if (!CFG.timeseriesUrl) return '';
   const url = CFG.timeseriesUrl.replace('{lon}', lon.toFixed(5)).replace('{lat}', lat.toFixed(5));
-  return `<a class="ext-link" href="${esc(url)}" target="_blank" rel="noopener">Sentinel-2 NBR time series &#8599;</a>`;
+  return `<a class="ext-link" href="${esc(url)}" target="_blank" rel="noopener">See this spot's satellite image history &#8599;</a>` +
+    '<p class="hint">Opens a Sentinel-2 viewer in a new tab; the chart takes a moment to load. ' +
+    'A drop in the line is when the forest changed.</p>';
 }
 
 function chip(text, color) {
@@ -408,9 +419,10 @@ function showDetail(e) {
   let html = '';
   for (const f of sccd.slice(0, 3)) {
     const p = f.properties;
-    html += `<section><h4>S-CCD ${esc(p.kind)} pixel</h4><div class="chips">${chip(p.kind, KIND_COLORS[p.kind])}</div>` +
-      `<dl><dt>Latest break</dt><dd>${esc(p.month)}</dd><dt>Confidence</dt><dd>${fmt(p.conf, 2)}</dd>` +
-      `<dt>Events</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
+    html += `<section><h4>Tree-cover alert (Sentinel-2)</h4><div class="chips">${chip(KIND_LABELS[p.kind], KIND_COLORS[p.kind])}` +
+      `${p.date >= newCutoff() ? chip('new', NEW_COLOR) : ''}</div>` +
+      `<dl><dt>Detected</dt><dd>${fmtDate(p.date)}</dd><dt>Certainty</dt><dd>${certainty(p.conf)}</dd>` +
+      `<dt>Changes at this spot</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
   }
   if (cell) html += cellSection(cell.properties);
   if (stand) html += standSection(standById.get(stand.properties.poly_id) || stand.properties);
@@ -486,17 +498,23 @@ function applyMapState() {
     '<li><i class="sw sw--outline"></i> declining (outline)</li>';
   const n = state.forestType === 'all' ? index.polygon_count
     : index.polygon_counts?.[state.forestType] ?? index.polygon_count;
-  document.getElementById('stand-count').textContent = String(n);
+  document.getElementById('stand-count').textContent = `(${n})`;
   const wanted = new Set(wantedLayers().map(({ aoi, kind }) => `${aoi}|${kind}`));
+  const [from, to] = [ymd(state.from), ymd(state.to)];
   const filter = ['all',
-    ['>=', ['get', 'month'], state.from],
-    ['<=', ['get', 'month'], state.to],
+    ['>=', ['get', 'date'], from],
+    ['<=', ['get', 'date'], to],
     ['>=', ['get', 'conf'], state.minConf]];
+  let shown = 0;
   for (const key of pointLayers.keys()) {
     if (!map.getLayer(key)) continue;
-    map.setLayoutProperty(key, 'visibility', state.alerts && wanted.has(key) ? 'visible' : 'none');
+    const on = state.alerts && wanted.has(key);
+    map.setLayoutProperty(key, 'visibility', on ? 'visible' : 'none');
     map.setFilter(key, filter);
+    const c = pointCols.get(key);
+    if (on && c) for (let i = 0; i < c.date.length; i++) shown += +(c.date[i] >= from && c.date[i] <= to && c.conf[i] >= state.minConf);
   }
+  document.getElementById('alert-count').textContent = `(${shown.toLocaleString()})`;
   applyRadd();
 }
 
@@ -518,7 +536,7 @@ async function refreshMap() {
 function filteredMonthly() {
   return monthly.filter((d) =>
     (state.forestType === 'all' || d.forest_type === state.forestType) &&
-    d.period >= state.from && d.period <= state.to);
+    d.period >= state.from.slice(0, 7) && d.period <= state.to.slice(0, 7));
 }
 
 /** Months -> years when annual: cover is the December (or last) value, areas are summed. */
@@ -558,7 +576,7 @@ function chartFrame(el, xs, yMax, yLabel) {
     if ((xs.length - 1 - i) % step === 0) g += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(t)}</text>`;
   });
   g += `<text x="12" y="${m.t + 4}" transform="rotate(-90 12 ${m.t + 4})" text-anchor="end">${esc(yLabel)}</text>`;
-  return { W, H, x, y, g, band };
+  return { W, H, x, y, g, band, m };
 }
 
 function legend(items) {
@@ -584,18 +602,20 @@ function renderCover() {
     `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Forest cover over time">${g}</svg>`;
 }
 
+/** The alert chart shows the whole record; the selected period sits between two markers. */
 function renderAlerts() {
   const el = document.getElementById('chart-alerts');
   const kinds = state.kind === 'all' ? KINDS : [state.kind];
   const sums = new Map();
-  for (const d of byResolution(filteredMonthly())) {
+  const rows = monthly.filter((d) => state.forestType === 'all' || d.forest_type === state.forestType);
+  for (const d of byResolution(rows)) {
     const o = sums.get(d.x) || { loss_ha: 0, gain_ha: 0 };
     o.loss_ha += d.loss_ha;
     o.gain_ha += d.gain_ha;
     sums.set(d.x, o);
   }
   const xs = [...sums.keys()].sort();
-  if (!xs.length) { el.innerHTML = '<p class="muted">No data in range.</p>'; return; }
+  if (!xs.length) { el.innerHTML = '<p class="muted">No data.</p>'; return; }
   const yMax = Math.max(...xs.map((t) => kinds.reduce((s, k) => s + sums.get(t)[`${k}_ha`], 0))) || 1;
   const f = chartFrame(el, xs, yMax, 'new alert area (ha)');
   const bw = Math.max(1, f.band * 0.8);
@@ -606,13 +626,85 @@ function renderAlerts() {
       const v = sums.get(t)[`${k}_ha`];
       if (v > 0) {
         g += `<rect x="${f.x(i) - bw / 2}" y="${f.y(base + v)}" width="${bw}" height="${f.y(base) - f.y(base + v)}" ` +
-          `fill="${KIND_COLORS[k]}"><title>${esc(t)} ${k}: ${fmt(v, 2)} ha</title></rect>`;
+          `fill="${KIND_COLORS[k]}"><title>${esc(t)} ${esc(KIND_LABELS[k])}: ${fmt(v, 2)} ha</title></rect>`;
       }
       base += v;
     }
   });
-  el.innerHTML = legend(kinds.map((k) => [k, KIND_COLORS[k]])) +
+  const top = f.m.t, bottom = f.H - f.m.b;
+  g += `<rect class="brush-out" data-side="left" y="${top}" height="${bottom - top}"/>` +
+    `<rect class="brush-out" data-side="right" y="${top}" height="${bottom - top}"/>`;
+  for (const [end, label] of [['from', 'Start of the period'], ['to', 'End of the period']]) {
+    g += `<g class="brush-handle" data-end="${end}" tabindex="0" role="slider" aria-label="${label}">` +
+      `<rect class="hit" x="-10" y="${top}" width="20" height="${bottom - top}"/>` +
+      `<line y1="${top}" y2="${bottom}"/><rect class="grip" x="-5" y="${(top + bottom) / 2 - 12}" width="10" height="24" rx="5"/></g>`;
+  }
+  el.innerHTML = legend(kinds.map((k) => [KIND_LABELS[k], KIND_COLORS[k]])) +
     `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Alert area over time">${g}</svg>`;
+  setupBrush(el.querySelector('svg'), xs, f);
+}
+
+/** Which bar a date falls in: the first at or after it (start) or the last at or before it (end). */
+function periodIndex(xs, iso, end) {
+  const key = iso.slice(0, state.resolution === 'monthly' ? 7 : 4);
+  const i = end === 'from' ? xs.findIndex((x) => x >= key) : xs.findLastIndex((x) => x <= key);
+  return i < 0 ? (end === 'from' ? xs.length - 1 : 0) : i;
+}
+
+let brushFocus = null; // the marker to refocus after a keyboard step re-renders the chart
+
+function setupBrush(svg, xs, f) {
+  const n = xs.length;
+  const edge = (k) => f.m.l + k * f.band; // the boundary before bar k
+  const span = () => [periodIndex(xs, state.from, 'from'), periodIndex(xs, state.to, 'to') + 1];
+  const draw = () => {
+    const [a, b] = span();
+    const left = svg.querySelector('[data-side="left"]'), right = svg.querySelector('[data-side="right"]');
+    left.setAttribute('x', String(edge(0)));
+    left.setAttribute('width', String(Math.max(0, edge(a) - edge(0))));
+    right.setAttribute('x', String(edge(b)));
+    right.setAttribute('width', String(Math.max(0, edge(n) - edge(b))));
+    for (const h of svg.querySelectorAll('.brush-handle')) {
+      const from = h.dataset.end === 'from';
+      h.setAttribute('transform', `translate(${edge(from ? a : b)},0)`);
+      h.setAttribute('aria-valuetext', fmtDate(ymd(from ? state.from : state.to)));
+    }
+  };
+  const [lo, hi] = index.date_range;
+  const clampDate = (iso) => (iso < lo ? lo : iso > hi ? hi : iso);
+  const start = (x) => (x.length === 4 ? `${x}-01-01` : `${x}-01`);
+  const finish = (x) => (x.length === 4 ? `${x}-12-31` : addDays(`${x.slice(0, 4)}-${String(+x.slice(5) % 12 + 1).padStart(2, '0')}-01`, -1));
+  for (const h of svg.querySelectorAll('.brush-handle')) {
+    const end = h.dataset.end;
+    const set = (k) => {
+      const [a, b] = span();
+      if (end === 'from') state.from = clampDate(start(xs[Math.min(Math.max(k, 0), b - 1)]));
+      else state.to = clampDate(finish(xs[Math.max(Math.min(k, n), a + 1) - 1]));
+      setPeriodControls(null);
+      draw();
+    };
+    h.addEventListener('pointerdown', (e) => { h.setPointerCapture(e.pointerId); h.classList.add('dragging'); });
+    h.addEventListener('pointermove', (e) => {
+      if (!h.hasPointerCapture(e.pointerId)) return;
+      const r = svg.getBoundingClientRect();
+      set(Math.round(((e.clientX - r.left) * (f.W / r.width) - f.m.l) / f.band));
+    });
+    h.addEventListener('lostpointercapture', () => refresh());
+    h.addEventListener('keydown', (e) => {
+      const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      const [a, b] = span();
+      set((end === 'from' ? a : b) + step);
+      brushFocus = end;
+      refresh();
+    });
+  }
+  draw();
+  if (brushFocus) {
+    /** @type {SVGGElement} */ (svg.querySelector(`.brush-handle[data-end="${brushFocus}"]`)).focus();
+    brushFocus = null;
+  }
 }
 
 function renderSummary() {
@@ -624,8 +716,8 @@ function renderSummary() {
     ? { value: `${fmt(latest[t].area_ha, 1)} ha`, sub: `as of ${latest[t].period}` }
     : { value: '—', sub: '' };
   const cards = [
-    { label: 'New loss area', value: `${fmt(total('loss_ha'), 2)} ha`, sub: 'selected period, by first break' },
-    { label: 'New gain area', value: `${fmt(total('gain_ha'), 2)} ha`, sub: 'selected period, by first break' },
+    { label: 'Tree cover lost', value: `${fmt(total('loss_ha'), 2)} ha`, sub: 'new alerts in the months selected' },
+    { label: 'Tree cover regrowing', value: `${fmt(total('gain_ha'), 2)} ha`, sub: 'new alerts in the months selected' },
     { label: 'Olivinskog cover', ...cover('olivinskog') },
     { label: 'Kalklindeskog cover', ...cover('kalklindeskog') }
   ];
@@ -664,6 +756,24 @@ function fmt(v, digits) {
   return Number(v).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+// Dates: ISO strings in the controls, YYYYMMDD integers on the points.
+const ymd = (iso) => Number(iso.replaceAll('-', ''));
+function addDays(iso, n) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function fmtDate(n) {
+  const s = String(n);
+  return new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}T00:00:00Z`)
+    .toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+const newCutoff = () => ymd(addDays(index.date_range[1], -NEW_DAYS));
+const isNew = () => ['>=', ['get', 'date'], newCutoff()];
+function certainty(c) {
+  return `${c >= 0.8 ? 'high' : c >= 0.5 ? 'medium' : 'low'} (${fmt(c, 2)})`;
+}
+
 function showError(msg) {
   const el = document.getElementById('data-status');
   el.textContent = msg;
@@ -682,36 +792,90 @@ function setupStatus() {
   const px = index.pixels;
   const n = (k) => index.forest_types.reduce((s, a) => s + px[a][k], 0);
   document.getElementById('footer-note').textContent =
-    `${index.polygon_count} mapped polygons · ${n('loss').toLocaleString()} loss and ` +
-    `${n('gain').toLocaleString()} gain pixels (10 m) · ${index.period_range[0]} to ${index.period_range[1]}. ` +
-    'Cover is the mapped area minus cumulative loss; gain is not added back.';
+    `${index.polygon_count} mapped stands · ${n('loss').toLocaleString()} tree-loss and ` +
+    `${n('gain').toLocaleString()} regrowth alerts (10 m squares) · ${fmtDate(ymd(index.date_range[0]))} to ` +
+    `${fmtDate(ymd(index.date_range[1]))}. Cover is the mapped area minus the lost area; regrowth is not added back.`;
 }
 
-function setupControls() {
-  const [lo, hi] = index.period_range;
+/** Write the period into the date fields; `preset` is the quick range to mark, null for a custom one. */
+function setPeriodControls(preset) {
+  /** @type {HTMLInputElement} */ (document.getElementById('filter-date-from')).value = state.from;
+  /** @type {HTMLInputElement} */ (document.getElementById('filter-date-to')).value = state.to;
+  for (const el of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="period"]'))) {
+    el.checked = el.value === preset;
+  }
+}
+
+function setupPeriod() {
+  const [lo, hi] = index.date_range;
   for (const id of ['filter-date-from', 'filter-date-to']) {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(id));
     el.min = lo;
     el.max = hi;
   }
-  state.from = lo;
-  state.to = hi;
-  /** @type {HTMLInputElement} */ (document.getElementById('filter-date-from')).value = lo;
-  /** @type {HTMLInputElement} */ (document.getElementById('filter-date-to')).value = hi;
-
-  const bind = (id, key, parse = (v) => v) => {
+  const preset = (v) => {
+    state.from = v === 'all' ? lo : [addDays(hi, 1 - Number(v)), lo].sort()[1];
+    state.to = hi;
+    setPeriodControls(v);
+  };
+  preset(/** @type {HTMLInputElement} */ (document.querySelector('input[name="period"]:checked'))?.value || 'all');
+  for (const el of document.querySelectorAll('input[name="period"]')) {
+    el.addEventListener('change', (e) => { preset(/** @type {HTMLInputElement} */ (e.target).value); refresh(); });
+  }
+  for (const [id, key] of [['filter-date-from', 'from'], ['filter-date-to', 'to']]) {
     document.getElementById(id).addEventListener('change', (e) => {
       const v = /** @type {HTMLInputElement} */ (e.target).value;
-      // An emptied month input would filter everything out; fall back to the range ends.
-      state[key] = v === '' ? (key === 'from' ? lo : key === 'to' ? hi : state[key]) : parse(v);
+      // An emptied field means the record's end; a crossed range moves the other end.
+      state[key] = v === '' ? (key === 'from' ? lo : hi) : v < lo ? lo : v > hi ? hi : v;
+      if (state.from > state.to) state[key === 'from' ? 'to' : 'from'] = state[key];
+      setPeriodControls(null);
+      refresh();
+    });
+  }
+  document.getElementById('period-note').textContent =
+    `Newest alert: ${fmtDate(ymd(hi))}. Quick ranges count back from it.`;
+}
+
+/** The "i" buttons: the layer's plain-words description, with its legend, in a dialog. */
+function setupInfo() {
+  const dlg = /** @type {HTMLDialogElement} */ (document.getElementById('info'));
+  for (const btn of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('[data-info]'))) {
+    btn.addEventListener('click', () => {
+      const t = /** @type {HTMLTemplateElement} */ (document.getElementById(`info-${btn.dataset.info}`));
+      document.getElementById('info-title').textContent = t.dataset.title;
+      const body = document.getElementById('info-body');
+      body.replaceChildren();
+      const keys = btn.closest('.layer-group')?.querySelectorAll('.key, .ramp, .ramp-labels') || [];
+      if (keys.length) {
+        const box = document.createElement('div');
+        box.className = 'info-legend';
+        for (const k of keys) {
+          const c = /** @type {HTMLElement} */ (k.cloneNode(true));
+          c.removeAttribute('id');
+          box.append(c);
+        }
+        body.append(box);
+      }
+      body.append(t.content.cloneNode(true));
+      dlg.showModal();
+    });
+  }
+  document.getElementById('info-close').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+}
+
+function setupControls() {
+  setupPeriod();
+  setupInfo();
+  const bind = (id, key, parse = (v) => v) => {
+    document.getElementById(id).addEventListener('change', (e) => {
+      state[key] = parse(/** @type {HTMLInputElement} */ (e.target).value);
       refresh();
     });
   };
   bind('filter-forest-type', 'forestType');
   bind('filter-alert-type', 'kind');
   bind('filter-confidence', 'minConf', Number);
-  bind('filter-date-from', 'from');
-  bind('filter-date-to', 'to');
   bind('cover-resolution', 'resolution');
   bind('stand-color', 'standColor');
   document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
@@ -739,6 +903,13 @@ function setupControls() {
   state.radd = val('toggle-radd').checked;
   state.raddMode = /** @type {HTMLInputElement} */ (document.querySelector('input[name="radd-mode"]:checked')).value;
   if (window.innerWidth < 700) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
+  for (const k of KINDS) {
+    for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(`.sw--${k}`))) el.style.background = KIND_COLORS[k];
+  }
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.sw--new'))) {
+    el.style.background = '#ffffff';
+    el.style.border = `2.5px solid ${NEW_COLOR}`;
+  }
   document.getElementById('cell-ramp').style.background =
     `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
   for (const el of document.querySelectorAll('input[name="basemap"]')) {

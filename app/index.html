@@ -29,6 +29,7 @@
     </div>
     <div class="topbar__right">
       <div class="topbar__status" id="data-status" role="status">Loading data&hellip;</div>
+      <button type="button" class="pill-btn" data-info="guide">How to read this map</button>
       <button type="button" class="pill-btn" id="theme-toggle" aria-pressed="false">Dark</button>
     </div>
   </header>
@@ -45,23 +46,34 @@
               <option value="kalklindeskog">Kalklindeskog</option>
             </select>
           </label>
-          <label>Alert type
+          <label>Show
             <select id="filter-alert-type">
-              <option value="loss" selected>Loss</option>
-              <option value="gain">Gain</option>
+              <option value="loss" selected>Tree loss</option>
+              <option value="gain">Regrowth</option>
               <option value="all">Both</option>
             </select>
           </label>
-          <label>Map: min. confidence
+          <label>Certainty
             <select id="filter-confidence">
-              <option value="0" selected>Any</option>
-              <option value="0.5">0.5</option>
-              <option value="0.8">0.8</option>
+              <option value="0" selected>All alerts</option>
+              <option value="0.5">Medium and high</option>
+              <option value="0.8">High only</option>
             </select>
           </label>
-          <label>From <input type="month" id="filter-date-from"></label>
-          <label>To <input type="month" id="filter-date-to"></label>
         </div>
+      </div>
+      <!-- The alert period: calendar fields, quick ranges, or the markers on the alert chart. -->
+      <div class="period" role="group" aria-labelledby="period-title">
+        <span class="period__title" id="period-title">Alerts detected</span>
+        <label>from <input type="date" id="filter-date-from"></label>
+        <label>to <input type="date" id="filter-date-to"></label>
+        <div class="seg seg--small" id="period-presets" role="radiogroup" aria-label="Quick period">
+          <label class="seg__opt"><input type="radio" name="period" value="30"><span>Last 30 days</span></label>
+          <label class="seg__opt"><input type="radio" name="period" value="90"><span>3 months</span></label>
+          <label class="seg__opt"><input type="radio" name="period" value="365"><span>1 year</span></label>
+          <label class="seg__opt"><input type="radio" name="period" value="all" checked><span>All</span></label>
+        </div>
+        <span class="hint" id="period-note"></span>
       </div>
       <div class="map-wrap">
         <!-- Before #map, so keyboard focus reaches the panel first. -->
@@ -69,92 +81,68 @@
           <summary>Layers</summary>
 
           <div class="layer-group" role="group" aria-labelledby="basemap-title">
-            <div class="group-title" id="basemap-title">Basemap</div>
+            <div class="layer-head">
+              <div class="group-title" id="basemap-title">Background</div>
+              <button type="button" class="info-btn" data-info="basemap" aria-label="About the background maps">i</button>
+            </div>
             <div class="seg" id="basemap-options" role="radiogroup" aria-labelledby="basemap-title"></div>
-            <p class="desc">Satellite: Esri World Imagery, a mosaic of recent aerial and
-              satellite images. Its capture date varies from place to place and is often
-              older than the newest alerts.</p>
           </div>
 
-          <div class="layer-group" role="group" aria-label="S-CCD alerts">
-            <label class="switch"><span>S-CCD alerts (Sentinel-2)</span><input type="checkbox" role="switch" id="toggle-alerts" checked></label>
+          <div class="layer-group layer-group--main" role="group" aria-label="Tree-cover alerts">
+            <div class="layer-head">
+              <label class="switch"><span>Tree-cover alerts <span class="count" id="alert-count"></span></span><input type="checkbox" role="switch" id="toggle-alerts" checked></label>
+              <button type="button" class="info-btn" data-info="alerts" aria-label="About tree-cover alerts">i</button>
+            </div>
             <ul class="key">
-              <li><i class="sw sw--dot" style="background:#e06666"></i> Loss pixel (10 m)</li>
-              <li><i class="sw sw--dot" style="background:#4dd0a7"></i> Gain pixel (10 m)</li>
+              <li><i class="sw sw--dot sw--loss"></i> Tree cover lost</li>
+              <li><i class="sw sw--dot sw--gain"></i> Tree cover regrowing</li>
+              <li><i class="sw sw--dot sw--new"></i> New: last 30 days</li>
             </ul>
-            <p class="desc">This project's near-real-time monitor. Each dot is a 10 m pixel
-              where the Sentinel-2 signal broke from its seasonal pattern: loss when tree
-              cover fell (felling, windthrow, dieback), gain when it grew back.</p>
-            <details class="about"><summary>More</summary>
-              <p>Only breaks larger than the magnitude gate are shown, minus any a
-                reviewer rejected. A dot is dated by its latest break. Confidence (0–1)
-                grows as later images confirm the break. Click a pixel for its details
-                and a link to its Sentinel-2 time series. Type, dates and confidence are
-                set by the filters above the map.</p>
-            </details>
+            <p class="hint">Sentinel-2 satellite, updated as new images arrive.</p>
           </div>
 
-          <div class="layer-group" role="group" aria-label="RADD alerts" id="radd-section">
-            <label class="switch"><span>RADD alerts (Sentinel-1)</span><input type="checkbox" role="switch" id="toggle-radd"></label>
-            <div class="seg seg--small" role="radiogroup" aria-label="RADD colouring">
-              <label class="seg__opt"><input type="radio" name="radd-mode" value="alert" checked><span>Confidence</span></label>
-              <label class="seg__opt"><input type="radio" name="radd-mode" value="alert_date"><span>Date</span></label>
+          <div class="layer-group" role="group" aria-label="Radar alerts" id="radd-section">
+            <div class="layer-head">
+              <label class="switch"><span>Radar alerts (RADD)</span><input type="checkbox" role="switch" id="toggle-radd"></label>
+              <button type="button" class="info-btn" data-info="radd" aria-label="About radar alerts">i</button>
+            </div>
+            <div class="seg seg--small" role="radiogroup" aria-label="Colour radar alerts by">
+              <label class="seg__opt"><input type="radio" name="radd-mode" value="alert" checked><span>Confirmed?</span></label>
+              <label class="seg__opt"><input type="radio" name="radd-mode" value="alert_date"><span>When</span></label>
             </div>
             <ul class="key">
               <li><i class="sw" style="background:#ea7e7d"></i> Confirmed</li>
-              <li><i class="sw" style="background:#00ffff"></i> Unconfirmed</li>
-              <li><i class="sw sw--wide" style="background:linear-gradient(90deg,#ffffcc,#fed976,#fd8d3c,#e31a1c,#800026)"></i> Date: 2020 &rarr; now</li>
+              <li><i class="sw" style="background:#00ffff"></i> Not yet confirmed</li>
+              <li><i class="sw sw--wide" style="background:linear-gradient(90deg,#ffffcc,#fed976,#fd8d3c,#e31a1c,#800026)"></i> When: 2020 &rarr; now</li>
             </ul>
-            <p class="desc">Forest-disturbance alerts from Wageningen University (RADD
-              Europe), from Sentinel-1 radar at 10 m since 2020. Radar sees through cloud,
-              so alerts can come earlier than optical ones. Shown inside the stands only.</p>
-            <details class="about"><summary>More</summary>
-              <p>Confirmed: the disturbance held in later radar images. Unconfirmed: a
-                first detection. Drawn as Earth Engine tiles; zoom in to see single
-                pixels. Covers all stands; the forest-type filter does not apply. An
-                independent check on the S-CCD alerts.</p>
-            </details>
             <p class="hint" id="radd-note"></p>
           </div>
 
-          <div class="layer-group" role="group" aria-label="Stands">
-            <label class="switch"><span>Stands (<span id="stand-count">…</span>)</span><input type="checkbox" role="switch" id="toggle-stands" checked></label>
+          <div class="layer-group" role="group" aria-label="Forest stands">
+            <div class="layer-head">
+              <label class="switch"><span>Forest stands <span class="count" id="stand-count"></span></span><input type="checkbox" role="switch" id="toggle-stands" checked></label>
+              <button type="button" class="info-btn" data-info="stands" aria-label="About the forest stands">i</button>
+            </div>
             <label class="inline">Colour by
               <select id="stand-color">
                 <option value="forest_type" selected>Forest type</option>
                 <option value="condition_local">Condition 2025 (local)</option>
                 <option value="condition_global">Condition 2025 (global)</option>
-                <option value="trajectory">Trajectory 2017&ndash;2025</option>
+                <option value="trajectory">Change 2017&ndash;2025</option>
               </select>
             </label>
             <ul class="key" id="stand-legend" aria-label="Stand colours"></ul>
-            <p class="desc">The mapped olivinskog and kalklindeskog stands from three field
-              surveys (MI, NiN 1:5000, HB13). Surveys overlap in places. Small stands show
-              as dots when zoomed out.</p>
-            <details class="about"><summary>More</summary>
-              <p><b>Condition 2025</b> compares the stand's AlphaEarth satellite embedding
-                with good-condition stands of its forest type: good, poor, or not decided
-                when the uncertainty interval spans the threshold (about 0.51).
-                <i>Local</i> compares with nearby good stands, <i>global</i> with all of
-                them. <b>Trajectory</b> is the direction of the yearly score 2017–2025.
-                Click a stand to see its yearly scores.</p>
-            </details>
           </div>
 
-          <div class="layer-group" role="group" aria-label="Condition cells" id="cells-section">
-            <label class="switch"><span>Condition: 10 m cells</span><input type="checkbox" role="switch" id="toggle-cells"></label>
+          <div class="layer-group" role="group" aria-label="Condition squares" id="cells-section">
+            <div class="layer-head">
+              <label class="switch"><span>Condition, 10 m squares</span><input type="checkbox" role="switch" id="toggle-cells"></label>
+              <button type="button" class="info-btn" data-info="cells" aria-label="About the condition squares">i</button>
+            </div>
             <div class="ramp" id="cell-ramp" role="img"
-                 aria-label="Colour scale from brown, below the stand threshold, through cream at the threshold, to dark teal, above it"></div>
-            <div class="ramp-labels" aria-hidden="true"><span>below threshold</span><span>above</span></div>
-            <p class="desc">The 2025 condition score of each 10 m cell, minus its stand's
-              threshold. Brown cells look less like good forest of their type, teal ones
-              more. Zoom in past 12 to see them.</p>
-            <details class="about"><summary>More</summary>
-              <p>Cells within 20 m of a stand edge partly mix in their surroundings.
-                Click a cell for its scores 2017–2025. Within one locality the score is
-                close to chance: it ranks a population of stands, and often cannot
-                resolve one stand on its own.</p>
-            </details>
+                 aria-label="Colour scale from brown, worse than the stand threshold, through cream at the threshold, to dark teal, better than it"></div>
+            <div class="ramp-labels" aria-hidden="true"><span>worse</span><span>better</span></div>
+            <p class="hint">Zoom in close to see them.</p>
           </div>
         </details>
         <!-- What was clicked: alerts, the cell and the stand under the pointer. -->
@@ -183,7 +171,8 @@
       </div>
       <div id="chart-cover" class="chart"></div>
 
-      <div class="panel__header"><h2>Alert area over time</h2></div>
+      <div class="panel__header"><h2>Alert area over time</h2>
+        <span class="hint">Drag the two markers to choose the period shown.</span></div>
       <div id="chart-alerts" class="chart"></div>
 
       <div class="panel__header"><h2>Summary</h2></div>
@@ -193,6 +182,90 @@
 
   <footer class="footer" id="footer-note"></footer>
 </div>
+<!-- What each layer shows, in plain words; opened by the "i" buttons. -->
+<dialog id="info" class="info-dialog glass" aria-labelledby="info-title">
+  <!-- Padding lives inside, so a click on the dialog element itself is the backdrop. -->
+  <div class="info-inner">
+    <div class="detail__head">
+      <h3 id="info-title"></h3>
+      <button type="button" class="icon-btn" id="info-close" aria-label="Close">&times;</button>
+    </div>
+    <div id="info-body"></div>
+  </div>
+</dialog>
+
+<template id="info-guide" data-title="How to read this map">
+  <p>The map watches the olivinskog and kalklindeskog forest stands for change,
+    using free satellite images that are processed as they arrive.</p>
+  <ul>
+    <li><b>Red dots</b> are places where trees seem to have been lost: felled, blown
+      down or died. <b>Green dots</b> are places where trees seem to be growing back.
+      Each dot is a 10 &times; 10 m square of ground.</li>
+    <li>Dots with a <b>yellow ring</b> are new: found in the last 30 days.</li>
+    <li>Choose the period with the date boxes above the map, the quick buttons
+      (<i>Last 30 days</i>, &hellip;), or by dragging the markers on the
+      <i>Alert area over time</i> chart.</li>
+    <li>Click anything on the map for its details.</li>
+  </ul>
+  <p><b>Alerts are early warnings, not proof.</b> Cloud, snow, shadow or flooding can
+    look like change to a satellite. Before acting, look at the spot on the
+    satellite background and open its image history (click the dot), or visit it.</p>
+  <p>Each layer has an <b>i</b> button that explains it.</p>
+</template>
+
+<template id="info-basemap" data-title="Background maps">
+  <p><b>Satellite</b>: aerial and satellite photos (Esri World Imagery). The photo is
+    often several years old, so a recent felling may not show on it yet.</p>
+  <p><b>Map</b>: OpenStreetMap, with roads, paths and place names.</p>
+</template>
+
+<template id="info-alerts" data-title="Tree-cover alerts">
+  <p>Made by this project from <b>Sentinel-2</b>, a European satellite that photographs
+    the same place every few days. Each new photo is compared with what the forest
+    normally looks like at that time of year. When a 10 m square changes, and stays
+    changed in the next photos, it becomes an alert (the method is called S-CCD).</p>
+  <p><b>Tree cover lost</b>: the canopy got thinner or disappeared, for example from
+    felling, wind, insects or dieback. <b>Regrowing</b>: it got greener again.</p>
+  <p><b>Certainty</b> grows as more photos confirm the change, so a new alert often
+    starts low. <i>High</i> means 0.8 or more (out of 1), <i>medium</i> 0.5&ndash;0.8.
+    Use <i>Certainty</i> above the map to hide the uncertain ones.</p>
+  <p>Very small changes are left out, and so are alerts that a reviewer checked and
+    rejected. A dot is dated by the most recent change at that spot.</p>
+  <p>Click a dot to open its Sentinel-2 image history in a new tab: the line drops
+    when the forest was lost.</p>
+</template>
+
+<template id="info-radd" data-title="Radar alerts (RADD)">
+  <p>Forest-disturbance alerts from Wageningen University, made from <b>Sentinel-1
+    radar</b> since 2020. Radar sees through cloud and works in the dark, so it can
+    find a change before the photo-based alerts do.</p>
+  <p><b>Confirmed</b>: the change was still there in later radar images.
+    <b>Not yet confirmed</b>: seen once so far. <i>When</i> colours each alert by the
+    date it was first seen, from light yellow (2020) to dark red (now).</p>
+  <p>Shown only inside the stands, for both forest types. Use it as a second opinion:
+    a place flagged by both radar and photo alerts is very likely a real change.</p>
+</template>
+
+<template id="info-stands" data-title="Forest stands">
+  <p>The olivinskog and kalklindeskog stands that are monitored, as mapped in three
+    field surveys (MI, NiN 1:5000 and HB13). Some surveys overlap. Small stands show as
+    dots when the map is zoomed out.</p>
+  <p><b>Condition 2025</b>: how much the stand looks, from space, like stands of the
+    same type known to be in good condition (from Google's AlphaEarth satellite data).
+    <i>Good</i>, <i>poor</i>, or <i>not decided</i> when it is too close to call.
+    <i>Local</i> compares with good stands nearby, <i>global</i> with all of them.</p>
+  <p><b>Change 2017&ndash;2025</b>: whether that score went up, down or stayed level.
+    Click a stand to see its score year by year.</p>
+</template>
+
+<template id="info-cells" data-title="Condition, 10 m squares">
+  <p>The same condition score as for the stands, for every 10 &times; 10 m square
+    in 2025, compared with its stand's threshold. <b>Brown</b> squares look less like
+    good forest of their type, <b>teal</b> ones more.</p>
+  <p>Read patterns, not single squares: one square is noisy, and squares near a
+    stand's edge partly mix in what is around them. Click a square for its scores
+    2017&ndash;2025.</p>
+</template>
 <script src="js/app.js"></script>
 </body>
 </html>
