@@ -1,4 +1,4 @@
-"""Write docs/report-src/map/stand_map.md: the interactive stand map for the HTML report.
+"""Write docs/report-assets/map/stand_map.md: the interactive stand map for the HTML report.
 
 The 737 stands (condition.parquet, 2025; trajectory.parquet; polygons_geo.parquet)
 as simplified GeoJSON in a Leaflet map. Included by the .qmd for HTML output only;
@@ -17,7 +17,7 @@ import os
 import shutil
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
-OUT = HERE.parent / "report-src"                # docs/report-src: the Quarto sources and their inputs
+OUT = HERE.parent / "report-assets"             # docs/report-assets: what the .qmd sources read
 DATA = Path(os.environ.get("CONDITION_OUT_DATA", HERE.parents[1] / "data" / "condition" / "outputs" / "data"))
 
 CLASSES = {  # key -> (label, colour)
@@ -99,7 +99,7 @@ def stands() -> dict:
 
 
 PAGE = r"""```{=html}
-<link rel="stylesheet" href="map/leaflet.css">
+<link rel="stylesheet" href="report-assets/map/leaflet.css">
 <style>
 #stand-map { height: 720px; width: 100%; border: 1px solid #ccc; border-radius: 4px; margin: 0.5em 0; }
 .map-legend { background: #fff; padding: 6px 10px; line-height: 1.5; font-size: 13px; border-radius: 4px; box-shadow: 0 0 6px rgba(0,0,0,.3); }
@@ -117,7 +117,7 @@ PAGE = r"""```{=html}
 </style>
 <div id="stand-map" role="application" aria-label="Interactive map of all 737 stands"></div>
 <p><em>Interactive map of all 737 stands. Choose what to colour them by with the layer list (condition class in 2025, trajectory 2017-2025, forest type, field condition). Zoom in to see the stand outlines and click a stand for its details and links to Norgeskart and Norge i bilder. The topographic map (Kartverket) can be switched on over the imagery.</em></p>
-<script src="map/leaflet.js"></script>
+<script src="report-assets/map/leaflet.js"></script>
 <script>
 (function () {
   var D = __DATA__, d = D.sites, n = d.id.length;

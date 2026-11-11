@@ -14,13 +14,13 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
-OUT = HERE.parent / "report-src"                # docs/report-src: the Quarto sources and their inputs
-DOCS = HERE.parent                              # docs/: the renders
+OUT = HERE.parent / "report-assets"             # docs/report-assets: what the .qmd sources read
+DOCS = HERE.parent                              # docs/: the .qmd sources and their renders
 OUT.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE))
 from fix_docx_tables import main as fix_docx  # noqa: E402
 
-QMD = OUT / "forest_monitoring_methods.qmd"
+QMD = DOCS / "forest_monitoring_methods.qmd"
 
 YAML = """---
 title: "Methods: remote sensed monitoring of olivinskog and kalklindeskog, 2017-2025"
@@ -46,8 +46,8 @@ code-links:
     icon: github
     href: https://github.com/NINAnor/effektovervaaking-2026-2030
 lang: en-GB
-bibliography: references.bib
-csl: ambio.csl
+bibliography: report-assets/references.bib
+csl: report-assets/ambio.csl
 fig-cap-location: bottom
 format:
   html:
@@ -61,14 +61,14 @@ format:
     lightbox: true
     anchor-sections: true
   docx:
-    reference-doc: reference_a4.docx
+    reference-doc: report-assets/reference_a4.docx
     columns: 1000
     toc: true
     toc-depth: 2
     toc-title: Contents
   typst:
     filters:
-      - typst_wrap_code.lua
+      - report-assets/typst_wrap_code.lua
     citeproc: true
     papersize: a4
     margin:
@@ -143,7 +143,7 @@ def main() -> None:
     pat = re.compile(r"&#91;embedded content: (.+?)\\?\]")
     m = pat.search(text)
     assert m and len(pat.findall(text)) == 1, "embedded content placeholder"
-    text = pat.sub(lambda m: f"![{m.group(1)}](media/image1.png){{#fig-pipeline width=100%}}", text)
+    text = pat.sub(lambda m: f"![{m.group(1)}](report-assets/media/image1.png){{#fig-pipeline width=100%}}", text)
 
     # ```latex blocks -> display math.
     text, n = re.subn(r"```latex\n(.+?)\n```", lambda m: f"$$\n{m.group(1)}\n$$", text, flags=re.S)
@@ -155,7 +155,7 @@ def main() -> None:
     for f in ("ambio.csl", "references.bib", "typst_wrap_code.lua"):
         shutil.copyfile(HERE / "assets" / f, OUT / f)
     shutil.copytree(HERE / "src" / "methods" / "media", OUT / "media", dirs_exist_ok=True, copy_function=shutil.copyfile)
-    subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=OUT, check=True)
+    subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=DOCS, check=True)
     fix_docx(DOCS / f"{QMD.stem}.docx")
     print("rendered:", ", ".join(p.name for p in sorted(DOCS.glob(QMD.stem + ".*"))))
 
