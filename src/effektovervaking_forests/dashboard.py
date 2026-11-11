@@ -26,7 +26,7 @@ from . import alerts as alerts_mod
 AOIS = ("olivinskog", "kalklindeskog")
 KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
-SCHEMA = 5  # bump when a file's shape changes; the app refuses other versions
+SCHEMA = 6  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -91,7 +91,7 @@ def pixels(events: pd.DataFrame) -> pd.DataFrame:
 
 def monthly(px: pd.DataFrame, baseline_ha: dict[str, float]) -> list[dict]:
     """New pixels per month by first break, and the cover left after loss."""
-    # To the latest break, so the range matches index.period_range.
+    # To the latest break, so the range matches index.date_range.
     months = pd.period_range(px["first"].min(), px["last"].max(), freq="M")
     rows = []
     for aoi in AOIS:
@@ -220,15 +220,12 @@ def bake(source: str, out_dir: Path | str) -> dict:
         "schema": SCHEMA,
         "generated_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "source": source if source.startswith(("http://", "https://")) else "local",
-        "pixel_ha": PIXEL_HA,
         "forest_types": list(AOIS),
         "polygon_count": int(len(polys)),
         "polygon_counts": {
             t: int(n) for t, n in polys["forest_type"].value_counts().items()
         },
-        "baseline_ha": {a: round(baseline[a], 2) for a in AOIS},
         "pixels": {a: {k: int(counts.get((a, k), 0)) for k in KINDS} for a in AOIS},
-        "period_range": [_month(px["first"]).min(), _month(px["last"]).max()],
         "date_range": [f"{px['first'].min():%Y-%m-%d}", f"{px['last'].max():%Y-%m-%d}"],
         "years": YEARS,
         "files": files,

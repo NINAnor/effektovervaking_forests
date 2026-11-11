@@ -558,7 +558,7 @@ def publish_dashboard(
     if not source:
         _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
     idx = dashboard.bake(source, out)
-    _echo(f"{out}/index.json: {idx['pixels']} pixels, {idx['period_range']}")
+    _echo(f"{out}/index.json: {idx['pixels']} pixels, {idx['date_range']}")
 
 
 @publish_app.command("radd")

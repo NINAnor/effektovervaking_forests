@@ -119,8 +119,6 @@ def test_pixel_with_two_losses_counts_once_and_maps_latest(baked) -> None:
 
 def test_monthly_cover_is_baseline_minus_cumulative_loss(baked) -> None:
     idx, out = baked
-    assert idx["baseline_ha"] == {"olivinskog": OLIVIN_HA, "kalklindeskog": KALK_HA}
-    assert idx["period_range"] == ["2024-01", "2024-03"]
     m = _monthly(out)
     # Olivinskog: pixel 1 first breaks in Jan (its March event is not new area).
     assert m["olivinskog", "2024-01"]["loss_ha"] == 0.01
@@ -191,7 +189,6 @@ def test_cli_publish_dashboard_needs_a_source(
 def test_unpublishable_breaks_and_overlaps_do_not_count(baked):
     idx, out = baked
     assert idx["pixels"]["olivinskog"] == {"loss": 2, "gain": 1}
-    assert idx["baseline_ha"]["olivinskog"] == pytest.approx(OLIVIN_HA)
 
 
 def test_polygons_carry_stand_condition(baked):

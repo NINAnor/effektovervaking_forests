@@ -4,7 +4,7 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 5; // must match dashboard.SCHEMA in Python
+const SCHEMA = 6; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 // Bright, with a white ring on the map, so the alerts stand out on imagery.
 const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
