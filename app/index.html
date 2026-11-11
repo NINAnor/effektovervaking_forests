@@ -13,6 +13,7 @@
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Forest Monitor · loss and gain alerts</title>
 <link rel="preconnect" href="https://tile.openstreetmap.org" crossorigin>
+<link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
 <script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/pmtiles.js"></script>
 <link href="vendor/maplibre-gl.css" rel="stylesheet">
@@ -59,24 +60,46 @@
           <label>To <input type="month" id="filter-date-to"></label>
         </div>
       </div>
-      <div class="controls layer-controls">
-        <label class="check"><input type="checkbox" id="toggle-stands" checked> Stands (<span id="stand-count">…</span>)</label>
-        <label>Colour stands by
-          <select id="stand-color">
-            <option value="forest_type" selected>Forest type</option>
-            <option value="condition_local">Condition 2025 (local)</option>
-            <option value="condition_global">Condition 2025 (global)</option>
-            <option value="trajectory">Trajectory 2017&ndash;2025</option>
-          </select>
-        </label>
-        <label class="check" title="Condition score per 10 m cell, 2025, against the stand threshold. Draws from zoom 12.">
-          <input type="checkbox" id="toggle-cells"> Condition: 10 m cells (zoom 12+)</label>
-      </div>
-      <div id="map"></div>
-      <div class="legend">
-        <span id="stand-legend"></span>
-        <span class="legend__item"><i class="dot dot--alert"></i> Loss pixel (10 m)</span>
-        <span class="legend__item"><i class="dot dot--gain"></i> Gain pixel</span>
+      <div class="map-wrap">
+        <div id="map"></div>
+        <details id="layer-panel" class="layer-panel" open>
+          <summary>Layers</summary>
+
+          <fieldset>
+            <legend>Basemap</legend>
+            <label class="check"><input type="radio" name="basemap" value="osm" checked> <span>Map (OpenStreetMap)</span></label>
+            <label class="check"><input type="radio" name="basemap" value="satellite"> <span>Satellite (Esri World Imagery)</span></label>
+          </fieldset>
+
+          <fieldset>
+            <legend><label class="check"><input type="checkbox" id="toggle-alerts" checked> <span>S-CCD alerts</span></label></legend>
+            <ul class="key">
+              <li><i class="sw sw--dot" style="background:#e06666"></i> Loss pixel (10 m)</li>
+              <li><i class="sw sw--dot" style="background:#4dd0a7"></i> Gain pixel (10 m)</li>
+            </ul>
+            <p class="hint">Type, dates and confidence: filters above.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend><label class="check"><input type="checkbox" id="toggle-stands" checked> <span>Stands (<span id="stand-count">…</span>)</span></label></legend>
+            <label class="inline">Colour by
+              <select id="stand-color">
+                <option value="forest_type" selected>Forest type</option>
+                <option value="condition_local">Condition 2025 (local)</option>
+                <option value="condition_global">Condition 2025 (global)</option>
+                <option value="trajectory">Trajectory 2017&ndash;2025</option>
+              </select>
+            </label>
+            <ul class="key" id="stand-legend"></ul>
+          </fieldset>
+
+          <fieldset id="cells-section">
+            <legend><label class="check"><input type="checkbox" id="toggle-cells"> <span>Condition: 10 m cells</span></label></legend>
+            <div class="ramp" id="cell-ramp"></div>
+            <div class="ramp-labels"><span>below threshold</span><span>above</span></div>
+            <p class="hint">2025 score minus the stand threshold. Zoom in past 12 to see cells.</p>
+          </fieldset>
+        </details>
       </div>
     </section>
 

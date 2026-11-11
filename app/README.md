@@ -51,6 +51,9 @@ Condition per 10 m cell is not baked: the page reads
 requests (`conditionCells` in `config.js`; empty hides the layer). It draws from
 zoom 12 and is coloured by the 2025 score minus the stand threshold.
 
+The map's **Layers** panel switches the basemap (`basemaps` in `config.js`:
+OpenStreetMap and Esri World Imagery) and each layer, with its key beside it.
+
 `config.js`'s `dataBase` says where the JSON is: `data/` beside the page, or
 any URL with CORS (e.g. the baked files copied to an S3 prefix).
 
