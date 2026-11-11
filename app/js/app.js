@@ -78,7 +78,7 @@ const CELL_RAMP = [['#8c510a', -90], ['#bf812d', -60], ['#dfc27d', -30], ['#f6e8
 const state = {
   forestType: 'all',
   kind: 'loss',
-  minConf: 0,
+  minConf: 0.34, // low certainty is mostly winter and cloud-gap noise
   from: '', // ISO dates, inclusive
   to: '',
   resolution: 'annual',
