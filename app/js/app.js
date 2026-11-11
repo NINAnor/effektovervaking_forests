@@ -611,6 +611,7 @@ function showDetail(e) {
     `${fmt(e.lngLat.lat, 5)}° N, ${fmt(e.lngLat.lng, 5)}° E`;
   document.getElementById('detail-body').innerHTML = html;
   card.hidden = false;
+  if (!card.contains(document.activeElement)) document.getElementById('detail-close').focus();
   if (popup) popup.remove();
   setMarker(dot ? [Number(dot.properties.lon), Number(dot.properties.lat)] : [e.lngLat.lng, e.lngLat.lat], standId);
 }
@@ -650,9 +651,14 @@ function setMarker(coords, standId = null) {
 function setupDetail(polygons) {
   for (const f of polygons.features) standById.set(f.properties.poly_id, f.properties);
   map.on('click', showDetail);
-  document.getElementById('detail-close').addEventListener('click', () => {
+  const close = () => {
     document.getElementById('detail').hidden = true;
     setMarker(null);
+  };
+  document.getElementById('detail-close').addEventListener('click', close);
+  document.addEventListener('keydown', (e) => {
+    const dialog = /** @type {HTMLDialogElement} */ (document.getElementById('info'));
+    if (e.key === 'Escape' && !dialog.open && !document.getElementById('detail').hidden) close();
   });
 }
 
