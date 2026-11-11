@@ -1,4 +1,4 @@
-"""Write docs/source/map/stand_map.md: the interactive stand map for the HTML report.
+"""Write docs/map/stand_map.md: the interactive stand map for the HTML report.
 
 The 737 stands (condition.parquet, 2025; trajectory.parquet; polygons_geo.parquet)
 as simplified GeoJSON in a Leaflet map. Included by the .qmd for HTML output only;
@@ -17,7 +17,7 @@ import os
 import shutil
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
-OUT = HERE.parent / "source"
+OUT = HERE.parent                               # docs/
 DATA = Path(os.environ.get("CONDITION_OUT_DATA", HERE.parents[1] / "data" / "condition" / "outputs" / "data"))
 
 CLASSES = {  # key -> (label, colour)
