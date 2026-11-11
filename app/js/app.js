@@ -332,13 +332,15 @@ const POPUPS = [
 function setupPopup() {
   popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '320px' });
   map.getCanvas().addEventListener('mouseleave', () => popup.remove());
+  map.on('movestart', () => popup.remove());
   map.on('mousemove', (e) => {
-    if (!document.getElementById('detail').hidden) {
+    if (map.isMoving() || !document.getElementById('detail').hidden) {
       map.getCanvas().style.cursor = '';
       popup.remove();
       return;
     }
-    const layers = ['forest-fill', 'forest-pts', 'cells', 'c2c', ...pointLayers.keys()].filter((id) => map.getLayer(id));
+    const layers = ['forest-fill', 'forest-pts', 'cells', 'c2c', ...pointLayers.keys()]
+      .filter((id) => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
     const feats = map.queryRenderedFeatures(e.point, { layers });
     let html = null;
     for (const [match, render] of POPUPS) {
