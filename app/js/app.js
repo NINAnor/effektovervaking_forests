@@ -160,6 +160,7 @@ function createMap() {
     zoom: 5.5
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
+  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
   return new Promise((resolve) => map.on('load', resolve));
 }
 
@@ -653,6 +654,7 @@ function setMarker(coords, standId = null) {
 function setupDetail(polygons) {
   for (const f of polygons.features) standById.set(f.properties.poly_id, f.properties);
   map.on('click', showDetail);
+  map.on('zoomend', setCellsHint);
   const close = () => {
     document.getElementById('detail').hidden = true;
     setMarker(null);
@@ -727,9 +729,17 @@ function applyMapState() {
     const c = pointCols.get(key);
     if (wanted.has(key) && c) for (let i = 0; i < c.date.length; i++) shown += +(c.date[i] >= from && c.date[i] <= to && c.conf[i] >= state.minConf);
   }
+  setCellsHint();
   document.getElementById('alert-count').textContent = pointsLoading ? '(loading…)' : `(${shown.toLocaleString()})`;
   applyRadd();
   applyOpacity();
+}
+
+/** The squares only draw from zoom 12; say so when they are on but not yet visible. */
+function setCellsHint() {
+  const hint = document.getElementById('cells-hint');
+  if (hint) hint.textContent = state.cells && map.getZoom() < 12
+    ? 'Zoom in further to see them (they show from zoom 12).' : 'Zoom in close to see them.';
 }
 
 let mapGeneration = 0;
