@@ -436,7 +436,7 @@ function applyRadd() {
       type: 'raster', tiles, tileSize: 256, maxzoom: 15,
       attribution: '<a href="https://www.wur.nl/en/research-results/research-institutes/environmental-research/radd-forest-disturbance-alert.htm">RADD</a> / Wageningen University'
     });
-    map.addLayer({ id: 'radd', type: 'raster', source: 'radd', paint: { 'raster-opacity': 0.9 } }, 'forest-pts');
+    map.addLayer({ id: 'radd', type: 'raster', source: 'radd', paint: { 'raster-opacity': 0.9 } }, 'forest-line');
     raddApplied = tiles[0];
     checkRaddTiles();
   } else if (state.radd && raddApplied !== tiles[0]) {
