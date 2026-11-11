@@ -110,7 +110,7 @@ def points(px: pd.DataFrame) -> dict:
         "lon": px["lon"].round(5).tolist(),
         "lat": px["lat"].round(5).tolist(),
         "month": _month(px["last"]).tolist(),
-        "conf": px["conf"].round(2).tolist(),
+        "conf": px["conf"].fillna(0).round(2).tolist(),  # unscored -> 0
         "n": px["n_events"].tolist(),
     }
 
@@ -156,6 +156,8 @@ def bake(source: str, out_dir: Path | str) -> dict:
     if missing:
         raise ValueError(f"no polygons for {missing}")
 
+    if events.empty:
+        raise ValueError(f"no publishable alerts in {source}")
     px = pixels(events)
     files = {"points": {}}
     for aoi in AOIS:

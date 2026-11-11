@@ -99,10 +99,7 @@ function ensurePoints(aoi, kind) {
   const key = `${aoi}|${kind}`;
   if (!pointLayers.has(key)) {
     const file = index.files.points[aoi][kind];
-    pointLayers.set(key, fetchJson(file).catch((e) => {
-      pointLayers.delete(key); // retry on the next refresh
-      throw e;
-    }).then((cols) => {
+    pointLayers.set(key, fetchJson(file).then((cols) => {
       map.addSource(key, { type: 'geojson', data: pointsToGeojson(cols, aoi, kind) });
       map.addLayer({
         id: key,
@@ -118,6 +115,9 @@ function ensurePoints(aoi, kind) {
         `<strong>${esc(p.kind)}</strong> &mdash; ${esc(p.aoi)}<br>latest break ${esc(p.month)}<br>` +
         `confidence ${fmt(p.conf, 2)}, ${p.n} event${p.n === 1 ? '' : 's'}`);
       return key;
+    }).catch((e) => {
+      pointLayers.delete(key); // retry on the next refresh
+      throw e;
     }));
   }
   return pointLayers.get(key);
@@ -169,11 +169,15 @@ function applyMapState() {
   }
 }
 
+let mapGeneration = 0;
+
 async function refreshMap() {
+  const gen = ++mapGeneration;
   applyMapState();
   const results = await Promise.allSettled(wantedLayers().map(({ aoi, kind }) => ensurePoints(aoi, kind)));
   // The state may have changed while files loaded; apply the current one.
   applyMapState();
+  if (gen !== mapGeneration) return; // a newer refresh owns the status line
   const failed = results.find((r) => r.status === 'rejected');
   if (failed) showError(`Some alert points failed to load: ${failed.reason.message}`);
   else showStatus();
@@ -206,11 +210,15 @@ function chartFrame(el, xs, yMax, yLabel) {
   const m = { l: 60, r: 10, t: 10, b: 26 };
   const band = (W - m.l - m.r) / xs.length;
   const x = (i) => m.l + (i + 0.5) * band;
-  const y = (v) => H - m.b - (yMax ? v / yMax : 0) * (H - m.t - m.b);
-  const digits = yMax < 1 ? 2 : yMax < 10 ? 1 : 0;
+  // Round tick steps (1, 2 or 5 x 10^n), never finer than one pixel (0.01 ha).
+  const raw = Math.max((yMax || 1) / 4, 0.01);
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const tick = [1, 2, 5, 10].map((k) => k * mag).find((t) => t >= raw * 0.999);
+  const top = Math.ceil((yMax || 1) / tick) * tick;
+  const y = (v) => H - m.b - (v / top) * (H - m.t - m.b);
+  const digits = Math.max(0, -Math.floor(Math.log10(tick) + 1e-9));
   let g = '';
-  for (let k = 0; k <= 4; k++) {
-    const v = (yMax * k) / 4;
+  for (let v = 0; v <= top + tick / 2; v += tick) {
     g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/>` +
       `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, digits)}</text>`;
   }
@@ -233,11 +241,13 @@ function renderCover() {
   const xs = [...new Set(rows.map((d) => d.x))].sort();
   if (!xs.length) { el.innerHTML = '<p class="muted">No data in range.</p>'; return; }
   const types = [...new Set(rows.map((d) => d.forest_type))];
-  const f = chartFrame(el, xs, Math.max(...rows.map((d) => d.area_ha)) * 1.05, 'area (ha)');
+  const f = chartFrame(el, xs, Math.max(...rows.map((d) => d.area_ha)), 'area (ha)');
   let g = f.g;
   for (const t of types) {
-    const pts = rows.filter((d) => d.forest_type === t).map((d) => `${f.x(xs.indexOf(d.x))},${f.y(d.area_ha)}`);
-    g += `<polyline fill="none" stroke="${FOREST_COLORS[t]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}"/>`;
+    const pts = rows.filter((d) => d.forest_type === t).map((d) => [f.x(xs.indexOf(d.x)), f.y(d.area_ha)]);
+    g += `<polyline fill="none" stroke="${FOREST_COLORS[t]}" stroke-width="2" points="${pts.join(' ')}"/>`;
+    // Dots too, so a one-point range still shows something.
+    if (pts.length <= 24) g += pts.map(([px, py]) => `<circle cx="${px}" cy="${py}" r="2.5" fill="${FOREST_COLORS[t]}"/>`).join('');
   }
   el.innerHTML = legend(types.map((t) => [t, FOREST_COLORS[t]])) +
     `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Forest cover over time">${g}</svg>`;
@@ -256,7 +266,7 @@ function renderAlerts() {
   const xs = [...sums.keys()].sort();
   if (!xs.length) { el.innerHTML = '<p class="muted">No data in range.</p>'; return; }
   const yMax = Math.max(...xs.map((t) => kinds.reduce((s, k) => s + sums.get(t)[`${k}_ha`], 0))) || 1;
-  const f = chartFrame(el, xs, yMax * 1.05, 'new alert area (ha)');
+  const f = chartFrame(el, xs, yMax, 'new alert area (ha)');
   const bw = Math.max(1, f.band * 0.8);
   let g = f.g;
   xs.forEach((t, i) => {
