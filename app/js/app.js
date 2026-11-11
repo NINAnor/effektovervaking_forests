@@ -26,6 +26,11 @@ const CLASS_COLORS = {
 const CLASS_LABELS = {
   good_condition: 'good', indistinguishable: 'not decided', poor_condition: 'poor', no_data: 'no score'
 };
+// The field surveys behind the stands (the prefix of `layer`) and their condition words.
+const SURVEYS = { MI: 'nature-type mapping (MI)', HB13: 'DN-håndbok 13', NiN5k: 'NiN 1:5000' };
+const survey = (layer) => SURVEYS[String(layer).split('_')[0]] || layer;
+const TILSTAND = { god: 'good', moderat: 'moderate', dårlig: 'poor', sværtRedusert: 'very reduced' };
+const fieldCondition = (t) => (t ? TILSTAND[t] || t : 'not recorded');
 const TRAJ_COLORS = { improving: '#35978f', stable: '#9aa39c', fluctuating: '#c8ccc2', declining: '#bf812d' };
 // Cells: (score - threshold) x 1000, brown below the threshold, blue-green above.
 // C2C: the year a change ended, light to dark purple (apart from the red/green alerts).
@@ -289,9 +294,9 @@ function c2cSection(p) {
     chip(`loss in ${year}`, C2C_COLORS[Math.max(0, C2C_YEARS.indexOf(year))]) +
     (drop < C2C_GATE ? chip('weak: below the 0.175 cut-off', CLASS_COLORS.no_data) : '') + '</div>' +
     `<dl><dt>Loss year</dt><dd>${year}${late}</dd>` +
-    `<dt>NBR drop</dt><dd>${fmt(drop, 2)} (cut-off 0.175)</dd>` +
-    `<dt>Steady before the drop</dt><dd>${fmt(p.duration, 0)} yr</dd>` +
-    `<dt>Drops found</dt><dd>${fmt(p.n_breaks, 0)}</dd>` +
+    `<dt>Size of drop (NBR)</dt><dd>${fmt(drop, 2)} (cut-off 0.175)</dd>` +
+    `<dt>Years stable before</dt><dd>${fmt(p.duration, 0)}</dd>` +
+    `<dt>Drops found here</dt><dd>${fmt(p.n_breaks, 0)}</dd>` +
     `<dt>Hansen (Global Forest Watch)</dt><dd>${p.hansen_lossyear ? `loss in ${Math.round(p.hansen_lossyear)}` : 'no loss mapped'}</dd></dl>` +
     `${timeseriesLink([Number(p.lon), Number(p.lat)])}</section>`;
 }
@@ -306,17 +311,17 @@ const POPUPS = [
     `<strong>${esc(KIND_LABELS[p.kind])}</strong> &mdash; ${esc(p.aoi)}<br>detected ${fmtDate(p.date)}<br>` +
     `certainty ${certainty(p.conf)}, size ${fmt(p.mag, 2)} &middot; click for details`],
   [(id) => id === 'c2c', (p) =>
-    `<strong>Forest loss in ${c2cYear(p)}</strong> (C2C)<br>NBR drop ${fmt(Math.abs(p.magnitude), 2)} &middot; click for details`],
+    `<strong>Forest loss in ${c2cYear(p)}</strong> (C2C)<br>size of drop ${fmt(Math.abs(p.magnitude), 2)} &middot; click for details`],
   [(id) => id === 'cells', (p) =>
-    `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
-    `(threshold ${fmt(p.threshold_global, 3)})<br>` +
-    `stand: ${esc(CLASS_LABELS[p.stand_condition_class] || '—')}, trajectory ${esc(p.trajectory_class || '—')}<br>` +
-    `${fmt(p.edge_m, 0)} m inside the stand`],
+    `<strong>10 m cell</strong><br>score 2025: ${score(p.dor_global_2025)} ` +
+    `(good/poor threshold ${fmt(p.threshold_global, 3)})<br>` +
+    `stand: ${esc(CLASS_LABELS[p.stand_condition_class] || '—')}, change 2017–2025 ${esc(p.trajectory_class || '—')}<br>` +
+    `${fmt(p.edge_m, 0)} m from the stand edge`],
   [(id) => id === 'forest-fill' || id === 'forest-pts', (p) =>
-    `<strong>${esc(p.forest_type)}</strong> &mdash; ${esc(p.layer)}<br>` +
-    `${fmt(p.area_ha, 2)} ha, surveyed ${esc(p.survey_year ?? '—')} (${esc(p.tilstand || 'no field condition')})<br>` +
+    `<strong>${esc(p.forest_type)} stand</strong> &mdash; ${esc(survey(p.layer))}<br>` +
+    `${fmt(p.area_ha, 2)} ha, surveyed ${esc(p.survey_year ?? '—')} (field condition: ${esc(fieldCondition(p.tilstand))})<br>` +
     `condition 2025: ${score(p.dor_global_2025)}, ${esc(CLASS_LABELS[p.condition_local] || 'no score')} (local) / ` +
-    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (nature type)<br>trajectory ${esc(p.trajectory || '—')}`]
+    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (nature type)<br>change 2017–2025 ${esc(p.trajectory || '—')}`]
 ];
 
 /** @type {any} */ let popup;
@@ -560,21 +565,22 @@ function cellSection(p) {
     '<div class="chips">' +
     (p.dor_global_2025 == null ? chip('2025: no score', CLASS_COLORS.no_data)
       : chip(`2025: ${above ? 'above' : 'below'} threshold`, above ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition)) +
-    chip(`trajectory: ${traj}`, TRAJ_COLORS[traj] || CLASS_COLORS.no_data) + '</div>' +
-    `<dl><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd><dt>Threshold</dt><dd>${fmt(p.threshold_global, 3)}</dd>` +
-    `<dt>Trend 2017–2025</dt><dd>${trend(series)}</dd><dt>Inside stand</dt><dd>${fmt(p.edge_m, 0)} m</dd></dl></section>`;
+    chip(`change 2017–2025: ${traj}`, TRAJ_COLORS[traj] || CLASS_COLORS.no_data) + '</div>' +
+    `<dl><dt>Score 2025 (nature type)</dt><dd>${score(p.dor_global_2025)}</dd><dt>Good/poor threshold</dt><dd>${fmt(p.threshold_global, 3)}</dd>` +
+    `<dt>Trend 2017–2025</dt><dd>${trend(series)}</dd><dt>Distance to stand edge</dt><dd>${fmt(p.edge_m, 0)} m</dd></dl></section>`;
 }
 
 function standSection(p) {
   const local = p.condition_local || 'no_data', global = p.condition_global || 'no_data';
-  return `<section><h4>Stand: ${esc(p.forest_type)} &middot; ${esc(p.layer)}</h4>` +
+  return `<section><h4>Stand: ${esc(p.forest_type)}</h4>` +
     trajChart(p.series || [], p.threshold_global, index.years, p.survey_year) +
     '<div class="chips">' +
     chip(`local: ${CLASS_LABELS[local] || 'no score'}`, CLASS_COLORS[local]) +
     chip(`nature type: ${CLASS_LABELS[global] || 'no score'}`, CLASS_COLORS[global]) +
-    chip(`trajectory: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
-    `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Surveyed</dt><dd>${esc(p.survey_year ?? '—')}</dd>` +
-    `<dt>Field condition</dt><dd>${esc(p.tilstand || '—')}</dd><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd>` +
+    chip(`change 2017–2025: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
+    `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Survey</dt><dd>${esc(survey(p.layer))}, ${esc(p.survey_year ?? 'year unknown')}</dd>` +
+    `<dt>Survey ID</dt><dd>${esc(String(p.poly_id).split(':').pop())}</dd>` +
+    `<dt>Field condition (survey)</dt><dd>${esc(fieldCondition(p.tilstand))}</dd><dt>Score 2025 (nature type)</dt><dd>${score(p.dor_global_2025)}</dd>` +
     `<dt>Trend 2017–2025</dt><dd>${trend(p.series || [])}</dd></dl></section>`;
 }
 
@@ -591,7 +597,7 @@ function showDetail(e) {
       `${p.date >= newCutoff() ? chip('new', NEW_COLOR) : ''}</div>` +
       `<dl><dt>Detected</dt><dd>${fmtDate(p.date)}</dd><dt>Certainty</dt><dd>${certainty(p.conf)}</dd>` +
       `<dt>Size of change</dt><dd>${fmt(p.mag, 3)} (cut-off ${SCCD_GATE})</dd>` +
-      `<dt>Breaks at this spot</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
+      `<dt>Changes detected here</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
   }
   if (c2c) html += c2cSection(c2c.properties);
   if (cell) html += cellSection(cell.properties);
@@ -1040,6 +1046,7 @@ function setupInfo() {
         for (const k of keys) {
           const c = /** @type {HTMLElement} */ (k.cloneNode(true));
           c.removeAttribute('id');
+          c.hidden = false; // e.g. the radar key, hidden while no layer is configured
           box.append(c);
         }
         body.append(box);

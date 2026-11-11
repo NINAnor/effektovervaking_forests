@@ -56,7 +56,7 @@ from `c2c/pmtiles/c2c_pixels.pmtiles` under the same S3 prefix (or `c2cPixels`
 in `config.js`), source-layer `c2c_pixels`. Shown only where |ΔNBR| ≥ 0.175,
 the loss gate tuned against the labels in the old inspector, unless *Include
 weak changes* is ticked (94 % of the pixels are below it). Coloured by the year
-the change ended; abrupt (≤ 1 year) or gradual from `duration`.
+the change ended; `duration` is the years the line was stable before the drop.
 
 **RADD** (Wageningen RADD Europe, Sentinel-1, 10 m) is drawn from Earth
 Engine XYZ tiles, as in the old inspector, masked to the stands:

@@ -251,7 +251,17 @@
 </template>
 
 <template id="info-alerts" data-title="Tree-cover alerts (S-CCD)">
-  <p><b>Near-real-time change candidates.</b> An automatic service checks each new
+  <p><b>What it shows.</b> Places where new Sentinel-2 satellite images suggest the
+    tree cover changed: red for possible loss, green for possible regrowth. Updated
+    as new clear images arrive; a dot appears a few weeks after the change.</p>
+  <p><b>How far to trust it.</b> These are candidates, not confirmed changes: on
+    checked cells about 1 in 10 high- and medium-certainty candidates was real loss.
+    Use <i>Certainty</i> to hide the least certain ones.</p>
+  <p><b>What to do.</b> Click a dot and open its satellite image history, or compare
+    with the <i>Forest-loss map</i> and aerial photos, before treating it as loss.</p>
+  <details class="about">
+  <summary>How it is made</summary>
+  <p>An automatic service checks each new
     clear Sentinel-2 scene over the stands. Each 10 m cell has a time-series model,
     which stochastic continuous change detection (S-CCD) updates with every new clear
     observation. A break is confirmed after 6 observations in a row that do not fit
@@ -267,15 +277,23 @@
     after more than 60 days without a clear image, are held low: at 58&ndash;61&deg; N
     there are almost no clear optical images then. <i>High</i> is 0.67 or more,
     <i>medium</i> 0.34&ndash;0.67. The score is not a probability.</p>
-  <p><b>Review before use.</b> On labelled cells, about 1 in 10 high- and
-    medium-certainty candidates was real loss. Candidates a reviewer rejected are not
-    shown. A dot is dated by its most recent break; candidates appear a few weeks
-    after the break, once more clear scenes confirm it.</p>
-  <p>Click a dot to open its Sentinel-2 image history in a new tab.</p>
+  <p>Candidates a reviewer rejected are not shown. A dot is dated by its most
+    recent break.</p>
+  </details>
 </template>
 
 <template id="info-c2c" data-title="Forest-loss map (C2C)">
-  <p><b>The main forest-loss map.</b> C2C (Composite2Change) fits straight segments
+  <p><b>What it shows.</b> The main forest-loss map: 10 m cells where the canopy was
+    opened or removed, coloured by the year of loss, 2018&ndash;2025. Made once a
+    year, so the date filter does not apply.</p>
+  <p><b>How far to trust it.</b> It finds about 80 % of real loss, and about 2 in 3
+    of its loss cells are real loss, so read its areas as an upper estimate.
+    <b>2024&ndash;2025 are undercounted</b>: read them as minimum values.</p>
+  <p><b>What to do.</b> Use it to see where and when the canopy was lost; it cannot
+    tell felling from storm or dieback.</p>
+  <details class="about">
+  <summary>How it is made</summary>
+  <p>C2C (Composite2Change) fits straight segments
     to a yearly Sentinel-2 value of each 10 m cell, 2017&ndash;2025: the median NBR of
     all clear observations from 1 June to 30 September. NBR (normalised burn ratio)
     falls when the canopy is opened or removed.</p>
@@ -289,8 +307,8 @@
     undercounted</b>, because a break needs later images to be confirmed: read
     2024&ndash;2025 as minimum values.</p>
   <p>Against labelled cells C2C finds 80 % of the loss cells, and 67 % of its loss
-    calls are true loss, so its loss areas are an upper estimate. It records canopy
-    loss of any cause. Made once a year, so the date filter does not apply.</p>
+    calls are true loss.</p>
+  </details>
 </template>
 
 <template id="info-radd" data-title="Radar alerts (RADD)">
@@ -306,6 +324,15 @@
 </template>
 
 <template id="info-stands" data-title="Forest stands">
+  <p><b>What it shows.</b> The 737 mapped olivinskog and kalklindeskog stands,
+    coloured by forest type, by their condition in 2025 (good, poor or not decided)
+    or by their change 2017&ndash;2025.</p>
+  <p><b>How far to trust it.</b> The condition comes from satellite data, not a field
+    visit. Small stands (below about 0.5 ha) are the least reliable.</p>
+  <p><b>What to do.</b> Use it to rank stands and choose where to look first; for a
+    decision on one stand, add a field visit or aerial photos.</p>
+  <details class="about">
+  <summary>How it is made</summary>
   <p>737 mapped polygons from three field surveys of each forest type:
     Milj&oslash;direktoratet's nature-type mapping (MI), Nature in Norway (NiN)
     1:5000 and DN-h&aring;ndbok 13 (HB13). The surveys overlap on 24 % of their area;
@@ -324,9 +351,9 @@
     Declining and improving are the steepest 2 % of trends on ground with no recorded
     clearing, so about 15 stands fall in each by chance. Read <i>stable</i> as "no
     change detected", and <i>improving</i> as rising faster than the area as a whole.</p>
-  <p>Use the score to rank stands and choose where to look first; for a decision on
-    one stand, add a field visit or aerial photos. Below about 0.5 ha, edge cells mix
-    in roads and fields: treat the score as a reason to investigate, not a result.</p>
+  <p>Below about 0.5 ha, edge cells mix in roads and fields: treat the score as a
+    reason to investigate, not a result.</p>
+  </details>
 </template>
 
 <template id="info-cells" data-title="Condition, 10 m squares">

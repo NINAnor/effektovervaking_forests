@@ -214,7 +214,7 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
         page.mouse.click(*centre)
         page.wait_for_function("() => !document.getElementById('detail').hidden")
         body = page.inner_text("#detail-body")
-        assert "Stand" in body and "trajectory: stable" in body
+        assert "Stand" in body and "change 2017–2025: stable" in body
         assert page.locator("#detail .traj-chart circle").count() == 9
         # The selected stand is outlined (no ring: nothing smaller was hit).
         assert page.evaluate("() => map.getFilter('sel-stand')[2]") != -1
@@ -347,7 +347,7 @@ def test_c2c_card_text(browser, site) -> None:
         assert "Hansen" in html[0] and "weak" not in html[0]
         assert "loss in 2025" in html[1] and "undercounted" in html[1]
         assert "weak" in html[1] and "no loss mapped" in html[1]
-        assert "Steady before the drop</dt><dd>8 yr" in html[1]
+        assert "Years stable before</dt><dd>8<" in html[1]
         assert not errors
     finally:
         ctx.close()

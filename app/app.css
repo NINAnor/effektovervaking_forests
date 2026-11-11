@@ -437,6 +437,9 @@ input[type="date"]:hover { background: var(--control-hover); }
   background: var(--control); border: 1px solid var(--line-strong); border-radius: 999px;
 }
 .about a { color: var(--accent); }
+/* In a dialog the method notes read as body text, not as a small aside. */
+.info-dialog .about { font-size: inherit; color: inherit; }
+.info-dialog .about summary { margin-top: 6px; }
 .key--years { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--muted); }
 .key--years span { display: inline-flex; align-items: center; gap: 4px; }
 .key--years .sw { width: 12px; height: 12px; border-radius: 50%; }
