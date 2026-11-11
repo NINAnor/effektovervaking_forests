@@ -65,7 +65,7 @@ html[data-theme="dark"] {
 html, body, #app { height: 100%; margin: 0; }
 
 body {
-  font: 400 13px/1.4 "Google Sans", Roboto, Arial, sans-serif;
+  font: 400 13px/1.4 Roboto, Arial, sans-serif;
   background: var(--bg);
   color: var(--ink);
 }
@@ -84,7 +84,7 @@ body {
   margin: 0; font-size: 17px; font-weight: 500; letter-spacing: -.012em;
 }
 .topbar__title p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
-.topbar__right { display: flex; align-items: center; gap: 10px; }
+.topbar__right { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .topbar__status {
   font-size: 12px; padding: 4px 12px; border-radius: 999px;
   border: 1px solid var(--line-strong); color: var(--muted);
@@ -132,7 +132,7 @@ body {
 
 /* ── fields ─────────────────────────────────────────────────────────── */
 select, .pill-btn {
-  font: 450 13px "Google Sans", Roboto, Arial, sans-serif;
+  font: 450 13px Roboto, Arial, sans-serif;
   color: var(--ink);
   background: var(--control);
   border: 1px solid var(--line-strong);
@@ -142,11 +142,11 @@ select, .pill-btn {
 select:hover, .pill-btn:hover {
   background: var(--control-hover);
 }
-.pill-btn { cursor: pointer; }
+.pill-btn { cursor: pointer; white-space: nowrap; }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   flex: none; width: 28px; height: 28px; padding: 0;
-  font: 450 18px/1 "Google Sans", Roboto, Arial, sans-serif;
+  font: 450 18px/1 Roboto, Arial, sans-serif;
   color: var(--ink);
   background: var(--control);
   border: 1px solid var(--line-strong);
@@ -210,9 +210,9 @@ label.switch input::after {
   background: var(--faint);
   transition: transform .16s ease, background .16s ease;
 }
-label.switch input:checked { background: var(--line-strong); }
+label.switch input:checked { background: var(--ink); }
 label.switch input:checked::after {
-  background: var(--ink); transform: translateX(14px);
+  background: var(--surface); transform: translateX(14px);
 }
 
 label.inline {
@@ -377,7 +377,7 @@ label.inline select { flex: 1 1 auto; min-width: 0; max-width: 150px; }
 .layer-head { display: flex; align-items: center; gap: 8px; }
 .layer-head > :first-child { flex: 1; margin-bottom: 0; }
 .info-btn {
-  flex: none; width: 22px; height: 22px; padding: 0;
+  flex: none; width: 28px; height: 28px; padding: 0;
   font: italic 500 13px/1 Georgia, serif; color: var(--muted);
   background: var(--control); border: 1px solid var(--line-strong);
   border-radius: 50%; cursor: pointer;
@@ -414,7 +414,7 @@ label.inline select { flex: 1 1 auto; min-width: 0; max-width: 150px; }
 .period .seg--small { margin: 0; }
 .period .hint { margin: 0; }
 input[type="date"] {
-  font: 450 13px "Google Sans", Roboto, Arial, sans-serif;
+  font: 450 13px Roboto, Arial, sans-serif;
   color: var(--ink); background: var(--control);
   border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px 10px;
 }
@@ -433,7 +433,7 @@ input[type="date"]:hover { background: var(--control-hover); }
 .link-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .link-form input {
   flex: 1 1 100%; min-width: 0; padding: 4px 10px;
-  font: 400 12px "Google Sans", Roboto, Arial, sans-serif; color: var(--ink);
+  font: 400 12px Roboto, Arial, sans-serif; color: var(--ink);
   background: var(--control); border: 1px solid var(--line-strong); border-radius: 999px;
 }
 .about a { color: var(--accent); }
