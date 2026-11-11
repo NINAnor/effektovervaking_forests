@@ -9,7 +9,11 @@ const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 const KIND_COLORS = { loss: '#e06666', gain: '#4dd0a7' };
 const KINDS = ['loss', 'gain'];
 const BASEMAPS = CFG.basemaps || {
-  osm: { tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; OpenStreetMap contributors' }
+  osm: {
+    label: 'Map (OpenStreetMap)',
+    tiles: CFG.basemap || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: CFG.basemapAttribution || '&copy; OpenStreetMap contributors'
+  }
 };
 // Condition colours, as in the old inspector (ColorBrewer BrBG).
 const CLASS_COLORS = {
@@ -30,7 +34,7 @@ const state = {
   from: '',
   to: '',
   resolution: 'annual',
-  basemap: 'osm',
+  basemap: Object.keys(BASEMAPS)[0], // the first configured is the default
   alerts: true,
   stands: true,
   standColor: 'forest_type',
@@ -236,6 +240,7 @@ function ensurePoints(aoi, kind) {
           'circle-opacity': 0.8
         }
       });
+      applyMapState(); // filter and show it per the state now, not on the next refresh
       return key;
     }).catch((e) => {
       pointLayers.delete(key); // retry on the next refresh
@@ -494,6 +499,20 @@ function setupControls() {
   bind('filter-date-to', 'to');
   bind('cover-resolution', 'resolution');
   bind('stand-color', 'standColor');
+  document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
+    `<label class="check"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}> ` +
+    `<span>${esc(b.label || id)}</span></label>`).join('');
+  // Browsers may restore form state on reload; the controls are the truth.
+  const val = (id) => /** @type {HTMLInputElement} */ (document.getElementById(id));
+  state.forestType = val('filter-forest-type').value;
+  state.kind = val('filter-alert-type').value;
+  state.minConf = Number(val('filter-confidence').value);
+  state.resolution = val('cover-resolution').value;
+  state.standColor = val('stand-color').value;
+  state.alerts = val('toggle-alerts').checked;
+  state.stands = val('toggle-stands').checked;
+  state.cells = val('toggle-cells').checked;
+  if (window.innerWidth < 700) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
   document.getElementById('cell-ramp').style.background =
     `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
   for (const el of document.querySelectorAll('input[name="basemap"]')) {
