@@ -179,6 +179,11 @@ def publishable(aoi_name: str, include_gain: bool = True) -> pd.DataFrame:
     df = load(aoi_name)
     if df.empty:
         return df
+    return df[publishable_mask(df, include_gain)].reset_index(drop=True)
+
+
+def publishable_mask(df: pd.DataFrame, include_gain: bool = True) -> pd.Series:
+    """Rows of an alert table that `publishable` would keep."""
     keep = df["status"].isin(("new", "historical", "confirmed") + REVIEWED)
     if include_gain:
         # `record` files gains as `below_gate`; a gain clearing the magnitude
@@ -186,4 +191,4 @@ def publishable(aoi_name: str, include_gain: bool = True) -> pd.DataFrame:
         keep |= (df["kind"] == "gain") & (df["magnitude"].abs() >= df["gate"])
     else:
         keep &= df["kind"] == "loss"
-    return df[keep].reset_index(drop=True)
+    return keep

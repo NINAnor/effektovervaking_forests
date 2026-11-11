@@ -542,6 +542,25 @@ def publish_site(
     _echo(f"manifest: {m}")
 
 
+@publish_app.command("dashboard")
+def publish_dashboard(
+    source: str = typer.Option(
+        None,
+        help="S3 prefix URL or local folder holding alerts/ and condition/ "
+        "(default: FORESTMON_DASHBOARD_SOURCE).",
+    ),
+    out: str = typer.Option("app/data", help="Where the dashboard reads its JSON."),
+):
+    """Bake the dashboard's JSON from the published alert and condition parquet."""
+    from . import dashboard
+
+    source = source or dashboard.default_source()
+    if not source:
+        _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
+    idx = dashboard.bake(source, out)
+    _echo(f"{out}/index.json: {idx['pixels']} pixels, {idx['period_range']}")
+
+
 # ── observability ────────────────────────────────────────────────────────────
 @app.command("health")
 def health_cmd(
