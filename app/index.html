@@ -101,6 +101,16 @@
             <p class="hint">Sentinel-2 satellite, updated as new images arrive.</p>
           </div>
 
+          <div class="layer-group" role="group" aria-label="Yearly change map" id="c2c-section">
+            <div class="layer-head">
+              <label class="switch"><span>Yearly change map (C2C)</span><input type="checkbox" role="switch" id="toggle-c2c"></label>
+              <button type="button" class="info-btn" data-info="c2c" aria-label="About the yearly change map">i</button>
+            </div>
+            <div class="key key--years" id="c2c-key" aria-label="Year the change ended"></div>
+            <label class="check"><input type="checkbox" id="c2c-weak"> Include weak changes</label>
+            <p class="hint">One Sentinel-2 image per summer, 2017&ndash;2025. Not filtered by date.</p>
+          </div>
+
           <div class="layer-group" role="group" aria-label="Radar alerts" id="radd-section">
             <div class="layer-head">
               <label class="switch"><span>Radar alerts (RADD)</span><input type="checkbox" role="switch" id="toggle-radd"></label>
@@ -252,6 +262,23 @@
     rejected. A dot is dated by when the most recent change at that spot happened.</p>
   <p>Click a dot to open its Sentinel-2 image history in a new tab: the line drops
     when the forest was lost.</p>
+</template>
+
+<template id="info-c2c" data-title="Yearly change map (C2C)">
+  <p>A look back over 2017&ndash;2025, made by this project with C2C
+    (<a href="https://doi.org/10.1016/j.envsoft.2026.107082" target="_blank" rel="noopener">Composite2Change</a>)
+    from one cloud-free Sentinel-2 image per summer. For each 10 m square it finds the
+    largest drop in greenness over those years, and when it happened.</p>
+  <p>The <b>colour</b> is the year the change ended, from light (2018) to dark purple
+    (2025). Click a dot to see whether it was an <b>abrupt loss</b> (within about a
+    year: felling, windthrow) or a <b>gradual decline</b> over several years
+    (thinning, drought stress, dieback).</p>
+  <p>Only drops of 0.175 or more are shown, measured in NBR, a satellite index of
+    green, healthy vegetation. That threshold was fitted to pixels a person checked;
+    weaker drops are mostly noise. Tick <i>Include weak changes</i> to see them anyway.</p>
+  <p>Unlike the tree-cover alerts it is updated about once a year, so the date
+    filter does not apply. A spot found by both is very likely a real change. The
+    details also say whether Global Forest Watch mapped loss there.</p>
 </template>
 
 <template id="info-radd" data-title="Radar alerts (RADD)">

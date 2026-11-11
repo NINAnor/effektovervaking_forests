@@ -28,6 +28,10 @@ const CLASS_LABELS = {
 };
 const TRAJ_COLORS = { improving: '#35978f', stable: '#9aa39c', fluctuating: '#c8ccc2', declining: '#bf812d' };
 // Cells: (score - threshold) x 1000, brown below the threshold, blue-green above.
+// C2C: the year a change ended, light to dark purple (apart from the red/green alerts).
+const C2C_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025];
+const C2C_COLORS = ['#efedf5', '#dadaeb', '#bcbddc', '#9e9ac8', '#807dba', '#6a51a3', '#54278f', '#3f007d'];
+const C2C_GATE = 0.175; // |NBR drop| tuned against the labelled pixels (old inspector)
 const CELL_RAMP = [['#8c510a', -90], ['#bf812d', -60], ['#dfc27d', -30], ['#f6e8c3', 0],
   ['#c7eae5', 30], ['#80cdc1', 60], ['#35978f', 90], ['#01665e', null]];
 
@@ -44,7 +48,9 @@ const state = {
   raddMode: 'alert',
   stands: true,
   standColor: 'forest_type',
-  cells: false
+  cells: false,
+  c2c: false,
+  c2cWeak: false
 };
 
 /** @type {any} */ let index;
@@ -177,6 +183,14 @@ function cellsUrl() {
   return src && src !== 'local' ? src.replace(/\/?$/, '/') + 'condition/pmtiles/condition_pixels.pmtiles' : '';
 }
 
+let pmtilesReady = false;
+/** Register the pmtiles:// protocol once, for whichever layer needs it first. */
+function usePmtiles() {
+  if (pmtilesReady) return;
+  maplibregl.addProtocol('pmtiles', new pmtiles.Protocol().tile);
+  pmtilesReady = true;
+}
+
 function addConditionCells() {
   const url = cellsUrl();
   if (!url || typeof pmtiles === 'undefined') {
@@ -184,8 +198,7 @@ function addConditionCells() {
     document.getElementById('cells-section').hidden = true;
     return;
   }
-  const protocol = new pmtiles.Protocol();
-  maplibregl.addProtocol('pmtiles', protocol.tile);
+  usePmtiles();
   map.addSource('cells', { type: 'vector', url: 'pmtiles://' + url });
   const diff = ['*', 1000, ['-', ['to-number', ['get', 'dor_global_2025']], ['to-number', ['get', 'threshold_global']]]];
   const ramp = ['step', diff, CELL_RAMP[0][0]];
@@ -201,6 +214,54 @@ function addConditionCells() {
   }, 'forest-line');
 }
 
+/** config.js wins; otherwise C2C's pmtiles under the S3 prefix the data were baked from. */
+function c2cUrl() {
+  if (CFG.c2cPixels) return CFG.c2cPixels;
+  const src = index.source;
+  return src && src !== 'local' ? src.replace(/\/?$/, '/') + 'c2c/pmtiles/c2c_pixels.pmtiles' : '';
+}
+
+function addC2c() {
+  const url = c2cUrl();
+  if (!url || typeof pmtiles === 'undefined') {
+    document.getElementById('c2c-section').hidden = true;
+    return;
+  }
+  usePmtiles();
+  map.addSource('c2c', { type: 'vector', url: 'pmtiles://' + url });
+  const year = ['round', ['coalesce', ['get', 'change_year'], C2C_YEARS[0]]];
+  const color = ['step', year, C2C_COLORS[0]];
+  C2C_YEARS.slice(1).forEach((y, i) => color.push(y, C2C_COLORS[i + 1]));
+  map.addLayer({
+    id: 'c2c', type: 'circle', source: 'c2c', 'source-layer': 'c2c_pixels',
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-color': color,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 2, 12, 3.5, 16, 6.5],
+      'circle-stroke-color': '#1d1030', 'circle-stroke-width': 0.8, 'circle-opacity': 0.95
+    }
+  });
+}
+
+/** C2C reports the change's end (change_year) and its length in years. */
+function c2cWhen(p) {
+  const end = Math.round(p.change_year), start = Math.round(p.change_year - p.duration);
+  return { end, start, abrupt: end - start <= 1 };
+}
+
+function c2cSection(p) {
+  const { end, start, abrupt } = c2cWhen(p);
+  const drop = Math.abs(Number(p.magnitude));
+  const kind = abrupt ? 'Abrupt loss' : 'Gradual decline';
+  return `<section><h4>Yearly change map (C2C)</h4><div class="chips">` +
+    chip(kind, C2C_COLORS[Math.max(0, C2C_YEARS.indexOf(end))]) +
+    (drop < C2C_GATE ? chip('weak', CLASS_COLORS.no_data) : '') + '</div>' +
+    `<dl><dt>When</dt><dd>${abrupt ? `between the ${start} and ${end} images` : `${start} to ${end} (${end - start} years)`}</dd>` +
+    `<dt>Size of the drop</dt><dd>${fmt(drop, 2)} NBR</dd>` +
+    `<dt>Global Forest Watch</dt><dd>${p.hansen_lossyear ? `loss in ${Math.round(p.hansen_lossyear)}` : 'no loss mapped'}</dd></dl>` +
+    `${timeseriesLink([Number(p.lon), Number(p.lat)])}</section>`;
+}
+
 function score(v) {
   return v === null || v === undefined || v === '' ? 'no score' : fmt(v, 3);
 }
@@ -210,6 +271,11 @@ const POPUPS = [
   [(id) => pointLayers.has(id), (p) =>
     `<strong>${esc(KIND_LABELS[p.kind])}</strong> &mdash; ${esc(p.aoi)}<br>detected ${fmtDate(p.date)}<br>` +
     `certainty ${certainty(p.conf)} &middot; click for details`],
+  [(id) => id === 'c2c', (p) => {
+    const { end, start, abrupt } = c2cWhen(p);
+    return `<strong>${abrupt ? 'Abrupt loss' : 'Gradual decline'}</strong> (C2C)<br>` +
+      `${abrupt ? `between ${start} and ${end}` : `${start}–${end}`}, drop ${fmt(Math.abs(p.magnitude), 2)} NBR`;
+  }],
   [(id) => id === 'cells', (p) =>
     `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
     `(threshold ${fmt(p.threshold_global, 3)})<br>` +
@@ -229,7 +295,7 @@ function setupPopup() {
   map.getCanvas().addEventListener('mouseleave', () => popup.remove());
   map.on('mousemove', (e) => {
     if (!document.getElementById('detail').hidden) { popup.remove(); return; }
-    const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys()].filter((id) => map.getLayer(id));
+    const layers = ['forest-fill', 'forest-pts', 'cells', 'c2c', ...pointLayers.keys()].filter((id) => map.getLayer(id));
     const feats = map.queryRenderedFeatures(e.point, { layers });
     let html = null;
     for (const [match, render] of POPUPS) {
@@ -480,6 +546,7 @@ function showDetail(e) {
   const at = (ids) => map.queryRenderedFeatures(e.point, { layers: ids.filter((id) => map.getLayer(id)) });
   const sccd = at([...pointLayers.keys()]);
   const cell = at(['cells'])[0];
+  const c2c = at(['c2c'])[0];
   const stand = at(['forest-fill', 'forest-pts'])[0];
   let html = '';
   for (const f of sccd.slice(0, 3)) {
@@ -489,6 +556,7 @@ function showDetail(e) {
       `<dl><dt>Detected</dt><dd>${fmtDate(p.date)}</dd><dt>Certainty</dt><dd>${certainty(p.conf)}</dd>` +
       `<dt>Changes at this spot</dt><dd>${esc(p.n)}</dd></dl>${timeseriesLink([p.lon, p.lat])}</section>`;
   }
+  if (c2c) html += c2cSection(c2c.properties);
   if (cell) html += cellSection(cell.properties);
   if (stand) html += standSection(standById.get(stand.properties.poly_id) || stand.properties);
   const card = document.getElementById('detail');
@@ -549,6 +617,11 @@ function applyMapState() {
   map.setPaintProperty('forest-fill', 'fill-color', color);
   map.setPaintProperty('forest-pts', 'circle-color', color);
   map.setPaintProperty('forest-line', 'line-color', ['case', ['==', ['get', 'trajectory'], 'declining'], '#8c510a', color]);
+  if (map.getLayer('c2c')) {
+    const gate = ['>=', ['abs', ['coalesce', ['get', 'magnitude'], 0]], state.c2cWeak ? 0 : C2C_GATE];
+    map.setFilter('c2c', forest ? ['all', forest, gate] : gate);
+    map.setLayoutProperty('c2c', 'visibility', state.c2c ? 'visible' : 'none');
+  }
   if (map.getLayer('cells')) {
     map.setFilter('cells', forest);
     map.setLayoutProperty('cells', 'visibility', state.cells ? 'visible' : 'none');
@@ -577,7 +650,7 @@ function applyMapState() {
     map.setLayoutProperty(key, 'visibility', on ? 'visible' : 'none');
     map.setFilter(key, filter);
     const c = pointCols.get(key);
-    if (on && c) for (let i = 0; i < c.date.length; i++) shown += +(c.date[i] >= from && c.date[i] <= to && c.conf[i] >= state.minConf);
+    if (wanted.has(key) && c) for (let i = 0; i < c.date.length; i++) shown += +(c.date[i] >= from && c.date[i] <= to && c.conf[i] >= state.minConf);
   }
   document.getElementById('alert-count').textContent = `(${shown.toLocaleString()})`;
   applyRadd();
@@ -980,6 +1053,8 @@ function setupControls() {
   state.alerts = val('toggle-alerts').checked;
   state.stands = val('toggle-stands').checked;
   state.cells = val('toggle-cells').checked;
+  state.c2c = val('toggle-c2c').checked;
+  state.c2cWeak = val('c2c-weak').checked;
   state.radd = val('toggle-radd').checked;
   state.raddMode = /** @type {HTMLInputElement} */ (document.querySelector('input[name="radd-mode"]:checked')).value;
   if (window.innerWidth < 700) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
@@ -990,6 +1065,8 @@ function setupControls() {
     el.style.background = '#ffffff';
     el.style.border = `2.5px solid ${NEW_COLOR}`;
   }
+  document.getElementById('c2c-key').innerHTML = C2C_YEARS.map((y, i) =>
+    `<span><i class="sw" style="background:${C2C_COLORS[i]}"></i>${y}</span>`).join('');
   document.getElementById('cell-ramp').style.background =
     `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
   for (const el of document.querySelectorAll('input[name="basemap"]')) {
@@ -998,7 +1075,8 @@ function setupControls() {
       applyMapState();
     });
   }
-  for (const [id, key] of [['toggle-alerts', 'alerts'], ['toggle-radd', 'radd'], ['toggle-stands', 'stands'], ['toggle-cells', 'cells']]) {
+  for (const [id, key] of [['toggle-alerts', 'alerts'], ['toggle-radd', 'radd'], ['toggle-stands', 'stands'], ['toggle-cells', 'cells'],
+    ['toggle-c2c', 'c2c'], ['c2c-weak', 'c2cWeak']]) {
     document.getElementById(id).addEventListener('change', (e) => {
       state[key] = /** @type {HTMLInputElement} */ (e.target).checked;
       refreshMap().catch((err) => showError(`Map update failed: ${err.message}`));
@@ -1032,6 +1110,7 @@ async function init() {
   setupControls();
   addPolygons(polygons);
   addConditionCells();
+  addC2c();
   setupPopup();
   setupDetail(polygons);
   refresh();

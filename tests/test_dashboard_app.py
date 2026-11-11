@@ -320,3 +320,26 @@ def test_radd_pasted_map_link(browser, site) -> None:
         assert not errors
     finally:
         ctx.close()
+
+
+def test_c2c_card_text(browser, site) -> None:
+    # No S3 in tests, so the layer itself is off; the card and popup text are checked.
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        assert page.locator("#c2c-section").is_hidden()
+        html = page.evaluate(
+            "() => [c2cSection({change_year: 2019.9956, duration: 0.999,"
+            " magnitude: -0.31, hansen_lossyear: 2020, lon: 15, lat: 59.6}),"
+            " c2cSection({change_year: 2024.9962, duration: 8, magnitude: -0.1,"
+            " hansen_lossyear: null, lon: 15, lat: 59.6})]"
+        )
+        assert (
+            "Abrupt loss" in html[0] and "between the 2019 and 2020 images" in html[0]
+        )
+        assert "loss in 2020" in html[0] and "weak" not in html[0]
+        assert "Gradual decline" in html[1] and "2017 to 2025 (8 years)" in html[1]
+        assert "weak" in html[1] and "no loss mapped" in html[1]
+        assert not errors
+    finally:
+        ctx.close()

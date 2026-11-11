@@ -10,6 +10,10 @@ window.DASHBOARD_CONFIG = {
   // data were baked from (index.json `source`); hidden when baked from a folder.
   conditionCells: '',
 
+  // C2C yearly change pixels (pmtiles, as conditionCells). Empty:
+  // c2c/pmtiles/c2c_pixels.pmtiles under the S3 prefix the data were baked from.
+  c2cPixels: '',
+
   // Sentinel-2 time series for a clicked S-CCD pixel; {lon} and {lat} are filled in.
   timeseriesUrl: 'https://jstnbraaten.users.earthengine.app/view/eo-timeseries-explorer#run=true;sensor=Sentinel-2%20SR;lon={lon};lat={lat};index=NBR;rgb=SWIR1%2FNIR%2FGREEN;duration=12;cloud=30;chipwidth=2;',
 

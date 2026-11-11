@@ -52,6 +52,13 @@ requests (`conditionCells` in `config.js`; empty takes it from the S3 prefix the
 baked from, and hides the layer when they were baked from a folder). It draws from
 zoom 12 and is coloured by the 2025 score minus the stand threshold.
 
+**C2C** (Composite2Change, yearly Sentinel-2 composites 2017–2025) is read
+from `c2c/pmtiles/c2c_pixels.pmtiles` under the same S3 prefix (or `c2cPixels`
+in `config.js`), source-layer `c2c_pixels`. Shown only where |ΔNBR| ≥ 0.175,
+the loss gate tuned against the labels in the old inspector, unless *Include
+weak changes* is ticked (94 % of the pixels are below it). Coloured by the year
+the change ended; abrupt (≤ 1 year) or gradual from `duration`.
+
 **RADD** (Wageningen RADD Europe, Sentinel-1, 10 m) is drawn from Earth
 Engine XYZ tiles, as in the old inspector, masked to the stands:
 `forestmon publish radd` (needs the `gee` extra and `earthengine authenticate`)
