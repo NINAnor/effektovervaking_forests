@@ -131,7 +131,7 @@ body {
 .controls label { display: flex; flex-direction: column; gap: 3px; }
 
 /* ── fields ─────────────────────────────────────────────────────────── */
-select, input[type="month"], .pill-btn {
+select, .pill-btn {
   font: 450 13px "Google Sans", Roboto, Arial, sans-serif;
   color: var(--ink);
   background: var(--control);
@@ -139,7 +139,7 @@ select, input[type="month"], .pill-btn {
   border-radius: 999px;
   padding: 4px 12px;
 }
-select:hover, input[type="month"]:hover, .pill-btn:hover {
+select:hover, .pill-btn:hover {
   background: var(--control-hover);
 }
 .pill-btn { cursor: pointer; }
@@ -362,8 +362,6 @@ label.inline {
 
 label.inline select { flex: 1 1 auto; min-width: 0; max-width: 150px; }
 
-/* Layer descriptions: one visible line of what it is, the rest behind "More". */
-.desc { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .about { margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .about summary { cursor: pointer; color: var(--accent); width: max-content; }
 .about p { margin: 4px 0 0; }
