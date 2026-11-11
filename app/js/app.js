@@ -325,7 +325,11 @@ function setupPopup() {
   popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '320px' });
   map.getCanvas().addEventListener('mouseleave', () => popup.remove());
   map.on('mousemove', (e) => {
-    if (!document.getElementById('detail').hidden) { popup.remove(); return; }
+    if (!document.getElementById('detail').hidden) {
+      map.getCanvas().style.cursor = '';
+      popup.remove();
+      return;
+    }
     const layers = ['forest-fill', 'forest-pts', 'cells', 'c2c', ...pointLayers.keys()].filter((id) => map.getLayer(id));
     const feats = map.queryRenderedFeatures(e.point, { layers });
     let html = null;
@@ -500,7 +504,7 @@ function trajChart(series, threshold, years, markYear) {
     g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/>` +
       `<text x="${m.l - 4}" y="${y(v) + 3}" text-anchor="end">${fmt(v, 2)}</text>`;
   }
-  for (const yr of [years[0], years[4], years[years.length - 1]]) {
+  for (const yr of [years[0], years[years.length >> 1], years[years.length - 1]]) {
     g += `<text x="${x(yr)}" y="${H - 5}" text-anchor="middle">${yr}</text>`;
   }
   if (markYear >= years[0] && markYear <= years[years.length - 1]) g += `<line class="mark" x1="${x(markYear)}" x2="${x(markYear)}" y1="${m.t}" y2="${H - m.b}"><title>surveyed ${markYear}</title></line>`;
@@ -566,8 +570,8 @@ function standSection(p) {
   return `<section><h4>Stand: ${esc(p.forest_type)} &middot; ${esc(p.layer)}</h4>` +
     trajChart(p.series || [], p.threshold_global, index.years, p.survey_year) +
     '<div class="chips">' +
-    chip(`local: ${CLASS_LABELS[local]}`, CLASS_COLORS[local]) +
-    chip(`nature type: ${CLASS_LABELS[global]}`, CLASS_COLORS[global]) +
+    chip(`local: ${CLASS_LABELS[local] || 'no score'}`, CLASS_COLORS[local]) +
+    chip(`nature type: ${CLASS_LABELS[global] || 'no score'}`, CLASS_COLORS[global]) +
     chip(`trajectory: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
     `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Surveyed</dt><dd>${esc(p.survey_year ?? '—')}</dd>` +
     `<dt>Field condition</dt><dd>${esc(p.tilstand || '—')}</dd><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd>` +
