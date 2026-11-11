@@ -635,12 +635,12 @@ function renderAlerts() {
   g += `<rect class="brush-out" data-side="left" y="${top}" height="${bottom - top}"/>` +
     `<rect class="brush-out" data-side="right" y="${top}" height="${bottom - top}"/>`;
   for (const [end, label] of [['from', 'Start of the period'], ['to', 'End of the period']]) {
-    g += `<g class="brush-handle" data-end="${end}" tabindex="0" role="slider" aria-label="${label}">` +
+    g += `<g class="brush-handle" data-end="${end}" tabindex="0" role="slider" aria-label="${label}" aria-valuemin="0" aria-valuemax="${xs.length}">` +
       `<rect class="hit" x="-10" y="${top}" width="20" height="${bottom - top}"/>` +
       `<line y1="${top}" y2="${bottom}"/><rect class="grip" x="-5" y="${(top + bottom) / 2 - 12}" width="10" height="24" rx="5"/></g>`;
   }
   el.innerHTML = legend(kinds.map((k) => [KIND_LABELS[k], KIND_COLORS[k]])) +
-    `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Alert area over time">${g}</svg>`;
+    `<svg viewBox="0 0 ${f.W} ${f.H}" role="group" aria-label="Alert area over time, with the period markers">${g}</svg>`;
   setupBrush(el.querySelector('svg'), xs, f);
 }
 
@@ -667,13 +667,16 @@ function setupBrush(svg, xs, f) {
     for (const h of svg.querySelectorAll('.brush-handle')) {
       const from = h.dataset.end === 'from';
       h.setAttribute('transform', `translate(${edge(from ? a : b)},0)`);
+      h.setAttribute('aria-valuenow', String(from ? a : b));
       h.setAttribute('aria-valuetext', fmtDate(ymd(from ? state.from : state.to)));
     }
   };
   const [lo, hi] = index.date_range;
   const clampDate = (iso) => (iso < lo ? lo : iso > hi ? hi : iso);
   const start = (x) => (x.length === 4 ? `${x}-01-01` : `${x}-01`);
-  const finish = (x) => (x.length === 4 ? `${x}-12-31` : addDays(`${x.slice(0, 4)}-${String(+x.slice(5) % 12 + 1).padStart(2, '0')}-01`, -1));
+  // Day 0 of the next month is the last of this one (month is 1-based here, 0-based in Date.UTC).
+  const finish = (x) => (x.length === 4 ? `${x}-12-31`
+    : new Date(Date.UTC(+x.slice(0, 4), +x.slice(5), 0)).toISOString().slice(0, 10));
   for (const h of svg.querySelectorAll('.brush-handle')) {
     const end = h.dataset.end;
     const set = (k) => {
@@ -689,7 +692,7 @@ function setupBrush(svg, xs, f) {
       const r = svg.getBoundingClientRect();
       set(Math.round(((e.clientX - r.left) * (f.W / r.width) - f.m.l) / f.band));
     });
-    h.addEventListener('lostpointercapture', () => refresh());
+    h.addEventListener('lostpointercapture', () => { brushFocus = end; refresh(); });
     h.addEventListener('keydown', (e) => {
       const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
       if (!step) return;
@@ -716,8 +719,8 @@ function renderSummary() {
     ? { value: `${fmt(latest[t].area_ha, 1)} ha`, sub: `as of ${latest[t].period}` }
     : { value: '—', sub: '' };
   const cards = [
-    { label: 'Tree cover lost', value: `${fmt(total('loss_ha'), 2)} ha`, sub: 'new alerts in the months selected' },
-    { label: 'Tree cover regrowing', value: `${fmt(total('gain_ha'), 2)} ha`, sub: 'new alerts in the months selected' },
+    { label: 'Tree cover lost', value: `${fmt(total('loss_ha'), 2)} ha`, sub: 'first seen in the months selected, any certainty' },
+    { label: 'Tree cover regrowing', value: `${fmt(total('gain_ha'), 2)} ha`, sub: 'first seen in the months selected, any certainty' },
     { label: 'Olivinskog cover', ...cover('olivinskog') },
     { label: 'Kalklindeskog cover', ...cover('kalklindeskog') }
   ];
@@ -768,10 +771,11 @@ function fmtDate(n) {
   return new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}T00:00:00Z`)
     .toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
-const newCutoff = () => ymd(addDays(index.date_range[1], -NEW_DAYS));
+const newCutoff = () => ymd(addDays(index.date_range[1], 1 - NEW_DAYS)); // as the 'Last 30 days' range
 const isNew = () => ['>=', ['get', 'date'], newCutoff()];
 function certainty(c) {
-  return `${c >= 0.8 ? 'high' : c >= 0.5 ? 'medium' : 'low'} (${fmt(c, 2)})`;
+  // Tiers as confidence.LOW_MAX / MEDIUM_MAX.
+  return `${c >= 0.67 ? 'high' : c >= 0.34 ? 'medium' : 'low'} (${fmt(c, 2)})`;
 }
 
 function showError(msg) {
@@ -818,9 +822,18 @@ function setupPeriod() {
     state.to = hi;
     setPeriodControls(v);
   };
-  preset(/** @type {HTMLInputElement} */ (document.querySelector('input[name="period"]:checked'))?.value || 'all');
+  const checked = /** @type {HTMLInputElement} */ (document.querySelector('input[name="period"]:checked'));
+  const [f0, t0] = ['filter-date-from', 'filter-date-to'].map((id) => /** @type {HTMLInputElement} */ (document.getElementById(id)).value);
+  if (!checked && f0 && t0 && lo <= f0 && f0 <= t0 && t0 <= hi) { state.from = f0; state.to = t0; } // restored on reload
+  else preset(checked?.value || 'all');
   for (const el of document.querySelectorAll('input[name="period"]')) {
-    el.addEventListener('change', (e) => { preset(/** @type {HTMLInputElement} */ (e.target).value); refresh(); });
+    el.addEventListener('change', (e) => {
+      const v = /** @type {HTMLInputElement} */ (e.target).value;
+      preset(v);
+      // A year or less is one or two bars by year: show months instead.
+      if (v !== 'all') /** @type {HTMLSelectElement} */ (document.getElementById('cover-resolution')).value = state.resolution = 'monthly';
+      refresh();
+    });
   }
   for (const [id, key] of [['filter-date-from', 'from'], ['filter-date-to', 'to']]) {
     document.getElementById(id).addEventListener('change', (e) => {

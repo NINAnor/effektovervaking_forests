@@ -421,3 +421,4 @@ input[type="date"]:hover { background: var(--control-hover); }
 .brush-handle:focus-visible .grip, .brush-handle.dragging .grip { fill: var(--accent); stroke: var(--accent); }
 .panel__header .hint { margin: 0; }
 .period .seg__opt { white-space: nowrap; }
+.info-inner ul.key { padding-left: 0; }

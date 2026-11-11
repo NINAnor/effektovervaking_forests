@@ -56,15 +56,15 @@
           <label>Certainty
             <select id="filter-confidence">
               <option value="0" selected>All alerts</option>
-              <option value="0.5">Medium and high</option>
-              <option value="0.8">High only</option>
+              <option value="0.34">Medium and high</option>
+              <option value="0.67">High only</option>
             </select>
           </label>
         </div>
       </div>
       <!-- The alert period: calendar fields, quick ranges, or the markers on the alert chart. -->
       <div class="period" role="group" aria-labelledby="period-title">
-        <span class="period__title" id="period-title">Alerts detected</span>
+        <span class="period__title" id="period-title">Changes dated</span>
         <label>from <input type="date" id="filter-date-from"></label>
         <label>to <input type="date" id="filter-date-to"></label>
         <div class="seg seg--small" id="period-presets" role="radiogroup" aria-label="Quick period">
@@ -96,7 +96,7 @@
             <ul class="key">
               <li><i class="sw sw--dot sw--loss"></i> Tree cover lost</li>
               <li><i class="sw sw--dot sw--gain"></i> Tree cover regrowing</li>
-              <li><i class="sw sw--dot sw--new"></i> New: last 30 days</li>
+              <li><i class="sw sw--dot sw--new"></i> New: latest 30 days</li>
             </ul>
             <p class="hint">Sentinel-2 satellite, updated as new images arrive.</p>
           </div>
@@ -201,7 +201,9 @@
     <li><b>Red dots</b> are places where trees seem to have been lost: felled, blown
       down or died. <b>Green dots</b> are places where trees seem to be growing back.
       Each dot is a 10 &times; 10 m square of ground.</li>
-    <li>Dots with a <b>yellow ring</b> are new: found in the last 30 days.</li>
+    <li>Dots with a <b>yellow ring</b> are new: dated within 30 days of the newest
+      alert. Alerts appear some days or weeks after the change, once the next clear
+      satellite photos have come in.</li>
     <li>Choose the period with the date boxes above the map, the quick buttons
       (<i>Last 30 days</i>, &hellip;), or by dragging the markers on the
       <i>Alert area over time</i> chart.</li>
@@ -226,11 +228,14 @@
     changed in the next photos, it becomes an alert (the method is called S-CCD).</p>
   <p><b>Tree cover lost</b>: the canopy got thinner or disappeared, for example from
     felling, wind, insects or dieback. <b>Regrowing</b>: it got greener again.</p>
-  <p><b>Certainty</b> grows as more photos confirm the change, so a new alert often
-    starts low. <i>High</i> means 0.8 or more (out of 1), <i>medium</i> 0.5&ndash;0.8.
-    Use <i>Certainty</i> above the map to hide the uncertain ones.</p>
+  <p><b>Certainty</b> (0 to 1) adds up two things: how many later photos confirm the
+    change, and how big the change is. A new alert often starts low and rises as photos
+    come in. Changes in winter, or after a long spell without clear photos, are kept
+    low, since snow and darkness fool the satellite. <i>High</i> is 0.67 or more,
+    <i>medium</i> 0.34&ndash;0.67. Use <i>Certainty</i> above the map to hide the
+    uncertain ones.</p>
   <p>Very small changes are left out, and so are alerts that a reviewer checked and
-    rejected. A dot is dated by the most recent change at that spot.</p>
+    rejected. A dot is dated by when the most recent change at that spot happened.</p>
   <p>Click a dot to open its Sentinel-2 image history in a new tab: the line drops
     when the forest was lost.</p>
 </template>
