@@ -26,12 +26,13 @@ window.DASHBOARD_CONFIG = {
       maxzoom: 19,
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
     },
-    osm: {
-      label: 'Map (OpenStreetMap)',
+    // Kartverket's open topographic map (CC BY 4.0): Norway only, which is all we show.
+    topo: {
+      label: 'Map (Kartverket topo)',
       short: 'Map',
-      tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      maxzoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
+      tiles: 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png',
+      maxzoom: 18,
+      attribution: '&copy; <a href="https://www.kartverket.no/">Kartverket</a>'
     }
   }
 };

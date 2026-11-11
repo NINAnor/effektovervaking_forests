@@ -13,10 +13,10 @@ const NEW_COLOR = '#ffd60a'; // ring of alerts from the last NEW_DAYS
 const NEW_DAYS = 30;
 const KINDS = ['loss', 'gain'];
 const BASEMAPS = CFG.basemaps || {
-  osm: {
-    label: 'Map (OpenStreetMap)',
-    tiles: CFG.basemap || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: CFG.basemapAttribution || '&copy; OpenStreetMap contributors'
+  topo: {
+    label: 'Map (Kartverket topo)',
+    tiles: CFG.basemap || 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png',
+    attribution: CFG.basemapAttribution || '&copy; Kartverket'
   }
 };
 // Condition colours, as in the old inspector (ColorBrewer BrBG).

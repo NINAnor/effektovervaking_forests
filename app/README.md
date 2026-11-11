@@ -95,7 +95,7 @@ the stand's yearly condition (survey year marked) with its classes and
 trajectory.
 
 The map's **Layers** panel switches the basemap (`basemaps` in `config.js`:
-OpenStreetMap and Esri World Imagery) and each layer, with its key beside it.
+Kartverket topo and Esri World Imagery) and each layer, with its key beside it.
 
 `config.js`'s `dataBase` says where the JSON is: `data/` beside the page, or
 any URL with CORS (e.g. the baked files copied to an S3 prefix).

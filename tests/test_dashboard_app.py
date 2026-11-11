@@ -90,7 +90,7 @@ def _open(browser, url):
         "console",
         lambda m: "Content Security Policy" in m.text and errors.append(m.text),
     )
-    page.route("**/tile.openstreetmap.org/**", lambda r: r.fulfill(status=204))
+    page.route("**/cache.kartverket.no/**", lambda r: r.fulfill(status=204))
     page.route("**/server.arcgisonline.com/**", lambda r: r.fulfill(status=204))
     page.route("**/radd.test/**", lambda r: r.fulfill(status=204))
     page.goto(url)
@@ -135,9 +135,9 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
         page.select_option("#stand-color", "trajectory")
         assert "declining" in page.inner_text("#stand-legend")
         assert page.locator("#toggle-cells").is_hidden()
-        page.check('input[name="basemap"][value="osm"]')
+        page.check('input[name="basemap"][value="topo"]')
         assert page.evaluate(
-            "() => ['osm', 'satellite']"
+            "() => ['topo', 'satellite']"
             ".map(i => map.getLayoutProperty('base-' + i, 'visibility'))"
         ) == ["visible", "none"]
         page.uncheck("#toggle-alerts")
