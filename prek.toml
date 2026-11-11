@@ -68,3 +68,10 @@ hooks = [
   { id = "deptry", name = "deptry", entry = "uv run deptry .", language = "system", types = ["python"], pass_filenames = false }
 ]
 repo = "local"
+
+[[repos]]
+hooks = [
+  { id = "eslint", files = '^app/.*\.js$', exclude = '^app/(vendor|data)/', additional_dependencies = ["eslint@10.10.0"] }
+]
+repo = "https://github.com/pre-commit/mirrors-eslint"
+rev = "v10.10.0"
