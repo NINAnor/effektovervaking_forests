@@ -184,3 +184,10 @@ pyrightconfig.json
 
 # Dashboard JSON baked by `forestmon publish dashboard`
 app/data/
+
+docs/.quarto/
+docs/*_files/
+docs/*.html.md
+docs/*.docx.md
+docs/*.typst.md
+docs/forest_monitoring_*.typ

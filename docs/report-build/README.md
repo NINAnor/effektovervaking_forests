@@ -4,9 +4,34 @@ The report ("Remote sensed monitoring of olivinskog and kalklindeskog, 2017-2025
 appendix are written as Claude Docs. This folder turns their exports into Quarto sources and renders
 HTML, PDF and Word. Nothing outside this repository is needed.
 
+Install [Quarto >= 1.4](https://quarto.org/docs/get-started/) (including its bundled Typst engine)
+and check that `quarto --version` works in your terminal. The VS Code Quarto extension alone does not
+install the command-line tool.
+
+To render the existing Quarto sources, run from the repository root; no Python packages are needed:
+
 ```bash
-pip install -r docs/report-build/requirements.txt      # Quarto (>= 1.4, with Typst) and pandoc must be on the PATH
-python docs/report-build/publish.py                    # rebuild everything into docs/
+bash docs/report-build/render.sh                      # HTML, PDF and Word
+bash docs/report-build/render.sh --to html            # HTML only (faster)
+```
+
+The project renders only the report and methods appendix, not the ecRxiv helper documents.
+The report writes directly to `docs/index.html`. The wrapper builds in local temporary storage and
+copies the finished files back. Rendering directly on the shared project drive fails with Quarto's
+`database is locked` project-cache error or `WouldBlock` during cleanup. Keep `TMPDIR` on a local
+filesystem, not the shared drive. On a local checkout, `quarto render docs --to all` also works.
+
+To render just one document, pass its source filename before any options:
+
+```bash
+bash docs/report-build/render.sh forest_monitoring_methods.qmd --to html
+```
+
+To regenerate the Quarto sources from the original exports and render all formats:
+
+```bash
+pip install -r docs/report-build/requirements.txt
+python docs/report-build/publish.py
 ```
 
 | Output | What |
@@ -14,7 +39,7 @@ python docs/report-build/publish.py                    # rebuild everything into
 | `docs/index.html` | the report (the GitHub Pages entry) |
 | `docs/forest_monitoring_methods.html` | the methods appendix; the report links to its sections |
 | `docs/forest_monitoring_{report,methods}.{pdf,docx}` | the same in PDF and Word |
-| `docs/forest_monitoring_report.qmd`, `docs/forest_monitoring_methods.qmd` | the Quarto sources (with `references.bib`, `ambio.csl`, `figures/`, `map/`, `media/` and the Word and Typst templates beside them); render with `quarto render` from `docs/` |
+| `docs/forest_monitoring_report.qmd`, `docs/forest_monitoring_methods.qmd` | the Quarto sources (with `references.bib`, `ambio.csl`, `figures/`, `map/`, `media/` and the Word and Typst templates beside them); render with the wrapper above |
 
 ## Updating from the Claude Docs
 
@@ -35,7 +60,8 @@ those no longer needed.
 
 | File | Role |
 |---|---|
-| `publish.py` | runs the two builds, moves the renders into `docs/` |
+| `publish.py` | runs the two builds in `docs/` and removes intermediate files |
+| `render.sh` | renders existing Quarto sources in local temporary storage, then copies HTML, PDF and Word into `docs/` |
 | `build_report.py` | report: `.qmd`, figures, ecRxiv badges and metadata, render, tidy the Word tables |
 | `build_methods.py` | methods appendix: `.qmd` with `section-N` anchors and citeproc references, render |
 | `make_stand_map.py` | interactive stand map (HTML only). Rebuilt when `CONDITION_OUT_DATA` (default `data/condition/outputs/data`) holds `condition.parquet`, `trajectory.parquet` and `polygons_geo.parquet` (also in the S3 bucket under `condition/parquet/`); otherwise the committed `assets/map/stand_map.md` is used |

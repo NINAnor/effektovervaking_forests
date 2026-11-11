@@ -3,7 +3,7 @@
     python docs/report-build/publish.py
 
 Runs build_report.py and build_methods.py (each writes its .qmd and renders HTML, PDF and Word in
-docs/), then renames the report to index.html, as in kystlynghei_condition (report + methods
+docs/), with the report written directly to index.html, as in kystlynghei_condition (report + methods
 appendix, rendered next to each other, linked section by section):
 
     docs/index.html                       the report (HTML, GitHub Pages)
@@ -24,6 +24,8 @@ GENERATED = ("forest_monitoring_report.qmd", "forest_monitoring_methods.qmd", "r
 
 
 def main() -> None:
+    if shutil.which("quarto") is None:
+        raise SystemExit("Quarto is not installed or not on PATH. Install Quarto >= 1.4 before publishing.")
     for name in GENERATED:
         p = DOCS / name
         if p.is_dir():
@@ -32,7 +34,6 @@ def main() -> None:
             p.unlink()
     for script in ("build_report.py", "build_methods.py"):    # the report first: it writes reference_a4.docx
         subprocess.run([sys.executable, str(HERE / script)], check=True)
-    shutil.move(DOCS / "forest_monitoring_report.html", DOCS / "index.html")
     (DOCS / ".nojekyll").touch()
     for p in DOCS.glob("*_files"):
         shutil.rmtree(p, ignore_errors=True)

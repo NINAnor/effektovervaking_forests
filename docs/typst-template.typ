@@ -2,6 +2,7 @@
 
 #let article(
   title: none,
+  subtitle: none,
   authors: none,
   date: none,
   abstract: none,
@@ -33,6 +34,10 @@
   if title != none {
     align(center)[#block(inset: 2em)[
       #text(weight: "bold", size: 1.5em)[#title]
+      #if subtitle != none {
+        parbreak()
+        text(size: 1.25em)[#subtitle]
+      }
     ]]
   }
 
