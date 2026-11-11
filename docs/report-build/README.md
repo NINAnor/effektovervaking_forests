@@ -14,7 +14,7 @@ python docs/report-build/publish.py                    # rebuild everything into
 | `docs/index.html` | the report (the GitHub Pages entry) |
 | `docs/forest_monitoring_methods.html` | the methods appendix; the report links to its sections |
 | `docs/forest_monitoring_{report,methods}.{pdf,docx}` | the same in PDF and Word |
-| `docs/source/` | the Quarto sources, rebuilt each run, to host in `NINAnor/effektovervaaking-2026-2030` |
+| `docs/forest_monitoring_report.qmd`, `docs/forest_monitoring_methods.qmd` | the Quarto sources (with `references.bib`, `ambio.csl`, `figures/`, `map/`, `media/` and the Word and Typst templates beside them); render with `quarto render` from `docs/` |
 
 ## Updating from the Claude Docs
 
