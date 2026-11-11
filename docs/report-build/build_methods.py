@@ -19,6 +19,7 @@ DOCS = HERE.parent                              # docs/: the .qmd sources and th
 OUT.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE))
 from fix_docx_tables import main as fix_docx  # noqa: E402
+from hide_s3 import hide_s3  # noqa: E402
 
 QMD = DOCS / "forest_monitoring_methods.qmd"
 
@@ -44,7 +45,7 @@ date-format: "D MMMM YYYY"
 code-links:
   - text: Code repository
     icon: github
-    href: https://github.com/NINAnor/effektovervaaking-2026-2030
+    href: https://github.com/NINAnor/effektovervaking_forests
 lang: en-GB
 bibliography: report-assets/references.bib
 csl: report-assets/ambio.csl
@@ -133,7 +134,7 @@ def appendix_structure(text: str) -> str:
 
 
 def main() -> None:
-    text = (HERE / "src" / "methods" / "claude_doc_export.md").read_text(encoding="utf-8")
+    text = hide_s3((HERE / "src" / "methods" / "claude_doc_export.md").read_text(encoding="utf-8"))
     lines = text.splitlines()
     # Title and byline ("Oct 22, 2026 · @Geethen Singh") move to the YAML.
     assert lines[0].startswith("# Methods:") and "@Geethen Singh" in lines[2], lines[:3]

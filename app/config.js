@@ -6,8 +6,9 @@ window.DASHBOARD_CONFIG = {
   dataBase: 'data/',
 
   // Condition per 10 m cell, read by range requests (needs CORS with Range).
-  // Empty hides the layer.
-  conditionCells: 'https://s3-int-1.nina.no/miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/pmtiles/condition_pixels.pmtiles',
+  // Empty: condition/pmtiles/condition_pixels.pmtiles under the S3 prefix the
+  // data were baked from (index.json `source`); hidden when baked from a folder.
+  conditionCells: '',
 
   // Basemaps offered in the layer panel; the first is the default.
   basemaps: {

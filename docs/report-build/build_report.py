@@ -21,6 +21,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 import make_stand_map
+from hide_s3 import hide_s3
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
 ASSETS = HERE / "assets"
@@ -37,6 +38,7 @@ FIG = OUT / "figures"
 QMD = DOCS / "forest_monitoring_report.qmd"
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
 
 YAML = """---
 title: "Remote sensed monitoring of olivinskog and kalklindeskog, 2017-2025"
@@ -64,8 +66,8 @@ callout-icon: false            # as in the ecRxiv template
 code-links:
   - text: Code repository
     icon: github
-    href: https://github.com/NINAnor/effektovervaaking-2026-2030
-repo-url: https://github.com/NINAnor/effektovervaaking-2026-2030
+    href: https://github.com/NINAnor/effektovervaking_forests
+repo-url: https://github.com/NINAnor/effektovervaking_forests
 # The methods appendix is rendered next to the report, so it is linked relatively
 methods-url: forest_monitoring_methods.html
 number-sections: true
@@ -340,7 +342,7 @@ def main() -> None:
     reference_docx()
     for f in ("ambio.csl", "references.bib", "typst-template.typ"):
         shutil.copyfile(ASSETS / f, OUT / f)
-    text = (SRC / "claude_doc_export.md").read_text(encoding="utf-8")
+    text = hide_s3((SRC / "claude_doc_export.md").read_text(encoding="utf-8"))
     for old, new in REPLACE:
         if text.count(old) == 0:                    # already fixed (or dropped) in the doc
             print("note: fix not needed, text not in the export:", old[:60])

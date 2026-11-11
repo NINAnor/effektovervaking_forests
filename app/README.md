@@ -48,7 +48,8 @@ The app refuses an `index.json` whose `schema` differs from `SCHEMA` in
 
 Condition per 10 m cell is not baked: the page reads
 `condition/pmtiles/condition_pixels.pmtiles` straight from S3 by range
-requests (`conditionCells` in `config.js`; empty hides the layer). It draws from
+requests (`conditionCells` in `config.js`; empty takes it from the S3 prefix the data were
+baked from, and hides the layer when they were baked from a folder). It draws from
 zoom 12 and is coloured by the 2025 score minus the stand threshold.
 
 The map's **Layers** panel switches the basemap (`basemaps` in `config.js`:
