@@ -180,7 +180,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
                 points(sel), out_dir / f"points_{aoi}_{kind}.json"
             )
 
-    web = polys[["poly_id", "forest_type", "layer", "naturtype", "area_ha", "geometry"]]
+    web = polys[["poly_id", "forest_type", "layer", "area_ha", "geometry"]]
     web = web.merge(stands, on="poly_id", how="left", validate="one_to_one")
     web["survey_year"] = web["survey_year"].astype("Int64")  # stays int if unmatched
     # A point inside each stand, for finding small stands at overview zoom.
