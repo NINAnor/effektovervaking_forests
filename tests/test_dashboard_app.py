@@ -232,6 +232,16 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
         assert page.evaluate("() => document.activeElement.id") == "detail-close"
         page.keyboard.press("Escape")
         assert page.locator("#detail").is_hidden()
+        # Zoomed out the stand is a dot: ring it as well as outlining it; zoom to it.
+        page.evaluate("() => map.jumpTo({center: [11.46823, 59.4911], zoom: 8})")
+        page.wait_for_timeout(1000)
+        page.mouse.click(*centre)
+        page.wait_for_function("() => !document.getElementById('detail').hidden")
+        assert page.evaluate("() => map.getFilter('sel-stand')[2]") != -1
+        assert page.evaluate("() => map.getSource('sel')._data.features.length") == 1
+        page.click("[data-zoom-stand]")
+        assert page.evaluate("() => map.getZoom()") > 12
+        page.click("#detail-close")
 
         # An S-CCD pixel: a link to its Sentinel-2 time series.
         page.evaluate("() => map.jumpTo({center: [15.0001, 59.6], zoom: 17})")

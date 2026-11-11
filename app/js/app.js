@@ -586,7 +586,8 @@ function standSection(p) {
     `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Survey</dt><dd>${esc(survey(p.layer))}, ${esc(p.survey_year ?? 'year unknown')}</dd>` +
     `<dt>Survey ID</dt><dd>${esc(String(p.poly_id).split(':').pop())}</dd>` +
     `<dt>Field condition (survey)</dt><dd>${esc(fieldCondition(p.tilstand))}</dd><dt>Score 2025 (nature type)</dt><dd>${score(p.dor_global_2025)}</dd>` +
-    `<dt>Trend 2017–2025</dt><dd>${trend(p.series || [])}</dd></dl></section>`;
+    `<dt>Trend 2017–2025</dt><dd>${trend(p.series || [])}</dd></dl>` +
+    `<button type="button" class="pill-btn" data-zoom-stand="${esc(p.poly_id)}">Zoom to stand</button></section>`;
 }
 
 function showDetail(e) {
@@ -612,20 +613,25 @@ function showDetail(e) {
   // On the dot that was picked (rendered coordinates are snapped to the tile grid).
   const dot = sccd[0] || c2c;
   const standId = !dot && !cell && stand ? stand.properties.poly_id : null;
+  // Zoomed out a stand is a dot (forest-pts) and its outline is sub-pixel: ring its centre.
+  const centre = standId !== null && stand.layer.id === 'forest-pts' ? stand.properties : null;
+  const ring = dot ? [Number(dot.properties.lon), Number(dot.properties.lat)]
+    : centre ? [Number(centre.lon), Number(centre.lat)]
+      : standId === null ? [e.lngLat.lng, e.lngLat.lat] : null;
   document.getElementById('detail-title').textContent =
     `${fmt(e.lngLat.lat, 5)}° N, ${fmt(e.lngLat.lng, 5)}° E`;
   document.getElementById('detail-body').innerHTML = html;
   card.hidden = false;
   if (!card.contains(document.activeElement)) document.getElementById('detail-close').focus();
   if (popup) popup.remove();
-  setMarker(dot ? [Number(dot.properties.lon), Number(dot.properties.lat)] : [e.lngLat.lng, e.lngLat.lat], standId);
+  setMarker(ring, standId);
 }
 
 let pulse = 0;
 
-/** The selection: a dark-and-white ring around the picked dot (pulsing once), or the stand's outline. */
+/** The selection: a dark-and-white ring around the picked dot (pulsing once), and/or the stand's outline. */
 function setMarker(coords, standId = null) {
-  const data = { type: 'FeatureCollection', features: coords && standId === null
+  const data = { type: 'FeatureCollection', features: coords
     ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: coords } }] : [] };
   if (!map.getSource('sel')) {
     map.addSource('sel', { type: 'geojson', data });
@@ -643,7 +649,7 @@ function setMarker(coords, standId = null) {
   // Alert layers load later: keep the selection on top.
   for (const id of ['sel-stand-halo', 'sel-stand', 'sel-halo', 'sel']) map.moveLayer(id);
   cancelAnimationFrame(pulse);
-  if (!coords || standId !== null || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!coords || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const t0 = performance.now();
   const step = (t) => {
     const k = Math.min(1, (t - t0) / 700);
@@ -654,8 +660,17 @@ function setMarker(coords, standId = null) {
 }
 
 function setupDetail(polygons) {
-  for (const f of polygons.features) standById.set(f.properties.poly_id, f.properties);
+  const shapes = new Map();
+  for (const f of polygons.features) {
+    standById.set(f.properties.poly_id, f.properties);
+    shapes.set(f.properties.poly_id, f);
+  }
   map.on('click', showDetail);
+  document.getElementById('detail-body').addEventListener('click', (e) => {
+    const btn = /** @type {HTMLElement} */ (e.target).closest('[data-zoom-stand]');
+    const f = btn && shapes.get(/** @type {HTMLElement} */ (btn).dataset.zoomStand);
+    if (f) fitTo({ features: [f] }, { maxZoom: 16 });
+  });
   map.on('zoomend', setCellsHint);
   const close = () => {
     document.getElementById('detail').hidden = true;
@@ -668,7 +683,7 @@ function setupDetail(polygons) {
   });
 }
 
-function fitTo(geojson) {
+function fitTo(geojson, opts = {}) {
   let w = 180, s = 90, e = -180, n = -90;
   const visit = (c) => {
     if (typeof c[0] === 'number') {
@@ -676,7 +691,7 @@ function fitTo(geojson) {
     } else c.forEach(visit);
   };
   for (const f of geojson.features) if (f.geometry) visit(f.geometry.coordinates);
-  if (w <= e) map.fitBounds([[w, s], [e, n]], { padding: 30, duration: 0 });
+  if (w <= e) map.fitBounds([[w, s], [e, n]], { padding: 30, duration: 0, ...opts });
 }
 
 function wantedLayers() {
