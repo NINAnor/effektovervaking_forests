@@ -4,10 +4,21 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 1; // must match dashboard.SCHEMA in Python
+const SCHEMA = 2; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 const KIND_COLORS = { loss: '#e06666', gain: '#4dd0a7' };
 const KINDS = ['loss', 'gain'];
+// Condition colours, as in the old inspector (ColorBrewer BrBG).
+const CLASS_COLORS = {
+  good_condition: '#35978f', indistinguishable: '#9aa39c', poor_condition: '#bf812d', no_data: '#d7dad3'
+};
+const CLASS_LABELS = {
+  good_condition: 'good', indistinguishable: 'not decided', poor_condition: 'poor', no_data: 'no score'
+};
+const TRAJ_COLORS = { improving: '#35978f', stable: '#9aa39c', fluctuating: '#c8ccc2', declining: '#bf812d' };
+// Cells: (score - threshold) x 1000, brown below the threshold, blue-green above.
+const CELL_RAMP = [['#8c510a', -90], ['#bf812d', -60], ['#dfc27d', -30], ['#f6e8c3', 0],
+  ['#c7eae5', 30], ['#80cdc1', 60], ['#35978f', 90], ['#01665e', null]];
 
 const state = {
   forestType: 'all',
@@ -15,7 +26,10 @@ const state = {
   minConf: 0,
   from: '',
   to: '',
-  resolution: 'annual'
+  resolution: 'annual',
+  stands: true,
+  standColor: 'forest_type',
+  cells: false
 };
 
 /** @type {any} */ let index;
@@ -84,15 +98,119 @@ function createMap() {
   return new Promise((resolve) => map.on('load', resolve));
 }
 
+function standColor(mode) {
+  const match = (prop, colors, fallback) =>
+    ['match', ['coalesce', ['get', prop], ''], ...Object.entries(colors).flat(), fallback];
+  if (mode === 'condition_local' || mode === 'condition_global') return match(mode, CLASS_COLORS, CLASS_COLORS.no_data);
+  if (mode === 'trajectory') return match('trajectory', TRAJ_COLORS, CLASS_COLORS.no_data);
+  return match('forest_type', FOREST_COLORS, '#999');
+}
+
+function standLegend(mode) {
+  if (mode === 'condition_local' || mode === 'condition_global') {
+    return Object.entries(CLASS_COLORS).map(([k, c]) => [CLASS_LABELS[k], c]);
+  }
+  if (mode === 'trajectory') return Object.entries(TRAJ_COLORS);
+  return Object.entries(FOREST_COLORS);
+}
+
 function addPolygons(geojson) {
-  const color = ['match', ['get', 'forest_type'],
-    'olivinskog', FOREST_COLORS.olivinskog, 'kalklindeskog', FOREST_COLORS.kalklindeskog, '#999'];
   map.addSource('forest', { type: 'geojson', data: geojson });
-  map.addLayer({ id: 'forest-fill', type: 'fill', source: 'forest', paint: { 'fill-color': color, 'fill-opacity': 0.3 } });
-  map.addLayer({ id: 'forest-line', type: 'line', source: 'forest', paint: { 'line-color': color, 'line-width': 1 } });
-  hoverPopup('forest-fill', (p) =>
-    `<strong>${esc(p.forest_type)}</strong><br>${esc(p.naturtype || p.layer || '')}<br>${fmt(p.area_ha, 2)} ha`);
+  // Each stand also as a point, so small stands are findable when zoomed out.
+  map.addSource('forest-pts', {
+    type: 'geojson',
+    data: {
+      type: 'FeatureCollection',
+      features: geojson.features.map((f) => ({
+        type: 'Feature',
+        properties: f.properties,
+        geometry: { type: 'Point', coordinates: [f.properties.lon, f.properties.lat] }
+      }))
+    }
+  });
+  const color = standColor(state.standColor);
+  map.addLayer({
+    id: 'forest-fill', type: 'fill', source: 'forest',
+    paint: { 'fill-color': color, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.6, 14, 0.2] }
+  });
+  map.addLayer({
+    id: 'forest-line', type: 'line', source: 'forest',
+    paint: {
+      // Declining stands get a heavier brown outline, as in the old inspector.
+      'line-color': ['case', ['==', ['get', 'trajectory'], 'declining'], '#8c510a', color],
+      'line-width': ['interpolate', ['linear'], ['zoom'],
+        8, 1, 14, ['case', ['==', ['get', 'trajectory'], 'declining'], 3, 1.5]]
+    }
+  });
+  map.addLayer({
+    id: 'forest-pts', type: 'circle', source: 'forest-pts', maxzoom: 10,
+    paint: {
+      'circle-color': color,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 3, 10, 5],
+      'circle-stroke-color': '#0f1620',
+      'circle-stroke-width': 1
+    }
+  });
   fitTo(geojson);
+}
+
+function addConditionCells() {
+  if (!CFG.conditionCells) {
+    /** @type {HTMLElement} */ (document.getElementById('toggle-cells').parentElement).hidden = true;
+    return;
+  }
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol('pmtiles', protocol.tile);
+  map.addSource('cells', { type: 'vector', url: 'pmtiles://' + CFG.conditionCells });
+  const diff = ['*', 1000, ['-', ['to-number', ['get', 'dor_global_2025']], ['to-number', ['get', 'threshold_global']]]];
+  const ramp = ['step', diff, CELL_RAMP[0][0]];
+  for (let k = 0; k < CELL_RAMP.length - 1; k++) ramp.push(CELL_RAMP[k][1], CELL_RAMP[k + 1][0]);
+  map.addLayer({
+    id: 'cells', type: 'fill', source: 'cells', 'source-layer': 'condition_pixels',
+    minzoom: 12, // below this a 10 m cell is smaller than a screen pixel
+    layout: { visibility: state.cells ? 'visible' : 'none' },
+    paint: {
+      'fill-color': ['case', ['has', 'dor_global_2025'], ramp, CLASS_COLORS.no_data],
+      'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 14, 0.85]
+    }
+  }, 'forest-line');
+}
+
+function score(v) {
+  return v === null || v === undefined || v === '' ? 'no score' : fmt(v, 3);
+}
+
+// One popup for the whole map: the topmost kind of feature under the cursor wins.
+const POPUPS = [
+  [(id) => pointLayers.has(id), (p) =>
+    `<strong>${esc(p.kind)}</strong> &mdash; ${esc(p.aoi)}<br>latest break ${esc(p.month)}<br>` +
+    `confidence ${fmt(p.conf, 2)}, ${p.n} event${p.n === 1 ? '' : 's'}`],
+  [(id) => id === 'cells', (p) =>
+    `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
+    `(threshold ${fmt(p.threshold_global, 3)})<br>` +
+    `stand: ${esc(p.stand_condition_class || '—')}, trajectory ${esc(p.trajectory_class || '—')}<br>` +
+    `${fmt(p.edge_m, 0)} m inside the stand`],
+  [(id) => id === 'forest-fill' || id === 'forest-pts', (p) =>
+    `<strong>${esc(p.forest_type)}</strong> &mdash; ${esc(p.layer)}<br>` +
+    `${fmt(p.area_ha, 2)} ha, surveyed ${esc(p.survey_year ?? '—')} (${esc(p.tilstand || 'no field condition')})<br>` +
+    `condition 2025: ${score(p.dor_global_2025)}, ${esc(CLASS_LABELS[p.condition_local] || 'no score')} (local) / ` +
+    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (global)<br>trajectory ${esc(p.trajectory || '—')}`]
+];
+
+function setupPopup() {
+  const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '320px' });
+  map.on('mousemove', (e) => {
+    const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys()].filter((id) => map.getLayer(id));
+    const feats = map.queryRenderedFeatures(e.point, { layers });
+    let html = null;
+    for (const [match, render] of POPUPS) {
+      const f = feats.find((x) => match(x.layer.id));
+      if (f) { html = render(f.properties); break; }
+    }
+    map.getCanvas().style.cursor = html ? 'pointer' : '';
+    if (html) popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+    else popup.remove();
+  });
 }
 
 function ensurePoints(aoi, kind) {
@@ -111,9 +229,6 @@ function ensurePoints(aoi, kind) {
           'circle-opacity': 0.8
         }
       });
-      hoverPopup(key, (p) =>
-        `<strong>${esc(p.kind)}</strong> &mdash; ${esc(p.aoi)}<br>latest break ${esc(p.month)}<br>` +
-        `confidence ${fmt(p.conf, 2)}, ${p.n} event${p.n === 1 ? '' : 's'}`);
       return key;
     }).catch((e) => {
       pointLayers.delete(key); // retry on the next refresh
@@ -121,18 +236,6 @@ function ensurePoints(aoi, kind) {
     }));
   }
   return pointLayers.get(key);
-}
-
-function hoverPopup(layer, html) {
-  const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
-  map.on('mousemove', layer, (e) => {
-    map.getCanvas().style.cursor = 'pointer';
-    popup.setLngLat(e.lngLat).setHTML(html(e.features[0].properties)).addTo(map);
-  });
-  map.on('mouseleave', layer, () => {
-    map.getCanvas().style.cursor = '';
-    popup.remove();
-  });
 }
 
 function fitTo(geojson) {
@@ -155,8 +258,19 @@ function wantedLayers() {
 /** Show and filter the loaded layers from the state as it is NOW. */
 function applyMapState() {
   const forest = state.forestType === 'all' ? null : ['==', ['get', 'forest_type'], state.forestType];
-  map.setFilter('forest-fill', forest);
-  map.setFilter('forest-line', forest);
+  const color = standColor(state.standColor);
+  for (const id of ['forest-fill', 'forest-line', 'forest-pts']) {
+    map.setFilter(id, forest);
+    map.setLayoutProperty(id, 'visibility', state.stands ? 'visible' : 'none');
+  }
+  map.setPaintProperty('forest-fill', 'fill-color', color);
+  map.setPaintProperty('forest-pts', 'circle-color', color);
+  map.setPaintProperty('forest-line', 'line-color', ['case', ['==', ['get', 'trajectory'], 'declining'], '#8c510a', color]);
+  if (map.getLayer('cells')) map.setLayoutProperty('cells', 'visibility', state.cells ? 'visible' : 'none');
+  document.getElementById('stand-legend').innerHTML = state.stands
+    ? standLegend(state.standColor).map(([name, c]) =>
+      `<span class="legend__item"><i class="dot" style="background:${c}"></i> ${esc(name)}</span>`).join('')
+    : '';
   const wanted = new Set(wantedLayers().map(({ aoi, kind }) => `${aoi}|${kind}`));
   const filter = ['all',
     ['>=', ['get', 'month'], state.from],
@@ -361,6 +475,13 @@ function setupControls() {
   bind('filter-date-from', 'from');
   bind('filter-date-to', 'to');
   bind('cover-resolution', 'resolution');
+  bind('stand-color', 'standColor');
+  for (const [id, key] of [['toggle-stands', 'stands'], ['toggle-cells', 'cells']]) {
+    document.getElementById(id).addEventListener('change', (e) => {
+      state[key] = /** @type {HTMLInputElement} */ (e.target).checked;
+      applyMapState();
+    });
+  }
 }
 
 function renderCharts() {
@@ -386,6 +507,8 @@ async function init() {
   setupStatus();
   setupControls();
   addPolygons(polygons);
+  addConditionCells();
+  setupPopup();
   refresh();
   let pending = 0;
   new ResizeObserver(() => {
