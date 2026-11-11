@@ -429,6 +429,14 @@ async function loadRaddTiles() {
 /** The template the radd source was last given (MapLibre updates source.tiles asynchronously). */
 let raddApplied = null;
 
+/** Show only the RADD key items for the colouring in use. */
+function syncRaddKey() {
+  const mode = /** @type {HTMLInputElement} */ (document.querySelector('input[name="radd-mode"]:checked')).value;
+  for (const li of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('li[data-radd]'))) {
+    li.hidden = li.dataset.radd !== mode;
+  }
+}
+
 function applyRadd() {
   if (!raddTiles) {
     if (map.getLayer('radd')) map.setLayoutProperty('radd', 'visibility', 'none');
@@ -726,6 +734,9 @@ function applyMapState() {
     map.setLayoutProperty(`base-${id}`, 'visibility', id === state.basemap ? 'visible' : 'none');
   }
   if (popup) popup.remove();
+  for (const li of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('li[data-kind]'))) {
+    li.hidden = state.kind !== 'all' && li.dataset.kind !== state.kind;
+  }
   document.getElementById('stand-legend').innerHTML =
     standLegend(state.standColor).map(([name, c]) =>
       `<li><i class="sw" style="background:${c}"></i> ${esc(name)}</li>`).join('') +
@@ -1129,9 +1140,11 @@ function setupControls() {
   for (const el of document.querySelectorAll('input[name="radd-mode"]')) {
     el.addEventListener('change', (e) => {
       state.raddMode = /** @type {HTMLInputElement} */ (e.target).value;
+      syncRaddKey();
       applyRadd();
     });
   }
+  syncRaddKey();
   // Browsers may restore form state on reload; the controls are the truth.
   const val = (id) => /** @type {HTMLInputElement} */ (document.getElementById(id));
   state.forestType = val('filter-forest-type').value;

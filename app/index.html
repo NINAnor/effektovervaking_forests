@@ -95,8 +95,8 @@
               <button type="button" class="info-btn" data-info="alerts" aria-label="About tree-cover alerts">i</button>
             </div>
             <ul class="key">
-              <li><i class="sw sw--dot sw--loss"></i> Possible tree loss</li>
-              <li><i class="sw sw--dot sw--gain"></i> Possible regrowth</li>
+              <li data-kind="loss"><i class="sw sw--dot sw--loss"></i> Possible tree loss</li>
+              <li data-kind="gain"><i class="sw sw--dot sw--gain"></i> Possible regrowth</li>
               <li><i class="sw sw--dot sw--new"></i> New: latest 30 days</li>
               <li><span class="sizes"><i></i><i></i><i></i></span> Bigger dot: bigger change</li>
             </ul>
@@ -126,9 +126,9 @@
               <label class="seg__opt"><input type="radio" name="radd-mode" value="alert_date"><span>When</span></label>
             </div>
             <ul class="key">
-              <li><i class="sw" style="background:#ea7e7d"></i> Confirmed</li>
-              <li><i class="sw" style="background:#00ffff"></i> Not yet confirmed</li>
-              <li><i class="sw sw--wide" style="background:linear-gradient(90deg,#ffffcc,#fed976,#fd8d3c,#e31a1c,#800026)"></i> When: 2020 &rarr; now</li>
+              <li data-radd="alert"><i class="sw" style="background:#ea7e7d"></i> Confirmed</li>
+              <li data-radd="alert"><i class="sw" style="background:#00ffff"></i> Not yet confirmed</li>
+              <li data-radd="alert_date" hidden><i class="sw sw--wide" style="background:linear-gradient(90deg,#ffffcc,#fed976,#fd8d3c,#e31a1c,#800026)"></i> When: 2020 &rarr; now</li>
             </ul>
             <label class="opacity">Opacity <input type="range" min="0" max="100" value="100" data-opacity="radd" aria-label="Opacity of the radar alerts"></label>
             <p class="hint" id="radd-note"></p>
