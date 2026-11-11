@@ -12,11 +12,13 @@ window.DASHBOARD_CONFIG = {
   // Basemaps offered in the layer panel; the first is the default.
   basemaps: {
     osm: {
+      label: 'Map (OpenStreetMap)',
       tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       maxzoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     },
     satellite: {
+      label: 'Satellite (Esri World Imagery)',
       tiles: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       maxzoom: 19,
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'

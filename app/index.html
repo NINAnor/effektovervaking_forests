@@ -61,27 +61,26 @@
         </div>
       </div>
       <div class="map-wrap">
-        <div id="map"></div>
+        <!-- Before #map, so keyboard focus reaches the panel first. -->
         <details id="layer-panel" class="layer-panel" open>
           <summary>Layers</summary>
 
           <fieldset>
             <legend>Basemap</legend>
-            <label class="check"><input type="radio" name="basemap" value="osm" checked> <span>Map (OpenStreetMap)</span></label>
-            <label class="check"><input type="radio" name="basemap" value="satellite"> <span>Satellite (Esri World Imagery)</span></label>
+            <div id="basemap-options"></div>
           </fieldset>
 
-          <fieldset>
-            <legend><label class="check"><input type="checkbox" id="toggle-alerts" checked> <span>S-CCD alerts</span></label></legend>
+          <div class="layer-group" role="group" aria-labelledby="alerts-title">
+            <label class="check title" id="alerts-title"><input type="checkbox" id="toggle-alerts" checked> <span>S-CCD alerts</span></label>
             <ul class="key">
               <li><i class="sw sw--dot" style="background:#e06666"></i> Loss pixel (10 m)</li>
               <li><i class="sw sw--dot" style="background:#4dd0a7"></i> Gain pixel (10 m)</li>
             </ul>
             <p class="hint">Type, dates and confidence: filters above.</p>
-          </fieldset>
+          </div>
 
-          <fieldset>
-            <legend><label class="check"><input type="checkbox" id="toggle-stands" checked> <span>Stands (<span id="stand-count">…</span>)</span></label></legend>
+          <div class="layer-group" role="group" aria-label="Stands">
+            <label class="check title"><input type="checkbox" id="toggle-stands" checked> <span>Stands (<span id="stand-count">…</span>)</span></label>
             <label class="inline">Colour by
               <select id="stand-color">
                 <option value="forest_type" selected>Forest type</option>
@@ -90,16 +89,18 @@
                 <option value="trajectory">Trajectory 2017&ndash;2025</option>
               </select>
             </label>
-            <ul class="key" id="stand-legend"></ul>
-          </fieldset>
+            <ul class="key" id="stand-legend" aria-label="Stand colours"></ul>
+          </div>
 
-          <fieldset id="cells-section">
-            <legend><label class="check"><input type="checkbox" id="toggle-cells"> <span>Condition: 10 m cells</span></label></legend>
-            <div class="ramp" id="cell-ramp"></div>
-            <div class="ramp-labels"><span>below threshold</span><span>above</span></div>
+          <div class="layer-group" role="group" aria-label="Condition cells" id="cells-section">
+            <label class="check title"><input type="checkbox" id="toggle-cells"> <span>Condition: 10 m cells</span></label>
+            <div class="ramp" id="cell-ramp" role="img"
+                 aria-label="Colour scale from brown, below the stand threshold, through cream at the threshold, to dark teal, above it"></div>
+            <div class="ramp-labels" aria-hidden="true"><span>below threshold</span><span>above</span></div>
             <p class="hint">2025 score minus the stand threshold. Zoom in past 12 to see cells.</p>
-          </fieldset>
+          </div>
         </details>
+        <div id="map"></div>
       </div>
     </section>
 
