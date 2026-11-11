@@ -2,6 +2,9 @@
 # schema: https://www.schemastore.org/prek.json
 
 default_stages = ["pre-commit"]
+# The report (docs/index.html, the methods appendix, docs/source) is generated, and
+# docs/report-build is its build tooling: neither is checked or reformatted by the hooks.
+exclude = '^docs/(index\.html|forest_monitoring_[^/]*|source/|report-build/)'
 
 [[repos]]
 hooks = [
