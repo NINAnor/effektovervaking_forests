@@ -178,3 +178,14 @@ def test_unpublishable_breaks_and_overlaps_do_not_count(baked):
     idx, out = baked
     assert idx["pixels"]["olivinskog"] == {"loss": 2, "gain": 1}
     assert idx["baseline_ha"]["olivinskog"] == pytest.approx(OLIVIN_HA)
+
+
+def test_polygons_carry_stand_condition(baked):
+    idx, out = baked
+    feats = json.loads((out / "polygons.geojson").read_text())["features"]
+    assert len(feats) == idx["polygon_count"] == sum(idx["polygon_counts"].values())
+    p = feats[0]["properties"]
+    for col in dashboard.STAND_COLS + ["lon", "lat"]:
+        assert col in p
+    assert isinstance(p["survey_year"], int)
+    assert -180 <= p["lon"] <= 180 and -90 <= p["lat"] <= 90
