@@ -65,7 +65,7 @@ html[data-theme="dark"] {
 html, body, #app { height: 100%; margin: 0; }
 
 body {
-  font: 400 13px/1.4 Roboto, Arial, sans-serif;
+  font: 400 14px/1.4 Roboto, Arial, sans-serif;
   background: var(--bg);
   color: var(--ink);
 }
@@ -310,7 +310,7 @@ label.inline {
 }
 .traj-chart { display: block; width: 100%; height: auto; margin-top: 6px; }
 .traj-chart .grid { stroke: var(--line); }
-.traj-chart text { fill: var(--muted); font-size: 10px; }
+.traj-chart text { fill: var(--muted); font-size: 12px; }
 .traj-chart .thr { stroke: var(--ink); stroke-dasharray: 4 3; fill: none; }
 .traj-chart .mark { stroke: var(--faint); stroke-dasharray: 1 3; }
 .traj-chart .traj { fill: none; stroke: var(--ink); stroke-width: 1.5; }
@@ -323,7 +323,7 @@ label.inline {
   border-radius: 16px;
 }
 .chart svg { display: block; width: 100%; height: auto; }
-.chart text { fill: var(--muted); font-size: 11px; }
+.chart text { fill: var(--muted); font-size: 12px; }
 .chart .grid { stroke: var(--line); }
 .chart-legend {
   display: flex; flex-wrap: wrap; gap: 14px;
@@ -451,7 +451,7 @@ input[type="date"]:hover { background: var(--control-hover); }
 /* In a dialog the method notes read as body text, not as a small aside. */
 .info-dialog .about { font-size: inherit; color: inherit; }
 .info-dialog .about summary { margin-top: 6px; }
-.key--years { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--muted); }
+.key--years { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--muted); }
 .key--years span { display: inline-flex; align-items: center; gap: 4px; }
 .key--years .sw { width: 12px; height: 12px; border-radius: 50%; }
 label.check { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
