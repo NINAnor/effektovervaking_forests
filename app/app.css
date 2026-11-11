@@ -295,11 +295,6 @@ body {
   display: contents;
 }
 
-.dot--declining {
-  background: transparent;
-  border: 2px solid #8c510a;
-}
-
 [hidden] {
   display: none !important;
 }

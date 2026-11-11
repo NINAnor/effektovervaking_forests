@@ -184,6 +184,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
 
     web = polys[["poly_id", "forest_type", "layer", "naturtype", "area_ha", "geometry"]]
     web = web.merge(stands, on="poly_id", how="left", validate="one_to_one")
+    web["survey_year"] = web["survey_year"].astype("Int64")  # stays int if unmatched
     # A point inside each stand, for finding small stands at overview zoom.
     inside = web.geometry.representative_point().to_crs(4326)
     web = web.assign(
@@ -207,6 +208,9 @@ def bake(source: str, out_dir: Path | str) -> dict:
         "pixel_ha": PIXEL_HA,
         "forest_types": list(AOIS),
         "polygon_count": int(len(polys)),
+        "polygon_counts": {
+            t: int(n) for t, n in polys["forest_type"].value_counts().items()
+        },
         "baseline_ha": {a: round(baseline[a], 2) for a in AOIS},
         "pixels": {a: {k: int(counts.get((a, k), 0)) for k in KINDS} for a in AOIS},
         "period_range": [_month(px["first"]).min(), _month(px["last"]).max()],

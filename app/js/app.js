@@ -155,7 +155,8 @@ function addPolygons(geojson) {
 }
 
 function addConditionCells() {
-  if (!CFG.conditionCells) {
+  if (!CFG.conditionCells || typeof pmtiles === 'undefined') {
+    if (CFG.conditionCells) console.error('pmtiles.js failed to load; condition cells are off');
     /** @type {HTMLElement} */ (document.getElementById('toggle-cells').parentElement).hidden = true;
     return;
   }
@@ -188,7 +189,7 @@ const POPUPS = [
   [(id) => id === 'cells', (p) =>
     `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
     `(threshold ${fmt(p.threshold_global, 3)})<br>` +
-    `stand: ${esc(p.stand_condition_class || '—')}, trajectory ${esc(p.trajectory_class || '—')}<br>` +
+    `stand: ${esc(CLASS_LABELS[p.stand_condition_class] || '—')}, trajectory ${esc(p.trajectory_class || '—')}<br>` +
     `${fmt(p.edge_m, 0)} m inside the stand`],
   [(id) => id === 'forest-fill' || id === 'forest-pts', (p) =>
     `<strong>${esc(p.forest_type)}</strong> &mdash; ${esc(p.layer)}<br>` +
@@ -197,8 +198,11 @@ const POPUPS = [
     `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (global)<br>trajectory ${esc(p.trajectory || '—')}`]
 ];
 
+/** @type {any} */ let popup;
+
 function setupPopup() {
-  const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '320px' });
+  popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '320px' });
+  map.getCanvas().addEventListener('mouseleave', () => popup.remove());
   map.on('mousemove', (e) => {
     const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys()].filter((id) => map.getLayer(id));
     const feats = map.queryRenderedFeatures(e.point, { layers });
@@ -266,11 +270,20 @@ function applyMapState() {
   map.setPaintProperty('forest-fill', 'fill-color', color);
   map.setPaintProperty('forest-pts', 'circle-color', color);
   map.setPaintProperty('forest-line', 'line-color', ['case', ['==', ['get', 'trajectory'], 'declining'], '#8c510a', color]);
-  if (map.getLayer('cells')) map.setLayoutProperty('cells', 'visibility', state.cells ? 'visible' : 'none');
-  document.getElementById('stand-legend').innerHTML = state.stands
-    ? standLegend(state.standColor).map(([name, c]) =>
-      `<span class="legend__item"><i class="dot" style="background:${c}"></i> ${esc(name)}</span>`).join('')
-    : '';
+  if (map.getLayer('cells')) {
+    map.setFilter('cells', forest);
+    map.setLayoutProperty('cells', 'visibility', state.cells ? 'visible' : 'none');
+  }
+  if (popup) popup.remove();
+  const item = (name, style) => `<span class="legend__item"><i class="dot" style="${style}"></i> ${esc(name)}</span>`;
+  document.getElementById('stand-legend').innerHTML =
+    (state.stands ? standLegend(state.standColor).map(([name, c]) => item(name, `background:${c}`)).join('') +
+      item('declining (outline)', 'border:2px solid #8c510a;background:transparent') : '') +
+    (state.cells ? item('cell below / above threshold',
+      `background:linear-gradient(90deg,${CELL_RAMP[0][0]},${CELL_RAMP[3][0]},${CELL_RAMP[7][0]})`) : '');
+  const n = state.forestType === 'all' ? index.polygon_count
+    : index.polygon_counts?.[state.forestType] ?? index.polygon_count;
+  document.getElementById('stand-count').textContent = String(n);
   const wanted = new Set(wantedLayers().map(({ aoi, kind }) => `${aoi}|${kind}`));
   const filter = ['all',
     ['>=', ['get', 'month'], state.from],
@@ -423,6 +436,7 @@ function esc(s) {
 }
 
 function fmt(v, digits) {
+  if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return '—';
   return Number(v).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
