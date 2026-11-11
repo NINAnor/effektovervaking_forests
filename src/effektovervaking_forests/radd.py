@@ -13,6 +13,7 @@ file it reads is old. Needs the `gee` extra and an authenticated account.
 
 from __future__ import annotations
 
+import json
 import time
 
 import geopandas as gpd
@@ -60,15 +61,35 @@ def alert_date_rgb(img, max_millis: int):
     )
 
 
+def stands_4326(polys: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """One dissolved, 1e-5 deg (~1 m) feature per forest type: small enough to send."""
+    out = polys[["forest_type", "geometry"]].dissolve("forest_type").reset_index()
+    out = out.to_crs(4326)
+    return out.set_geometry(shapely.set_precision(out.geometry.values, 1e-5))
+
+
+def write_stands_zip(polys: gpd.GeoDataFrame, out: str) -> None:
+    """The stands as a zipped shapefile, for upload as an Earth Engine table asset."""
+    import tempfile
+    import zipfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as t:
+        # Shapefile field names stop at 10 characters.
+        stands = stands_4326(polys).rename(columns={"forest_type": "type"})
+        stands.to_file(Path(t) / "forest_stands.shp")
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted(Path(t).iterdir()):
+                z.write(f, f.name)
+
+
 def mint_tiles(polys: gpd.GeoDataFrame, project: str | None = None) -> dict:
     """XYZ templates for the alert and alert-date layers, inside `polys` only."""
     import ee
 
     ee.Initialize(project=project)
     img = latest_image(ee)
-    # One dissolved, 1e-5 deg (~1 m) geometry keeps the request small.
-    geom = shapely.set_precision(polys.to_crs(4326).union_all(), 1e-5)
-    stands = ee.FeatureCollection([ee.Feature(ee.Geometry(geom.__geo_interface__))])
+    stands = ee.FeatureCollection(json.loads(stands_4326(polys).to_json(drop_id=True)))
     # Masked before visualize: updateMask after it would reset the 0.75 opacity.
     img = img.updateMask(ee.Image(0).paint(stands, 1).selfMask())
     props = img.toDictionary(["system:index", "version_date"]).getInfo()

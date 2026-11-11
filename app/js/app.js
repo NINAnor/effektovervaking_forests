@@ -272,8 +272,39 @@ function ensurePoints(aoi, kind) {
 }
 
 // ── RADD: Earth Engine XYZ tiles, masked to the stands (forestmon publish radd) ──
-/** radd_tiles.json, or null when it has not been minted. */
+/** radd_tiles.json, a map link pasted in this browser, or null. */
 let raddTiles = null;
+/** The file's tiles, to fall back to when a pasted link is cleared. */
+let raddFile = null;
+const RADD_LINK_KEY = 'forestmon:radd-link';
+// An Earth Engine map: what getMap()'s urlFormat and eetiles.geocarpentry.org give.
+const EE_MAP = /^https:\/\/[a-z0-9.-]+\.googleapis\.com\/v1\/projects\/[^/\s]+\/maps\/[^/\s?#]+/i;
+
+/** A pasted link as radd_tiles.json would hold it; one visualisation serves both modes. */
+function linkTiles({ url, at }) {
+  const tiles = `${url.match(EE_MAP)[0]}/tiles/{z}/{x}/{y}`;
+  return { pasted: true, minted_at: at, layers: { alert: { tiles }, alert_date: { tiles } } };
+}
+
+function setRaddLink(link) {
+  try {
+    if (link) localStorage.setItem(RADD_LINK_KEY, JSON.stringify(link));
+    else localStorage.removeItem(RADD_LINK_KEY);
+  } catch { /* private mode: this page view only */ }
+  raddTiles = link ? linkTiles(link) : raddFile;
+  describeRadd();
+  if (map.getSource('radd')) checkRaddTiles();
+  applyRadd();
+}
+
+function storedRaddLink() {
+  try {
+    const link = JSON.parse(localStorage.getItem(RADD_LINK_KEY) || 'null');
+    return link && EE_MAP.test(link.url) ? link : null;
+  } catch {
+    return null;
+  }
+}
 
 async function loadRaddTiles() {
   try {
@@ -283,8 +314,14 @@ async function loadRaddTiles() {
   }
 }
 
+/** The template the radd source was last given (MapLibre updates source.tiles asynchronously). */
+let raddApplied = null;
+
 function applyRadd() {
-  if (!raddTiles) return;
+  if (!raddTiles) {
+    if (map.getLayer('radd')) map.setLayoutProperty('radd', 'visibility', 'none');
+    return;
+  }
   const tiles = [raddTiles.layers[state.raddMode].tiles];
   if (!map.getSource('radd')) {
     if (!state.radd) return; // nothing is fetched until it is switched on
@@ -293,9 +330,11 @@ function applyRadd() {
       attribution: '<a href="https://www.wur.nl/en/research-results/research-institutes/environmental-research/radd-forest-disturbance-alert.htm">RADD</a> / Wageningen University'
     });
     map.addLayer({ id: 'radd', type: 'raster', source: 'radd', paint: { 'raster-opacity': 0.9 } }, 'forest-pts');
+    raddApplied = tiles[0];
     checkRaddTiles();
-  } else if (state.radd && map.getSource('radd').tiles?.[0] !== tiles[0]) {
+  } else if (state.radd && raddApplied !== tiles[0]) {
     map.getSource('radd').setTiles(tiles);
+    raddApplied = tiles[0];
   }
   map.setLayoutProperty('radd', 'visibility', state.radd ? 'visible' : 'none');
 }
@@ -306,17 +345,43 @@ function checkRaddTiles() {
     fetch(tiles.replace('{z}', 0).replace('{x}', 0).replace('{y}', 0))
       .then((r) => { if (!r.ok) throw new Error(r.status); })
       .catch(() => {
-        document.getElementById('radd-note').textContent =
-          'RADD tiles failed to load. Earth Engine map IDs expire: re-run forestmon publish radd.';
+        document.getElementById('radd-note').textContent = raddTiles?.pasted
+          ? 'The map link failed to load: Earth Engine links expire. Paste a new one.'
+          : 'RADD tiles failed to load. Earth Engine map IDs expire: re-run forestmon publish radd.';
       });
   }
 }
 
 function describeRadd() {
+  const note = document.getElementById('radd-note');
+  document.getElementById('radd-modes').hidden = !raddTiles || raddTiles.pasted;
+  for (const el of document.querySelectorAll('#radd-section .key')) el.hidden = !raddTiles;
+  if (!raddTiles) { note.textContent = 'No radar layer yet: paste a map link below.'; return; }
   const days = (Date.now() - raddTiles.minted_at) / 864e5;
-  document.getElementById('radd-note').textContent =
-    `Image ${raddTiles.image_id} (v${raddTiles.version_date}), tiles made ${fmt(days, 0)} d ago` +
-    (days > 3 ? ' — they may have expired; re-run forestmon publish radd.' : '.');
+  note.textContent = raddTiles.pasted
+    ? `Your pasted map link, added ${fmt(days * 24, 0)} h ago. Links expire; paste a new one if the layer goes blank.`
+    : `Image ${raddTiles.image_id} (v${raddTiles.version_date}), tiles made ${fmt(days, 0)} d ago` +
+      (days > 3 ? ' — they may have expired; re-run forestmon publish radd.' : '.');
+}
+
+function setupRaddLink() {
+  const input = /** @type {HTMLInputElement} */ (document.getElementById('radd-link'));
+  const msg = document.getElementById('radd-link-msg');
+  document.getElementById('radd-link-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = input.value.trim();
+    if (!EE_MAP.test(url)) {
+      msg.textContent = 'Not an Earth Engine map link: it should contain …googleapis.com/v1/projects/…/maps/…';
+      return;
+    }
+    msg.textContent = '';
+    setRaddLink({ url, at: Date.now() });
+  });
+  document.getElementById('radd-link-clear').addEventListener('click', () => {
+    input.value = '';
+    msg.textContent = '';
+    setRaddLink(null);
+  });
 }
 
 // ── the click card: everything under the clicked point ───────────────────────
@@ -894,8 +959,10 @@ function setupControls() {
   document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
     `<label class="seg__opt"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}>` +
     `<span>${esc(b.short || b.label || id)}</span></label>`).join('');
-  if (!raddTiles) document.getElementById('radd-section').hidden = true;
-  else describeRadd();
+  const link = storedRaddLink();
+  if (link) raddTiles = linkTiles(link);
+  describeRadd();
+  setupRaddLink();
   for (const el of document.querySelectorAll('input[name="radd-mode"]')) {
     el.addEventListener('change', (e) => {
       state.raddMode = /** @type {HTMLInputElement} */ (e.target).value;
@@ -960,7 +1027,7 @@ async function init() {
     createMap()
   ]);
   monthly = rows;
-  raddTiles = radd;
+  raddTiles = raddFile = radd;
   setupStatus();
   setupControls();
   addPolygons(polygons);

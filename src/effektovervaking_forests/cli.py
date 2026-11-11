@@ -595,6 +595,35 @@ def publish_radd(
     _echo(f"{out}: RADD {tiles['image_id']} (v{tiles['version_date']})")
 
 
+@publish_app.command("stands-asset")
+def publish_stands_asset(
+    source: str = typer.Option(
+        None, help="Where condition/parquet/polygons_geo.parquet is (as dashboard)."
+    ),
+    out: str = typer.Option("forest_stands.zip", help="Shapefile zip to write."),
+):
+    """Write the stands for upload as an Earth Engine table asset (RADD clipping)."""
+    import tempfile
+    from pathlib import Path
+
+    import geopandas as gpd
+
+    from . import dashboard
+    from . import radd as radd_mod
+
+    source = source or dashboard.default_source()
+    if not source:
+        _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
+    with tempfile.TemporaryDirectory() as t:
+        polys = gpd.read_parquet(
+            dashboard._local(source, "condition/parquet/polygons_geo.parquet", Path(t))
+        )
+    radd_mod.write_stands_zip(polys[polys["forest_type"].isin(dashboard.AOIS)], out)
+    typer.echo(
+        f"wrote {out}: upload it in the Code Editor (Assets > New > Shape files)"
+    )
+
+
 # ── observability ────────────────────────────────────────────────────────────
 @app.command("health")
 def health_cmd(

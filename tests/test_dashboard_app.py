@@ -205,7 +205,7 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
             " && map.getLayoutProperty('radd', 'visibility') === 'visible'"
         )
         page.locator('.seg__opt:has(input[value="alert_date"])').click()
-        assert "/alert_date/" in page.evaluate("() => map.getSource('radd').tiles[0]")
+        page.wait_for_function("() => raddApplied.includes('/alert_date/')")
 
         # A stand: its trajectory and classification.
         page.evaluate("() => map.jumpTo({center: [11.46823, 59.4911], zoom: 16})")
@@ -287,6 +287,36 @@ def test_layer_info_dialog(browser, site) -> None:
         assert "early warnings" in page.inner_text("#info-body")
         page.keyboard.press("Escape")
         assert dlg.is_hidden()
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_radd_pasted_map_link(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    page.route("**/earthengine.googleapis.com/**", lambda r: r.fulfill(status=204))
+    try:
+        page.click("#radd-section .about summary")
+        page.fill("#radd-link", "https://example.com/tiles/{z}/{x}/{y}")
+        page.click("#radd-link-form button[type=submit]")
+        assert "Not an Earth Engine map link" in page.inner_text("#radd-link-msg")
+        link = "https://earthengine.googleapis.com/v1/projects/p/maps/abc123-def/tiles/{z}/{x}/{y}"
+        page.fill("#radd-link", link)
+        page.click("#radd-link-form button[type=submit]")
+        assert "pasted map link" in page.inner_text("#radd-note")
+        assert page.locator("#radd-modes").is_hidden()
+        page.check("#toggle-radd")
+        page.wait_for_function("() => map.getLayer('radd')")
+        assert page.evaluate("() => raddApplied") == link
+        # Kept on reload; cleared back to the minted file.
+        page.reload()
+        page.wait_for_function(
+            "() => typeof raddTiles !== 'undefined' && raddTiles?.pasted"
+        )
+        page.click("#radd-section .about summary")
+        page.click("#radd-link-clear")
+        assert "tiles made" in page.inner_text("#radd-note")
         assert not errors
     finally:
         ctx.close()

@@ -422,3 +422,10 @@ input[type="date"]:hover { background: var(--control-hover); }
 .panel__header .hint { margin: 0; }
 .period .seg__opt { white-space: nowrap; }
 .info-inner ul.key { padding-left: 0; }
+.link-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.link-form input {
+  flex: 1 1 100%; min-width: 0; padding: 4px 10px;
+  font: 400 12px "Google Sans", Roboto, Arial, sans-serif; color: var(--ink);
+  background: var(--control); border: 1px solid var(--line-strong); border-radius: 999px;
+}
+.about a { color: var(--accent); }

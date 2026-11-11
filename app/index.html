@@ -106,7 +106,7 @@
               <label class="switch"><span>Radar alerts (RADD)</span><input type="checkbox" role="switch" id="toggle-radd"></label>
               <button type="button" class="info-btn" data-info="radd" aria-label="About radar alerts">i</button>
             </div>
-            <div class="seg seg--small" role="radiogroup" aria-label="Colour radar alerts by">
+            <div class="seg seg--small" id="radd-modes" role="radiogroup" aria-label="Colour radar alerts by">
               <label class="seg__opt"><input type="radio" name="radd-mode" value="alert" checked><span>Confirmed?</span></label>
               <label class="seg__opt"><input type="radio" name="radd-mode" value="alert_date"><span>When</span></label>
             </div>
@@ -116,6 +116,20 @@
               <li><i class="sw sw--wide" style="background:linear-gradient(90deg,#ffffcc,#fed976,#fd8d3c,#e31a1c,#800026)"></i> When: 2020 &rarr; now</li>
             </ul>
             <p class="hint" id="radd-note"></p>
+            <details class="about">
+              <summary>Use a map link</summary>
+              <p>Paste an Earth Engine tile link: from the Code Editor script in the
+                app's README, or the <i>Standard XYZ URL</i> from
+                <a href="https://eetiles.geocarpentry.org/" target="_blank" rel="noopener">eetiles.geocarpentry.org</a>.
+                It is kept in this browser only.</p>
+              <form id="radd-link-form" class="link-form">
+                <input type="url" id="radd-link" aria-label="Earth Engine tile link"
+                       placeholder="https://earthengine.googleapis.com/v1/projects/…/maps/…/tiles/{z}/{x}/{y}">
+                <button type="submit" class="pill-btn">Use</button>
+                <button type="button" class="pill-btn" id="radd-link-clear">Clear</button>
+              </form>
+              <p class="hint" id="radd-link-msg" role="status"></p>
+            </details>
           </div>
 
           <div class="layer-group" role="group" aria-label="Forest stands">

@@ -165,6 +165,18 @@ def test_cli_publish_dashboard(tmp_path: Path) -> None:
     assert (out / "index.json").is_file()
 
 
+def test_cli_publish_stands_asset(tmp_path: Path) -> None:
+    src, out = make_source(tmp_path / "src"), tmp_path / "stands.zip"
+    result = runner.invoke(
+        app, ["publish", "stands-asset", "--source", str(src), "--out", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    stands = gpd.read_file(f"zip://{out}")
+    # Dissolved per forest type, in lon/lat for Earth Engine.
+    assert sorted(stands["type"]) == ["kalklindeskog", "olivinskog"]
+    assert stands.crs.to_epsg() == 4326
+
+
 def test_cli_publish_dashboard_needs_a_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

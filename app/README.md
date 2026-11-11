@@ -56,7 +56,31 @@ zoom 12 and is coloured by the 2025 score minus the stand threshold.
 Engine XYZ tiles, as in the old inspector, masked to the stands:
 `forestmon publish radd` (needs the `gee` extra and `earthengine authenticate`)
 mints them into `app/data/radd_tiles.json`. Map IDs expire within days, so run
-it nightly; the panel shows the tiles' age. Without the file the layer is hidden.
+it nightly; the panel shows the tiles' age.
+
+Without a local Earth Engine login, a tile link can be pasted instead (Layers →
+Radar alerts → *Use a map link*; kept in that browser's localStorage, and it
+overrides the file). Run this in the [Code Editor](https://code.earthengine.google.com/)
+and paste the printed link, or paste a map ID into
+[eetiles.geocarpentry.org](https://eetiles.geocarpentry.org/) and copy its
+*Standard XYZ URL*. To clip to the stands, upload them as a table asset first
+(`forestmon publish stands-asset` writes the shapefile zip) and set `STANDS`.
+
+```js
+var STANDS = null; // e.g. 'projects/<your-project>/assets/forest_stands'
+var img = ee.Image(ee.ImageCollection('projects/wurnrt-raddeurope/assets/01_NRT/00_Operational/V1_IC')
+  .filterMetadata('layer', 'contains', 'alert')
+  .filterMetadata('geography', 'equals', 'europe')
+  .sort('system:time_end', false).first());
+if (STANDS) img = img.updateMask(ee.Image(0).paint(ee.FeatureCollection(STANDS), 1).selfMask());
+var a = img.select('Alert').unmask(0, false);
+var vis = ee.ImageCollection([   // confirmed over unconfirmed, as the RADD app
+  a.eq(3).selfMask().visualize({palette: ['EA7E7D']}),
+  a.eq(2).selfMask().visualize({palette: ['00ffff'], opacity: 0.75})
+]).mosaic();
+Map.addLayer(vis, {}, 'RADD');
+print(vis.getMap().urlFormat);  // paste this into the dashboard
+```
 
 **Clicking the map** opens a card with everything under the point: S-CCD
 alerts (with a link to the pixel's Sentinel-2 NBR time series, `timeseriesUrl`
