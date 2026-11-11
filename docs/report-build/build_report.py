@@ -72,6 +72,7 @@ fig-cap-location: bottom
 tbl-cap-location: top
 format:
   html:
+    output-file: index.html
     embed-resources: true
     toc: true
     toc-title: Contents
@@ -500,11 +501,10 @@ def main() -> None:
     QMD.write_text(YAML + "\n" + body.strip() + "\n", encoding="utf-8")
     print(f"wrote {QMD.name}: {nfig + 1} figures, {ntab} tables")
 
-    subprocess.run(["quarto", "render", QMD.name], cwd=OUT, check=True)
+    subprocess.run(["bash", str(HERE / "render.sh"), QMD.name], cwd=OUT, check=True)
     fix_docx(QMD.with_suffix(".docx"))
     print("rendered:", ", ".join(p.name for p in sorted(OUT.glob(QMD.stem + ".*"))))
 
 
 if __name__ == "__main__":
     main()
-
