@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import http.server
 import json
+import re
 import shutil
 import threading
 from pathlib import Path
@@ -28,8 +29,18 @@ PREFIX_ARGS = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader"]
 def site(tmp_path_factory):
     """A copy of app/ with data/ baked from the synthetic source, served over HTTP."""
     root = tmp_path_factory.mktemp("site")
+    # Plain read/write: the kernel copy shutil uses fails with EAGAIN on CIFS.
     shutil.copytree(
-        APP, root, dirs_exist_ok=True, ignore=shutil.ignore_patterns("data")
+        APP,
+        root,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("data"),
+        copy_function=lambda s, d: Path(d).write_bytes(Path(s).read_bytes()),
+    )
+    # No S3 in tests: the condition-cell layer stays off.
+    cfg = root / "config.js"
+    cfg.write_text(
+        re.sub(r"conditionCells: '[^']*'", "conditionCells: ''", cfg.read_text())
     )
     src = make_source(tmp_path_factory.mktemp("src"))
     dashboard.bake(str(src), root / "data")
@@ -102,6 +113,16 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
             ".map(k => map.getLayoutProperty(k, 'visibility'))"
         )
         assert vis == ["visible"] * 4
+
+        # Stands recolour and relabel; no cell layer without a configured URL.
+        page.select_option("#stand-color", "trajectory")
+        assert "declining" in page.inner_text("#stand-legend")
+        assert page.locator("#toggle-cells").is_hidden()
+        page.uncheck("#toggle-stands")
+        assert (
+            page.evaluate("() => map.getLayoutProperty('forest-fill', 'visibility')")
+            == "none"
+        )
         assert not errors
     finally:
         ctx.close()

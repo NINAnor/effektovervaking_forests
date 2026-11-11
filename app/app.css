@@ -280,3 +280,26 @@ body {
 .muted {
   color: var(--color-muted);
 }
+
+.layer-controls {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.controls label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+#stand-legend {
+  display: contents;
+}
+
+.dot--declining {
+  background: transparent;
+  border: 2px solid #8c510a;
+}
+
+[hidden] {
+  display: none !important;
+}

@@ -20,6 +20,7 @@ export default [
         cancelAnimationFrame: "readonly",
         ResizeObserver: "readonly",
         maplibregl: "readonly",
+        pmtiles: "readonly",
       },
     },
     rules: {

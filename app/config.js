@@ -5,6 +5,10 @@ window.DASHBOARD_CONFIG = {
   // (e.g. an S3 prefix with public read and CORS).
   dataBase: 'data/',
 
+  // Condition per 10 m cell, read by range requests (needs CORS with Range).
+  // Empty hides the layer.
+  conditionCells: 'https://s3-int-1.nina.no/miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/pmtiles/condition_pixels.pmtiles',
+
   // Basemap tiles.
   basemap: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   basemapAttribution: '&copy; OpenStreetMap contributors'
