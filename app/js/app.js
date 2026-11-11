@@ -161,7 +161,9 @@ function createMap() {
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-  return new Promise((resolve) => map.on('load', resolve));
+  // The style, not 'load': that waits for the first basemap tiles, so a slow tile
+  // server would hold up the whole app.
+  return new Promise((resolve) => map.once('style.load', resolve));
 }
 
 function standColor(mode) {

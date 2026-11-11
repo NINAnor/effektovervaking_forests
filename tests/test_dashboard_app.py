@@ -79,7 +79,7 @@ def browser():
         b.close()
 
 
-def _open(browser, url):
+def _open(browser, url, hung_tiles=False):
     # No bypass_csp: the page's CSP is under test too. Functions, not expression
     # strings, are passed to the page, since the CSP forbids eval.
     ctx = browser.new_context()
@@ -91,7 +91,11 @@ def _open(browser, url):
         lambda m: "Content Security Policy" in m.text and errors.append(m.text),
     )
     page.route("**/cache.kartverket.no/**", lambda r: r.fulfill(status=204))
-    page.route("**/server.arcgisonline.com/**", lambda r: r.fulfill(status=204))
+    # hung_tiles: the satellite basemap never answers (a slow or dead tile server).
+    page.route(
+        "**/server.arcgisonline.com/**",
+        (lambda r: None) if hung_tiles else (lambda r: r.fulfill(status=204)),
+    )
     page.route("**/radd.test/**", lambda r: r.fulfill(status=204))
     page.goto(url)
     # Loaded = data status set (OK or error) and the charts drawn or given up on.
@@ -150,6 +154,18 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
             page.evaluate("() => map.getLayoutProperty('forest-fill', 'visibility')")
             == "none"
         )
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_starts_while_basemap_tiles_hang(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url, hung_tiles=True)
+    try:
+        assert "Alerts up to" in page.inner_text("#data-status")
+        page.wait_for_function("() => map.getLayer('forest-fill')")
+        assert page.locator("#chart-alerts svg").count() >= 1
         assert not errors
     finally:
         ctx.close()
