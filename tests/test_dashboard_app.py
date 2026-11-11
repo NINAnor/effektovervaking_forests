@@ -221,6 +221,12 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
         assert page.evaluate("() => map.getSource('sel')._data.features.length") == 0
         page.click("#detail-close")
         assert page.locator("#detail").is_hidden()
+        # Opening the card moves focus to its close button; Escape closes it.
+        page.mouse.click(*centre)
+        page.wait_for_function("() => !document.getElementById('detail').hidden")
+        assert page.evaluate("() => document.activeElement.id") == "detail-close"
+        page.keyboard.press("Escape")
+        assert page.locator("#detail").is_hidden()
 
         # An S-CCD pixel: a link to its Sentinel-2 time series.
         page.evaluate("() => map.jumpTo({center: [15.0001, 59.6], zoom: 17})")
