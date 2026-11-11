@@ -181,3 +181,13 @@ pyrightconfig.json
 # S3 credentials (never commit)
 .env.s3
 *.credentials
+
+# Dashboard JSON baked by `forestmon publish dashboard`
+app/data/
+
+docs/.quarto/
+docs/*_files/
+docs/*.html.md
+docs/*.docx.md
+docs/*.typst.md
+docs/forest_monitoring_*.typ
