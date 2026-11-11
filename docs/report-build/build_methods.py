@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
-OUT = HERE.parent / "source"
+OUT = HERE.parent                               # docs/
 OUT.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE))
 from fix_docx_tables import main as fix_docx  # noqa: E402

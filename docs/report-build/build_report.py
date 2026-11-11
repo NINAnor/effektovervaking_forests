@@ -7,7 +7,7 @@ from the doc's own Word export. This script only reshapes that text for Quarto
 (title block, numbered sections, figure and table captions) and removes
 authoring notes; it does not change the findings.
 
-    python docs/report-build/build_report.py   # .qmd + figures into docs/source, render html/docx/pdf, tidy the docx
+    python docs/report-build/build_report.py   # .qmd + figures into docs/, render html/docx/pdf, tidy the docx
 """
 import importlib.metadata
 import platform
@@ -24,7 +24,7 @@ import make_stand_map
 
 HERE = Path(__file__).resolve().parent          # docs/report-build
 ASSETS = HERE / "assets"
-OUT = HERE.parent / "source"                    # the Quarto sources and their renders
+OUT = HERE.parent                               # docs/: the Quarto sources and their renders
 OUT.mkdir(exist_ok=True)
 ECRXIV = HERE / "ecrxiv"
 sys.path.insert(0, str(ECRXIV))
