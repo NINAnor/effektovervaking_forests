@@ -1,96 +1,77 @@
-# Forest Monitor Dashboard
+# Forest Monitor dashboard
 
-A static, client-side dashboard for monitoring **olivinskog** and **kalklindeskog**
-forest cover and loss/gain alerts over time.
+A static page showing S-CCD loss and gain alerts and forest cover for
+**olivinskog** and **kalklindeskog**: a MapLibre map, two SVG charts and a
+summary.
 
-Stack: [Vite](https://vitejs.dev/), [DuckDB-WASM](https://duckdb.org/docs/api/wasm/overview)
-(in-browser SQL over Parquet), [MapLibre GL JS](https://maplibre.org/) (map), and
-[Observable Plot](https://observablehq.com/plot/) (charts). No backend, no server-side
-database - everything runs in the browser.
+```
+app/
+  index.html      markup, CSP, and the tags that load the rest
+  app.css         styles
+  js/boot.js      MapLibre CDN fallback, then config.js (cache-busted)
+  js/app.js       everything else; must load last
+  js/globals.d.ts declarations so `// @ts-check` works in an editor
+  config.js       per-deployment settings: where the data is, the basemap
+  vendor/         MapLibre 4.7.1, self-hosted
+  data/           baked JSON (git-ignored; see below)
+```
+
+There is no build step, no `package.json` and no `node_modules`: plain
+`<script>` tags that share one global scope. The stack is the one used by the
+RECOVER labelling app.
+
+## Data
+
+The browser reads only JSON, baked by Python from the published parquet under
+the project's S3 prefix (`alerts/parquet/<aoi>_alerts_all.parquet` and
+`condition/parquet/polygons_geo.parquet`):
+
+```bash
+forestmon publish dashboard --source "$FORESTMON_DASHBOARD_SOURCE" --out app/data
+```
+
+`FORESTMON_DASHBOARD_SOURCE` is the public HTTPS URL of the prefix
+(`<endpoint>/<bucket>/<prefix>`; see `.env.example`) or a local folder with
+the same layout. `index.json` is written last and lists the other files:
+
+| file | contents |
+| --- | --- |
+| `index.json` | schema version, generation time, counts, period, file names |
+| `polygons.geojson` | the 737 mapped polygons (EPSG:4326, lightly simplified) |
+| `monthly.json` | per forest type and month: new loss/gain area, cumulative loss, cover |
+| `points_<aoi>_<kind>.json` | one point per 10 m pixel, columnar: lon, lat, latest break month, confidence, event count |
+
+Each pixel counts once: area by its first break, map date by its latest.
+Cover is the polygons' area minus cumulative loss; gain is not added back.
+The app refuses an `index.json` whose `schema` differs from `SCHEMA` in
+`js/app.js`; bump both (and `dashboard.SCHEMA`) when a file's shape changes.
+
+`config.js`'s `dataBase` says where the JSON is: `data/` beside the page, or
+any URL with CORS (e.g. the baked files copied to an S3 prefix).
 
 ## Running locally
 
 ```bash
-cd app
-npm run dev
+forestmon publish dashboard --out app/data
+python -m http.server 8000 --directory app   # open http://localhost:8000/
 ```
 
-This starts the Vite dev server (default port 5180, see terminal output for the exact
-URL). Open it in a normal desktop browser (Chrome, Firefox, Edge).
+`file://` does not work: the app fetches its JSON.
 
-Note: `npm install` was run with `--no-bin-links` because this project lives on a CIFS
-network mount that doesn't support symlinks, so `node_modules/.bin` doesn't exist. The
-`dev`/`build`/`preview` scripts in `package.json` invoke
-`node node_modules/vite/bin/vite.js` directly instead of `vite`.
+## Tests and lint
 
-The required `Cross-Origin-Opener-Policy: same-origin` /
-`Cross-Origin-Embedder-Policy: require-corp` headers for DuckDB-WASM are already
-configured in `vite.config.js` for both the dev server and `preview`.
+- `tests/test_dashboard.py`: the baker, on a synthetic source.
+- `tests/test_dashboard_app.py`: the page in headless Chromium (Playwright);
+  skips where Playwright is not installed.
+- eslint runs from prek (`eslint.config.mjs`), with no local node install.
 
-DuckDB-WASM is configured to use the single-threaded **mvp** bundle
-(`app/src/duck.js`). This is more broadly compatible than the threaded **eh** bundle
-and is plenty fast for this app's dataset sizes.
+## Vendored MapLibre
 
-## Data layout
-
-**Alerts come from S3.** `src/main.js` reads
-`$VITE_S3_BASE/alerts/parquet/{olivinskog,kalklindeskog}_alerts_all.parquet`
-(public read, CORS open; `VITE_S3_BASE` is set in `.env`, override in `.env.local`)
-and maps one row per 10 m pixel (0.01 ha) to the app's alert shape;
-`alert_type` is the S-CCD `kind`, `loss` or `gain`.
-
-Still mock, in `public/data/` (no S3 equivalent wired yet):
-
-- `forest_polygons.geojson` - polygon geometries for both forest types (EPSG:4326),
-  with `forest_type`, `source_layer`, `polygon_id`, `area_ha` properties.
-- `area_cover_monthly.parquet` - monthly area-cover time series per forest type.
-- `area_cover_annual.parquet` - annual (December snapshot) area-cover time series per
-  forest type.
-- `meta.json` - metadata shown in the UI: `data_status` (`"MOCK"` or `"LIVE"`),
-  `generated` timestamp, `polygon_count`, `alert_count`, `period_range`.
-
-## Data update workflow
-
-Regenerate all of the above (currently mock data, derived from the real polygon
-geometries) with:
+`vendor/` keeps the map off the critical path of a CDN. `js/boot.js` falls
+back to unpkg with SRI if the files are missing. To refresh (and update both
+digests in `js/boot.js`: `openssl dgst -sha384 -binary <file> | openssl base64 -A`):
 
 ```bash
-~/.pixi/envs/geo/bin/python app/data-prep/prepare_mock_data.py
+curl -fsSL https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js  -o app/vendor/maplibre-gl.js
+curl -fsSL https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css -o app/vendor/maplibre-gl.css
 ```
-
-This produces both the monthly and annual cadence files in one run, so it can be
-scheduled monthly (covers both update cadences - the annual file is just the December
-rows of the monthly series).
-
-## Swapping mock data for real data
-
-When a real alerts/area-cover pipeline is available:
-
-1. Replace `alerts.parquet`, `area_cover_monthly.parquet`, and
-   `area_cover_annual.parquet` with the real pipeline's output, keeping the **same
-   column names and types** as the mock files (see `data-prep/prepare_mock_data.py`
-   for the exact schema).
-2. Replace `forest_polygons.geojson` if the mapped polygons change.
-3. Set `meta.json`'s `data_status` field to `"LIVE"` (instead of `"MOCK"`) - this
-   updates the status badge and removes the "MOCK placeholder" note in the footer.
-
-No code changes are required as long as the schema matches.
-
-## Known limitations
-
-- `npm run build` (production build) currently fails on this CIFS-mounted filesystem
-  with `EAGAIN` errors during Node's ESM module resolution. The dev server works fine
-  here. Run `npm run build` on local disk or in CI when ready to deploy.
-- Verify the app in a normal desktop browser - headless/sandboxed browser automation
-  in this environment cannot reliably run dedicated Web Workers to completion, which
-  DuckDB-WASM depends on.
-
-## Credentials / permissions
-
-The app as built is fully static and client-side - **no credentials are required** to
-run or host it.
-
-If real alert/area-cover data derived from AlphaEarth/Earth Engine is wired in later,
-that pipeline would reuse the existing Earth Engine credentials at
-`~/.config/earthengine/credentials`. For public hosting (e.g. GitHub Pages), no special
-credentials are needed beyond push access to the repository.
