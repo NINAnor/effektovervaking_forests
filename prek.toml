@@ -3,8 +3,8 @@
 
 default_stages = ["pre-commit"]
 # The report (docs/index.html, the methods appendix, its .qmd sources and assets) is generated, and
-# docs/report-build is its build tooling: neither is checked or reformatted by the hooks.
-exclude = '^docs/(index\.html|forest_monitoring_[^/]*|report-assets/|report-build/)'
+# docs/report-build is its build tooling; app/vendor is third-party: none is checked or reformatted by the hooks.
+exclude = '^(app/vendor/|docs/(index\.html|forest_monitoring_[^/]*|report-assets/|report-build/))'
 
 [[repos]]
 hooks = [
