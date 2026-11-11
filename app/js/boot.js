@@ -16,7 +16,7 @@ if (typeof maplibregl === 'undefined') {
 // pmtiles.js reads PMTiles from S3 with range requests.
 if (typeof pmtiles === 'undefined') {
   document.write('<script src="https://unpkg.com/pmtiles@3.0.6/dist/'
-    + 'pmtiles.js" integrity="sha384-4sbA4B4Oqxkzs6apu8HaZcGrL3BySmt0tO/LQf6al3hkgq8ijZFxkTkvxxZZ/3PU" '
+    + 'pmtiles.js" integrity="sha384-4sbA4B4Oqxkzs6apu8HaZcGrL3BySmt0tO/LQf6al3hkgq8ijZFxkTkvxxZZ/3PU" '  // pragma: allowlist secret (SRI hash)
     + 'crossorigin="anonymous"><\/script>');
 }
 

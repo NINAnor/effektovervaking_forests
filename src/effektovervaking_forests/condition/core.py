@@ -16,7 +16,7 @@ Direction: a score near 1 means the probe sits FAR from the bad pool and CLOSE
 to the good pool -- for this project, good condition.
 
 For this project the pools are re-defined for forest condition rather than
-land-cover reversion (see `condition.refs` and `docs/condition/METHODS.md`), but the
+land-cover reversion (see `condition.refs` and `docs/METHODS.md`), but the
 score, its bootstrap and its CI-vs-threshold classification are unchanged.
 """
 from __future__ import annotations
