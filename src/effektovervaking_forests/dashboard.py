@@ -26,7 +26,7 @@ from . import alerts as alerts_mod
 AOIS = ("olivinskog", "kalklindeskog")
 KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
-SCHEMA = 1  # bump when a file's shape changes; the app refuses other versions
+SCHEMA = 2  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -37,6 +37,16 @@ ALERT_COLS = [
     "status",
     "magnitude",
     "gate",
+]
+# Per-stand condition joined onto the polygons (condition/parquet).
+STAND_COLS = [
+    "poly_id",
+    "tilstand",
+    "survey_year",
+    "condition_local",
+    "condition_global",
+    "dor_global_2025",
+    "trajectory",
 ]
 
 
@@ -143,6 +153,10 @@ def bake(source: str, out_dir: Path | str) -> dict:
         polys = gpd.read_parquet(
             _local(source, "condition/parquet/polygons_geo.parquet", tmp)
         )
+        stands = pd.read_parquet(
+            _local(source, "condition/parquet/condition_stands.parquet", tmp),
+            columns=STAND_COLS,
+        )
 
     polys = polys[polys["forest_type"].isin(AOIS)]
     if polys.crs is None or not polys.crs.is_projected:
@@ -169,12 +183,20 @@ def bake(source: str, out_dir: Path | str) -> dict:
             )
 
     web = polys[["poly_id", "forest_type", "layer", "naturtype", "area_ha", "geometry"]]
-    web = web.assign(area_ha=web["area_ha"].round(2)).to_crs(4326)
+    web = web.merge(stands, on="poly_id", how="left", validate="one_to_one")
+    # A point inside each stand, for finding small stands at overview zoom.
+    inside = web.geometry.representative_point().to_crs(4326)
+    web = web.assign(
+        area_ha=web["area_ha"].round(2),
+        dor_global_2025=web["dor_global_2025"].round(3),
+        lon=inside.x.round(5),
+        lat=inside.y.round(5),
+    ).to_crs(4326)
     geom = web.geometry.simplify(1e-5, preserve_topology=True)
     web = web.assign(geometry=shapely.set_precision(geom.values, 1e-5))
-    files["polygons"] = _write(
-        json.loads(web.to_json(drop_id=True)), out_dir / "polygons.geojson"
-    )
+    # na="null": the app reads a missing score as "no score".
+    feats = json.loads(web.to_json(drop_id=True, na="null"))
+    files["polygons"] = _write(feats, out_dir / "polygons.geojson")
     files["monthly"] = _write(monthly(px, baseline), out_dir / "monthly.json")
 
     counts = px.groupby(["aoi", "kind"]).size()

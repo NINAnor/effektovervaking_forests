@@ -77,6 +77,17 @@ def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Pat
         columns=["poly_id", "forest_type", "layer", "naturtype", "geometry"],
         crs=25833,
     ).to_parquet(root / "condition/parquet/polygons_geo.parquet")
+    pd.DataFrame(
+        {
+            "poly_id": [r[0] for r in rows],
+            "tilstand": "god",
+            "survey_year": 2020,
+            "condition_local": "good_condition",
+            "condition_global": "good_condition",
+            "dor_global_2025": 0.6,
+            "trajectory": "stable",
+        }
+    ).to_parquet(root / "condition/parquet/condition_stands.parquet")
     return root
 
 
