@@ -405,7 +405,6 @@ function setRaddLink(link) {
   } catch { /* private mode: this page view only */ }
   raddTiles = link ? linkTiles(link) : raddFile;
   describeRadd();
-  if (map.getSource('radd')) checkRaddTiles();
   applyRadd();
 }
 
@@ -451,7 +450,6 @@ function applyRadd() {
     });
     map.addLayer({ id: 'radd', type: 'raster', source: 'radd', paint: { 'raster-opacity': 0.9 } }, 'forest-line');
     raddApplied = tiles[0];
-    checkRaddTiles();
   } else if (state.radd && raddApplied !== tiles[0]) {
     map.getSource('radd').setTiles(tiles);
     raddApplied = tiles[0];
@@ -460,18 +458,6 @@ function applyRadd() {
 }
 
 /** MapLibre stays silent on tile 404s, so probe one tile per layer once. */
-function checkRaddTiles() {
-  for (const { tiles } of Object.values(raddTiles.layers)) {
-    fetch(tiles.replace('{z}', 0).replace('{x}', 0).replace('{y}', 0))
-      .then((r) => { if (!r.ok) throw new Error(r.status); })
-      .catch(() => {
-        document.getElementById('radd-note').textContent = raddTiles?.pasted
-          ? 'The map link failed to load: Earth Engine links expire. Paste a new one.'
-          : 'RADD tiles failed to load. Earth Engine map IDs expire: re-run forestmon publish radd.';
-      });
-  }
-}
-
 function describeRadd() {
   const note = document.getElementById('radd-note');
   document.getElementById('radd-modes').hidden = !raddTiles || raddTiles.pasted;
@@ -1218,9 +1204,15 @@ function showFatal(e) {
   document.querySelector('.map-wrap').append(p);
 }
 
-/** Tile layers read from S3 fail quietly in MapLibre: say so in their section. */
+/** Tile layers fail quietly in MapLibre: say so in their section. */
 function setupLayerErrors() {
   map.on('error', (e) => {
+    if (e.sourceId === 'radd') { // Earth Engine tile links expire
+      document.getElementById('radd-note').textContent = raddTiles?.pasted
+        ? 'The radar layer could not be loaded: map links expire. Paste a new one under Advanced.'
+        : 'The radar layer could not be loaded; it may be out of date.';
+      return;
+    }
     const section = { c2c: 'c2c-section', cells: 'cells-section' }[e.sourceId];
     const el = section && document.getElementById(section);
     if (!el || el.querySelector('.layer-error')) return;

@@ -209,8 +209,14 @@ def test_radd_tiles_and_click_card(browser, site) -> None:
             "() => map.getLayer('radd')"
             " && map.getLayoutProperty('radd', 'visibility') === 'visible'"
         )
+        # Expired tiles: the map's own tile error says so in the note.
+        page.route("**/radd.test/**", lambda r: r.fulfill(status=403))
         page.locator('.seg__opt:has(input[value="alert_date"])').click()
         page.wait_for_function("() => raddApplied.includes('/alert_date/')")
+        page.wait_for_function(
+            "() => document.getElementById('radd-note').textContent"
+            ".includes('could not be loaded')"
+        )
 
         # A stand: its trajectory and classification.
         page.evaluate("() => map.jumpTo({center: [11.46823, 59.4911], zoom: 16})")
