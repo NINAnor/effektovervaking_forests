@@ -190,6 +190,10 @@ select:hover, .pill-btn:hover {
 
 .layer-group { padding: 10px 16px 12px; border-bottom: 1px solid var(--line); }
 .layer-group:last-child { border-bottom: 0; }
+/* A layer that is off shows only its name and hint; the info dialog still shows its key. */
+.layer-group:has(.switch input:not(:checked)) :is(.key, .ramp, .ramp-labels, .opacity, .seg, .inline, .check) {
+  display: none;
+}
 .group-title { margin-bottom: 6px; font-size: 12px; font-weight: 450; color: var(--muted); }
 
 /* switch row: text left, pill switch right */
