@@ -5,7 +5,7 @@ tests each new observation against it, so `update()` calls `sccd_update`
 rather than refitting history with `sccd_detect`. The recipe (band order,
 clipping to 1-10000, all-clear QA, p_cg/conse) mirrors the inspector so alerts
 are reproducible there. Breaks are triggers for review, not final answers; see
-docs/ for detector accuracy.
+docs/operational.md for detector accuracy.
 """
 
 from __future__ import annotations
