@@ -2285,7 +2285,7 @@ font-family: inherit;
   <li><a href="#appendix-whitening" id="toc-appendix-whitening" class="nav-link" data-scroll-target="#appendix-whitening">Appendix: whitening formula</a></li>
   <li><a href="#references" id="toc-references" class="nav-link" data-scroll-target="#references">References</a></li>
   </ul>
-<div class="quarto-alternate-formats"><h2>Other Formats</h2><ul><li><a href="forest_monitoring_methods.docx"><i class="bi bi-file-word"></i>MS Word</a></li><li><a href="forest_monitoring_methods.pdf"><i class="bi bi-file-pdf"></i>Typst</a></li></ul></div><div class="quarto-code-links"><h2>Code Links</h2><ul><li><a href="https://github.com/NINAnor/effektovervaaking-2026-2030"><i class="bi bi-github"></i>Code repository</a></li></ul></div></nav>
+<div class="quarto-alternate-formats"><h2>Other Formats</h2><ul><li><a href="forest_monitoring_methods.docx"><i class="bi bi-file-word"></i>MS Word</a></li><li><a href="forest_monitoring_methods.pdf"><i class="bi bi-file-pdf"></i>Typst</a></li></ul></div><div class="quarto-code-links"><h2>Code Links</h2><ul><li><a href="https://github.com/NINAnor/effektovervaking_forests"><i class="bi bi-github"></i>Code repository</a></li></ul></div></nav>
 </div>
 <main class="content" id="quarto-document-content">
 
@@ -2590,7 +2590,7 @@ Figure 1: Pipeline overview · 4 products from 3 data streams
 <p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>J</mi><mo>=</mo><mtext mathvariant="normal">share of good stands above the threshold</mtext><mo>+</mo><mtext mathvariant="normal">share of poor stands below it</mtext><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">
 J = \text{share of good stands above the threshold} + \text{share of poor stands below it} - 1
 </annotation></semantics></math></p>
-<p>At 0.511, 73.5 % of good stands are above and 82.9 % of poor stands are below, so J = 0.564 (s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/parquet<code>/threshold.json</code>).</p>
+<p>At 0.511, 73.5 % of good stands are above and 82.9 % of poor stands are below, so J = 0.564 (S3_PREFIX/condition/parquet<code>/threshold.json</code>).</p>
 <p><strong>Fitted outside the stand’s own block.</strong> For each spatial block (section 3.6) the threshold is fitted again without the stands of that block, and the stands of the block are classified with that threshold. Every stand, with or without a field label, is classed with its own block’s threshold: 0.511 in most blocks, 0.499 and 0.503 in two large blocks.</p>
 <p><strong>Classes.</strong> A stand is classed with its 95 % interval (section 3.7):</p>
 <table class="caption-top table">
@@ -2827,7 +2827,7 @@ J = \text{share of good stands above the threshold} + \text{share of poor stands
 <li><strong>Catalogue.</strong> The service lists new Sentinel-2 Level-2A scenes from the EOPF catalogue for the Sentinel-2 tiles that cover the stands.</li>
 <li><strong>Reading.</strong> For each new scene it reads only the image blocks that contain stand cells, bands B02, B03, B04, B08, B11 and B12, and masks cells with the scene classification (section 2.3).</li>
 <li><strong>Model update.</strong> Each cell has a stored time-series model. Stochastic continuous change detection <span class="citation" data-cites="ye2021">(S-CCD, <a href="#ref-ye2021" role="doc-biblioref">Ye et al. 2021</a>)</span> updates that model with each new clear observation and tests the observation against it. A break is confirmed after 6 consecutive observations that do not fit the model (change probability 0.90). Settings: <code>src/effektovervaking_forests/config.py and src/effektovervaking_forests``/sccd.py</code>.</li>
-<li><strong>Candidates.</strong> Each confirmed break becomes one candidate, written to <code>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/kalklindeskog_alerts.parquet</code> and olivinskog_alerts.parquet.</li>
+<li><strong>Candidates.</strong> Each confirmed break becomes one candidate, written to <code>S3_PREFIX/sccd/operational/alerts/kalklindeskog_alerts.parquet</code> and olivinskog_alerts.parquet.</li>
 </ol>
 </section>
 <section id="section-8-2" class="level2 unnumbered">
@@ -3185,22 +3185,22 @@ s = 0.5\,\min\!\left(\frac{n_{\text{confirm}}}{12}, 1\right) + 0.5\,\operatornam
 </thead>
 <tbody>
 <tr class="odd">
-<td>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/parquet<code>/condition.parquet</code></td>
+<td>S3_PREFIX/condition/parquet<code>/condition.parquet</code></td>
 <td>one row per stand and year: stand score and interval for both scopes, class, threshold, cell-score median, quartiles and share below threshold, field-assigned condition, survey year, area</td>
 <td style="text-align: right;">6,633</td>
 </tr>
 <tr class="even">
-<td>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/parquet<code>/pixel_condition.parquet</code></td>
+<td>S3_PREFIX/condition/parquet<code>/pixel_condition.parquet</code></td>
 <td>one row per cell, stand and year: AE score for both scopes, m_good, m_poor, distance to stand edge</td>
 <td style="text-align: right;">2,005,866</td>
 </tr>
 <tr class="odd">
-<td>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/parquet<code>/trajectory.parquet</code></td>
+<td>S3_PREFIX/condition/parquet<code>/trajectory.parquet</code></td>
 <td>one row per stand: Theil-Sen slope, Mann-Kendall statistics, standard deviation, class, yearly nature type AE scores <code>c_2017</code>-<code>c_2025</code></td>
 <td style="text-align: right;">737</td>
 </tr>
 <tr class="even">
-<td><code>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/parquet/threshold.json, data/condition/outputs/data/trajectory_gate.json, data/condition/outputs/data/``whitener.json</code></td>
+<td><code>S3_PREFIX/condition/parquet/threshold.json, data/condition/outputs/data/trajectory_gate.json, data/condition/outputs/data/``whitener.json</code></td>
 <td>fitted threshold and its block values, trajectory cut-offs and stable/fluctuating cut-offs, whitening parameters</td>
 <td style="text-align: right;">-</td>
 </tr>
@@ -3210,7 +3210,7 @@ s = 0.5\,\min\!\left(\frac{n_{\text{confirm}}}{12}, 1\right) + 0.5\,\operatornam
 <td style="text-align: right;">-</td>
 </tr>
 <tr class="even">
-<td>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/cog<code>/</code></td>
+<td>S3_PREFIX/condition/cog<code>/</code></td>
 <td>the cell results as 66 GeoTIFFs on the AlphaEarth grid, one per spatial block, with 5 VRT mosaics, one per UTM zone</td>
 <td style="text-align: right;">-</td>
 </tr>
@@ -3225,12 +3225,12 @@ s = 0.5\,\min\!\left(\frac{n_{\text{confirm}}}{12}, 1\right) + 0.5\,\operatornam
 <td style="text-align: right;">-</td>
 </tr>
 <tr class="odd">
-<td><code>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/kalklindeskog_alerts.parquet</code></td>
+<td><code>S3_PREFIX/sccd/operational/alerts/kalklindeskog_alerts.parquet</code></td>
 <td>S-CCD candidates: <code>alert_id</code>, <code>pix_id</code>, <code>lon</code>, <code>lat</code>, <code>break_date</code>, <code>magnitude</code>, <code>kind</code>, <code>gate</code>, <code>status</code>, <code>detected_at</code>, <code>detection_lag_days</code>, <code>n_confirm</code>, <code>conf_score</code>, <code>confidence</code></td>
 <td style="text-align: right;">68,696</td>
 </tr>
 <tr class="even">
-<td><code>s3://miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/sccd/operational/alerts/olivinskog_alerts.parquet</code></td>
+<td><code>S3_PREFIX/sccd/operational/alerts/olivinskog_alerts.parquet</code></td>
 <td>S-CCD candidates for olivinskog, same columns as the kalklindeskog file</td>
 <td style="text-align: right;"></td>
 </tr>

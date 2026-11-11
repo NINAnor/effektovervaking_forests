@@ -161,15 +161,23 @@ function addPolygons(geojson) {
   fitTo(geojson);
 }
 
+/** config.js wins; otherwise the pmtiles under the S3 prefix the data were baked from. */
+function cellsUrl() {
+  if (CFG.conditionCells) return CFG.conditionCells;
+  const src = index.source;
+  return src && src !== 'local' ? src.replace(/\/?$/, '/') + 'condition/pmtiles/condition_pixels.pmtiles' : '';
+}
+
 function addConditionCells() {
-  if (!CFG.conditionCells || typeof pmtiles === 'undefined') {
-    if (CFG.conditionCells) console.error('pmtiles.js failed to load; condition cells are off');
+  const url = cellsUrl();
+  if (!url || typeof pmtiles === 'undefined') {
+    if (url) console.error('pmtiles.js failed to load; condition cells are off');
     document.getElementById('cells-section').hidden = true;
     return;
   }
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
-  map.addSource('cells', { type: 'vector', url: 'pmtiles://' + CFG.conditionCells });
+  map.addSource('cells', { type: 'vector', url: 'pmtiles://' + url });
   const diff = ['*', 1000, ['-', ['to-number', ['get', 'dor_global_2025']], ['to-number', ['get', 'threshold_global']]]];
   const ramp = ['step', diff, CELL_RAMP[0][0]];
   for (let k = 0; k < CELL_RAMP.length - 1; k++) ramp.push(CELL_RAMP[k][1], CELL_RAMP[k + 1][0]);
