@@ -1,7 +1,7 @@
 # Forest Monitor dashboard
 
 A static page showing S-CCD loss and gain alerts and forest cover for
-**olivinskog** and **kalklindeskog**: a MapLibre map, two SVG charts and a
+**olivinskog** and **kalklindeskog**: a MapLibre map, an SVG chart of alert area over time and a
 summary.
 
 ```
@@ -12,7 +12,7 @@ app/
   js/app.js       everything else; must load last
   js/globals.d.ts declarations so `// @ts-check` works in an editor
   config.js       per-deployment settings: where the data is, the basemap
-  vendor/         MapLibre 4.7.1, self-hosted
+  vendor/         MapLibre 4.7.1 and pmtiles.js 3.0.6, self-hosted
   data/           baked JSON (git-ignored; see below)
 ```
 
