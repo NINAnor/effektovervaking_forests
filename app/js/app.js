@@ -727,18 +727,22 @@ function applyMapState() {
     const c = pointCols.get(key);
     if (wanted.has(key) && c) for (let i = 0; i < c.date.length; i++) shown += +(c.date[i] >= from && c.date[i] <= to && c.conf[i] >= state.minConf);
   }
-  document.getElementById('alert-count').textContent = `(${shown.toLocaleString()})`;
+  document.getElementById('alert-count').textContent = pointsLoading ? '(loading…)' : `(${shown.toLocaleString()})`;
   applyRadd();
   applyOpacity();
 }
 
 let mapGeneration = 0;
+/** True while a refresh is still fetching point files, so the count is not shown as 0. */
+let pointsLoading = false;
 
 async function refreshMap() {
   const gen = ++mapGeneration;
+  pointsLoading = true;
   applyMapState();
   const results = await Promise.allSettled(wantedLayers().map(({ aoi, kind }) => ensurePoints(aoi, kind)));
   // The state may have changed while files loaded; apply the current one.
+  if (gen === mapGeneration) pointsLoading = false;
   applyMapState();
   if (gen !== mapGeneration) return; // a newer refresh owns the status line
   const failed = results.find((r) => r.status === 'rejected');
