@@ -48,9 +48,9 @@ effektovervaking-forests = "effektovervaking_forests.cli:app"
 forestmon = "effektovervaking_forests.cli:app"
 
 [tool.deptry]
-known_first_party = ["effektovervaking_forests"]
 # The report build in docs/report-build has its own requirements.txt.
 extend_exclude = ["docs"]
+known_first_party = ["effektovervaking_forests"]
 
 [tool.deptry.package_module_name_map]
 aef-loader-plus = "aef_loader"
@@ -70,9 +70,9 @@ markers = [
 testpaths = ["tests"]
 
 [tool.ruff]
-fix = true
 # The report build tooling and its generated files are not project code.
 extend-exclude = ["docs"]
+fix = true
 force-exclude = true
 
 [tool.ruff.format]
