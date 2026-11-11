@@ -42,7 +42,7 @@ def site(tmp_path_factory):
     cfg.write_text(
         re.sub(r"conditionCells: '[^']*'", "conditionCells: ''", cfg.read_text())
     )
-    src = make_source(tmp_path_factory.mktemp("src"))
+    src = make_source(tmp_path_factory.mktemp("src"), radd=True)
     dashboard.bake(str(src), root / "data")
     handler = functools.partial(
         http.server.SimpleHTTPRequestHandler, directory=str(root)
@@ -172,3 +172,30 @@ def test_missing_points_file_errors_but_charts_render(browser, site) -> None:
         ctx.close()
     finally:
         path.write_bytes(saved)
+
+
+def test_radd_toggle_and_click_card(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        page.check("#toggle-radd")
+        page.wait_for_function(
+            "() => raddLayers.size === 2"
+            " && [...raddLayers.keys()].every(k => map.getLayer(k)"
+            " && map.getLayoutProperty(k, 'visibility') === 'visible')"
+        )
+        # Click the middle of the first olivinskog stand: the card shows its
+        # trajectory and classification.
+        page.evaluate("() => map.jumpTo({center: [11.46823, 59.4911], zoom: 16})")
+        page.wait_for_timeout(1500)
+        box = page.locator("#map").bounding_box()
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_function("() => !document.getElementById('detail').hidden")
+        body = page.inner_text("#detail-body")
+        assert "Stand" in body and "trajectory: stable" in body
+        assert page.locator("#detail .traj-chart circle").count() == 9
+        page.click("#detail-close")
+        assert page.locator("#detail").is_hidden()
+        assert not errors
+    finally:
+        ctx.close()

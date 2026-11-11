@@ -2,6 +2,12 @@
 // Runs before the app. Classic, parser-blocking script: the document.write
 // calls below only work while the parser waits, so no async/defer/module.
 
+// Theme, applied before first paint so dark does not flash white. Light is the
+// default; prefers-color-scheme is deliberately not consulted.
+try {
+  if (localStorage.getItem('forestmon:theme') === 'dark') document.documentElement.dataset.theme = 'dark';
+} catch { /* storage blocked */ }
+
 // CDN fallback, used only if vendor/ is missing. The SRI digests are of the
 // files in app/vendor/; change the version and the digests together.
 if (typeof maplibregl === 'undefined') {

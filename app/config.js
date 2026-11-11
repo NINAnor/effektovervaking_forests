@@ -14,12 +14,14 @@ window.DASHBOARD_CONFIG = {
   basemaps: {
     osm: {
       label: 'Map (OpenStreetMap)',
+      short: 'Map',
       tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       maxzoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     },
     satellite: {
       label: 'Satellite (Esri World Imagery)',
+      short: 'Satellite',
       tiles: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       maxzoom: 19,
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'

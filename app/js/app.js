@@ -4,7 +4,7 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 2; // must match dashboard.SCHEMA in Python
+const SCHEMA = 3; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 const KIND_COLORS = { loss: '#e06666', gain: '#4dd0a7' };
 const KINDS = ['loss', 'gain'];
@@ -36,6 +36,7 @@ const state = {
   resolution: 'annual',
   basemap: Object.keys(BASEMAPS)[0], // the first configured is the default
   alerts: true,
+  radd: false,
   stands: true,
   standColor: 'forest_type',
   cells: false
@@ -201,6 +202,8 @@ const POPUPS = [
   [(id) => pointLayers.has(id), (p) =>
     `<strong>${esc(p.kind)}</strong> &mdash; ${esc(p.aoi)}<br>latest break ${esc(p.month)}<br>` +
     `confidence ${fmt(p.conf, 2)}, ${p.n} event${p.n === 1 ? '' : 's'}`],
+  [(id) => raddLayers.has(id), (p) =>
+    `<strong>RADD ${p.conf === 3 ? 'confirmed' : 'unconfirmed'}</strong><br>${esc(p.date)}`],
   [(id) => id === 'cells', (p) =>
     `<strong>10 m cell</strong><br>condition 2025: ${score(p.dor_global_2025)} ` +
     `(threshold ${fmt(p.threshold_global, 3)})<br>` +
@@ -219,7 +222,9 @@ function setupPopup() {
   popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '320px' });
   map.getCanvas().addEventListener('mouseleave', () => popup.remove());
   map.on('mousemove', (e) => {
-    const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys()].filter((id) => map.getLayer(id));
+    if (!document.getElementById('detail').hidden) { popup.remove(); return; }
+    const layers = ['forest-fill', 'forest-pts', 'cells', ...pointLayers.keys(), ...raddLayers.keys()]
+      .filter((id) => map.getLayer(id));
     const feats = map.queryRenderedFeatures(e.point, { layers });
     let html = null;
     for (const [match, render] of POPUPS) {
@@ -256,6 +261,172 @@ function ensurePoints(aoi, kind) {
     }));
   }
   return pointLayers.get(key);
+}
+
+// ── RADD (optional; baked only when a RADD table exists) ─────────────────────
+const RADD_COLORS = { 3: '#ea7e7d', 2: '#00ffff' };
+/** RADD layers, keyed `radd|${aoi}`, as promises so each loads once. */
+const raddLayers = new Map();
+
+function ensureRadd(aoi) {
+  const key = `radd|${aoi}`;
+  if (!raddLayers.has(key)) {
+    raddLayers.set(key, fetchJson(index.files.radd[aoi]).then((c) => {
+      const features = c.lon.map((lon, i) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lon, c.lat[i]] },
+        properties: { aoi, date: c.date[i], conf: c.conf[i] }
+      }));
+      map.addSource(key, { type: 'geojson', data: { type: 'FeatureCollection', features } });
+      map.addLayer({
+        id: key, type: 'circle', source: key,
+        layout: { visibility: 'none' },
+        paint: {
+          'circle-color': ['match', ['get', 'conf'], 3, RADD_COLORS[3], RADD_COLORS[2]],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 12, 3, 16, 6],
+          'circle-stroke-color': '#000', 'circle-stroke-width': 0.5
+        }
+      });
+      applyMapState();
+      return key;
+    }).catch((e) => {
+      raddLayers.delete(key);
+      throw e;
+    }));
+  }
+  return raddLayers.get(key);
+}
+
+// ── the click card: everything under the clicked point ───────────────────────
+/** Stand properties by poly_id; the map's copies have their arrays stringified. */
+const standById = new Map();
+
+/** Condition by year against the threshold, as a small SVG line. */
+function trajChart(series, threshold, years, markYear) {
+  const pts = series.map((v, i) => [years[i], v]).filter(([, v]) => v !== null && v !== undefined);
+  if (!pts.length) return '<p class="hint">No yearly scores.</p>';
+  const W = 300, H = 120, m = { l: 34, r: 16, t: 8, b: 20 };
+  const vals = pts.map(([, v]) => Number(v)).concat(threshold ?? []);
+  const lo = Math.min(...vals) - 0.02, hi = Math.max(...vals) + 0.02;
+  const x = (yr) => m.l + ((yr - years[0]) / Math.max(1, years[years.length - 1] - years[0])) * (W - m.l - m.r);
+  const y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+  let g = '';
+  for (const v of [lo + 0.02, (lo + hi) / 2, hi - 0.02]) {
+    g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/>` +
+      `<text x="${m.l - 4}" y="${y(v) + 3}" text-anchor="end">${fmt(v, 2)}</text>`;
+  }
+  for (const yr of [years[0], years[4], years[years.length - 1]]) {
+    g += `<text x="${x(yr)}" y="${H - 5}" text-anchor="middle">${yr}</text>`;
+  }
+  if (markYear) g += `<line class="mark" x1="${x(markYear)}" x2="${x(markYear)}" y1="${m.t}" y2="${H - m.b}"><title>surveyed ${markYear}</title></line>`;
+  if (threshold !== null && threshold !== undefined) {
+    g += `<line class="thr" x1="${m.l}" x2="${W - m.r}" y1="${y(threshold)}" y2="${y(threshold)}"><title>threshold ${fmt(threshold, 3)}</title></line>`;
+  }
+  g += `<polyline class="traj" points="${pts.map(([yr, v]) => `${x(yr)},${y(v)}`).join(' ')}"/>`;
+  for (const [yr, v] of pts) {
+    const good = threshold === null || threshold === undefined || v >= threshold;
+    g += `<circle cx="${x(yr)}" cy="${y(v)}" r="3.5" fill="${good ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition}">` +
+      `<title>${yr}: ${fmt(v, 3)} (${good ? 'above' : 'below'} threshold)</title></circle>`;
+  }
+  return `<svg class="traj-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Condition score by year against the threshold">${g}</svg>`;
+}
+
+/** Theil-Sen slope per year, in score units (the tiles' sen_slope is standardised). */
+function senSlope(series, years) {
+  const pts = series.map((v, i) => [years[i], v]).filter(([, v]) => v !== null && v !== undefined);
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) slopes.push((pts[j][1] - pts[i][1]) / (pts[j][0] - pts[i][0]));
+  }
+  if (!slopes.length) return null;
+  slopes.sort((a, b) => a - b);
+  const k = slopes.length >> 1;
+  return slopes.length % 2 ? slopes[k] : (slopes[k - 1] + slopes[k]) / 2;
+}
+
+function trend(series) {
+  const s = senSlope(series, index.years);
+  return s === null ? '—' : `${s >= 0 ? '+' : ''}${fmt(s, 4)} / yr`;
+}
+
+function chip(text, color) {
+  return `<span class="chip"><i style="background:${color}"></i>${esc(text)}</span>`;
+}
+
+function cellSection(p) {
+  const series = index.years.map((yr) => p[`dor_global_${yr}`] ?? null);
+  const traj = p.trajectory_class || '—';
+  return '<section><h4>10 m cell condition</h4>' +
+    trajChart(series, p.threshold_global, index.years) +
+    '<div class="chips">' +
+    chip(`2025: ${Number(p.dor_global_2025) >= Number(p.threshold_global) ? 'above' : 'below'} threshold`,
+      Number(p.dor_global_2025) >= Number(p.threshold_global) ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition) +
+    chip(`trajectory: ${traj}`, TRAJ_COLORS[traj] || CLASS_COLORS.no_data) + '</div>' +
+    `<dl><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd><dt>Threshold</dt><dd>${fmt(p.threshold_global, 3)}</dd>` +
+    `<dt>Trend 2017–2025</dt><dd>${trend(series)}</dd><dt>Inside stand</dt><dd>${fmt(p.edge_m, 0)} m</dd></dl></section>`;
+}
+
+function standSection(p) {
+  const local = p.condition_local || 'no_data', global = p.condition_global || 'no_data';
+  return `<section><h4>Stand: ${esc(p.forest_type)} &middot; ${esc(p.layer)}</h4>` +
+    trajChart(p.series || [], p.threshold_global, index.years, p.survey_year) +
+    '<div class="chips">' +
+    chip(`local: ${CLASS_LABELS[local]}`, CLASS_COLORS[local]) +
+    chip(`global: ${CLASS_LABELS[global]}`, CLASS_COLORS[global]) +
+    chip(`trajectory: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
+    `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Surveyed</dt><dd>${esc(p.survey_year ?? '—')}</dd>` +
+    `<dt>Field condition</dt><dd>${esc(p.tilstand || '—')}</dd><dt>Score 2025</dt><dd>${score(p.dor_global_2025)}</dd>` +
+    `<dt>Trend 2017–2025</dt><dd>${trend(p.series || [])}</dd></dl></section>`;
+}
+
+function showDetail(e) {
+  const at = (ids) => map.queryRenderedFeatures(e.point, { layers: ids.filter((id) => map.getLayer(id)) });
+  const radd = at([...raddLayers.keys()]);
+  const sccd = at([...pointLayers.keys()]);
+  const cell = at(['cells'])[0];
+  const stand = at(['forest-fill', 'forest-pts'])[0];
+  let html = '';
+  for (const f of radd.slice(0, 3)) {
+    const p = f.properties;
+    html += `<section><h4>RADD alert</h4><div class="chips">${chip(p.conf === 3 ? 'confirmed' : 'unconfirmed', RADD_COLORS[p.conf] || RADD_COLORS[2])}</div>` +
+      `<dl><dt>Date</dt><dd>${esc(p.date)}</dd></dl></section>`;
+  }
+  for (const f of sccd.slice(0, 3)) {
+    const p = f.properties;
+    html += `<section><h4>S-CCD ${esc(p.kind)} pixel</h4><div class="chips">${chip(p.kind, KIND_COLORS[p.kind])}</div>` +
+      `<dl><dt>Latest break</dt><dd>${esc(p.month)}</dd><dt>Confidence</dt><dd>${fmt(p.conf, 2)}</dd>` +
+      `<dt>Events</dt><dd>${esc(p.n)}</dd></dl></section>`;
+  }
+  if (cell) html += cellSection(cell.properties);
+  if (stand) html += standSection(standById.get(stand.properties.poly_id) || stand.properties);
+  const card = document.getElementById('detail');
+  if (!html) { card.hidden = true; setMarker(null); return; }
+  document.getElementById('detail-title').textContent =
+    `${fmt(e.lngLat.lat, 5)}° N, ${fmt(e.lngLat.lng, 5)}° E`;
+  document.getElementById('detail-body').innerHTML = html;
+  card.hidden = false;
+  if (popup) popup.remove();
+  setMarker(e.lngLat);
+}
+
+function setMarker(lngLat) {
+  const data = { type: 'FeatureCollection', features: lngLat
+    ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lngLat.lng, lngLat.lat] } }] : [] };
+  if (map.getSource('sel')) { map.getSource('sel').setData(data); return; }
+  map.addSource('sel', { type: 'geojson', data });
+  map.addLayer({
+    id: 'sel', type: 'circle', source: 'sel',
+    paint: { 'circle-radius': 9, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 }
+  });
+}
+
+function setupDetail(polygons) {
+  for (const f of polygons.features) standById.set(f.properties.poly_id, f.properties);
+  map.on('click', showDetail);
+  document.getElementById('detail-close').addEventListener('click', () => {
+    document.getElementById('detail').hidden = true;
+    setMarker(null);
+  });
 }
 
 function fitTo(geojson) {
@@ -311,6 +482,14 @@ function applyMapState() {
     map.setLayoutProperty(key, 'visibility', state.alerts && wanted.has(key) ? 'visible' : 'none');
     map.setFilter(key, filter);
   }
+  const month = ['slice', ['get', 'date'], 0, 7];
+  for (const key of raddLayers.keys()) {
+    if (!map.getLayer(key)) continue;
+    const aoi = key.slice(5);
+    const show = state.radd && (state.forestType === 'all' || state.forestType === aoi);
+    map.setLayoutProperty(key, 'visibility', show ? 'visible' : 'none');
+    map.setFilter(key, ['all', ['>=', month, state.from], ['<=', month, state.to]]);
+  }
 }
 
 let mapGeneration = 0;
@@ -318,7 +497,9 @@ let mapGeneration = 0;
 async function refreshMap() {
   const gen = ++mapGeneration;
   applyMapState();
-  const results = await Promise.allSettled(wantedLayers().map(({ aoi, kind }) => ensurePoints(aoi, kind)));
+  const loads = wantedLayers().map(({ aoi, kind }) => ensurePoints(aoi, kind));
+  if (state.radd && index.files.radd) loads.push(...index.forest_types.map(ensureRadd));
+  const results = await Promise.allSettled(loads);
   // The state may have changed while files loaded; apply the current one.
   applyMapState();
   if (gen !== mapGeneration) return; // a newer refresh owns the status line
@@ -452,6 +633,26 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+// Theme: light by default, as in the RECOVER app; js/boot.js applies the
+// stored choice before first paint.
+function setupTheme() {
+  const btn = document.getElementById('theme-toggle');
+  const sync = () => {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    btn.textContent = dark ? 'Light' : 'Dark';
+    btn.setAttribute('aria-pressed', String(dark));
+  };
+  btn.addEventListener('click', () => {
+    const dark = document.documentElement.dataset.theme !== 'dark';
+    if (dark) document.documentElement.dataset.theme = 'dark';
+    else delete document.documentElement.dataset.theme;
+    try { localStorage.setItem('forestmon:theme', dark ? 'dark' : 'light'); } catch { /* private mode */ }
+    sync();
+    renderCharts();
+  });
+  sync();
+}
+
 function fmt(v, digits) {
   if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return '—';
   return Number(v).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -508,8 +709,12 @@ function setupControls() {
   bind('cover-resolution', 'resolution');
   bind('stand-color', 'standColor');
   document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
-    `<label class="check"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}> ` +
-    `<span>${esc(b.label || id)}</span></label>`).join('');
+    `<label class="seg__opt"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}>` +
+    `<span>${esc(b.short || b.label || id)}</span></label>`).join('');
+  if (!index.files.radd) document.getElementById('radd-section').hidden = true;
+  else document.getElementById('radd-note').textContent =
+    `Wageningen RADD Europe, inside the stands: ${index.forest_types.reduce((n, a) => n + (index.radd[a] || 0), 0).toLocaleString()} pixels.`;
+  setupTheme();
   // Browsers may restore form state on reload; the controls are the truth.
   const val = (id) => /** @type {HTMLInputElement} */ (document.getElementById(id));
   state.forestType = val('filter-forest-type').value;
@@ -520,6 +725,7 @@ function setupControls() {
   state.alerts = val('toggle-alerts').checked;
   state.stands = val('toggle-stands').checked;
   state.cells = val('toggle-cells').checked;
+  state.radd = val('toggle-radd').checked;
   if (window.innerWidth < 700) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
   document.getElementById('cell-ramp').style.background =
     `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
@@ -529,10 +735,10 @@ function setupControls() {
       applyMapState();
     });
   }
-  for (const [id, key] of [['toggle-alerts', 'alerts'], ['toggle-stands', 'stands'], ['toggle-cells', 'cells']]) {
+  for (const [id, key] of [['toggle-alerts', 'alerts'], ['toggle-radd', 'radd'], ['toggle-stands', 'stands'], ['toggle-cells', 'cells']]) {
     document.getElementById(id).addEventListener('change', (e) => {
       state[key] = /** @type {HTMLInputElement} */ (e.target).checked;
-      applyMapState();
+      refreshMap().catch((err) => showError(`Map update failed: ${err.message}`));
     });
   }
 }
@@ -562,6 +768,7 @@ async function init() {
   addPolygons(polygons);
   addConditionCells();
   setupPopup();
+  setupDetail(polygons);
   refresh();
   let pending = 0;
   new ResizeObserver(() => {

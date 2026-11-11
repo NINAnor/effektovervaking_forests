@@ -27,7 +27,10 @@
       <h1>Forest Monitor</h1>
       <p>Loss and gain alerts &amp; forest cover &mdash; olivinskog &amp; kalklindeskog</p>
     </div>
-    <div class="topbar__status" id="data-status" role="status">Loading data&hellip;</div>
+    <div class="topbar__right">
+      <div class="topbar__status" id="data-status" role="status">Loading data&hellip;</div>
+      <button type="button" class="pill-btn" id="theme-toggle" aria-pressed="false">Dark</button>
+    </div>
   </header>
 
   <main class="layout">
@@ -62,16 +65,16 @@
       </div>
       <div class="map-wrap">
         <!-- Before #map, so keyboard focus reaches the panel first. -->
-        <details id="layer-panel" class="layer-panel" open>
+        <details id="layer-panel" class="layer-panel glass" open>
           <summary>Layers</summary>
 
-          <fieldset>
-            <legend>Basemap</legend>
-            <div id="basemap-options"></div>
-          </fieldset>
+          <div class="layer-group" role="group" aria-labelledby="basemap-title">
+            <div class="group-title" id="basemap-title">Basemap</div>
+            <div class="seg" id="basemap-options" role="radiogroup" aria-labelledby="basemap-title"></div>
+          </div>
 
-          <div class="layer-group" role="group" aria-labelledby="alerts-title">
-            <label class="check title" id="alerts-title"><input type="checkbox" id="toggle-alerts" checked> <span>S-CCD alerts</span></label>
+          <div class="layer-group" role="group" aria-label="S-CCD alerts">
+            <label class="switch"><span>S-CCD alerts</span><input type="checkbox" role="switch" id="toggle-alerts" checked></label>
             <ul class="key">
               <li><i class="sw sw--dot" style="background:#e06666"></i> Loss pixel (10 m)</li>
               <li><i class="sw sw--dot" style="background:#4dd0a7"></i> Gain pixel (10 m)</li>
@@ -79,8 +82,17 @@
             <p class="hint">Type, dates and confidence: filters above.</p>
           </div>
 
+          <div class="layer-group" role="group" aria-label="RADD alerts" id="radd-section">
+            <label class="switch"><span>RADD alerts (Sentinel-1)</span><input type="checkbox" role="switch" id="toggle-radd"></label>
+            <ul class="key">
+              <li><i class="sw sw--dot" style="background:#ea7e7d"></i> Confirmed</li>
+              <li><i class="sw sw--dot" style="background:#00ffff"></i> Unconfirmed</li>
+            </ul>
+            <p class="hint" id="radd-note">Wageningen RADD Europe, inside the stands.</p>
+          </div>
+
           <div class="layer-group" role="group" aria-label="Stands">
-            <label class="check title"><input type="checkbox" id="toggle-stands" checked> <span>Stands (<span id="stand-count">…</span>)</span></label>
+            <label class="switch"><span>Stands (<span id="stand-count">…</span>)</span><input type="checkbox" role="switch" id="toggle-stands" checked></label>
             <label class="inline">Colour by
               <select id="stand-color">
                 <option value="forest_type" selected>Forest type</option>
@@ -93,13 +105,21 @@
           </div>
 
           <div class="layer-group" role="group" aria-label="Condition cells" id="cells-section">
-            <label class="check title"><input type="checkbox" id="toggle-cells"> <span>Condition: 10 m cells</span></label>
+            <label class="switch"><span>Condition: 10 m cells</span><input type="checkbox" role="switch" id="toggle-cells"></label>
             <div class="ramp" id="cell-ramp" role="img"
                  aria-label="Colour scale from brown, below the stand threshold, through cream at the threshold, to dark teal, above it"></div>
             <div class="ramp-labels" aria-hidden="true"><span>below threshold</span><span>above</span></div>
             <p class="hint">2025 score minus the stand threshold. Zoom in past 12 to see cells.</p>
           </div>
         </details>
+        <!-- What was clicked: alerts, the cell and the stand under the pointer. -->
+        <aside id="detail" class="detail glass" hidden aria-live="polite">
+          <div class="detail__head">
+            <h3 id="detail-title">Pixel</h3>
+            <button type="button" class="icon-btn" id="detail-close" aria-label="Close">&times;</button>
+          </div>
+          <div id="detail-body"></div>
+        </aside>
         <div id="map"></div>
       </div>
     </section>
