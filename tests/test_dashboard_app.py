@@ -55,15 +55,21 @@ def browser():
 
 
 def _open(browser, url):
-    ctx = browser.new_context(bypass_csp=True)
+    # No bypass_csp: the page's CSP is under test too. Functions, not expression
+    # strings, are passed to the page, since the CSP forbids eval.
+    ctx = browser.new_context()
     page = ctx.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on(
+        "console",
+        lambda m: "Content Security Policy" in m.text and errors.append(m.text),
+    )
     page.route("**/tile.openstreetmap.org/**", lambda r: r.fulfill(status=204))
     page.goto(url)
     # Loaded = data status set (OK or error) and the charts drawn or given up on.
     page.wait_for_function(
-        "document.getElementById('data-status').textContent !== 'Loading data…'"
+        "() => document.getElementById('data-status').textContent !== 'Loading data…'"
     )
     return ctx, page, errors
 
@@ -88,11 +94,12 @@ def test_dashboard_renders_and_layers_toggle(browser, site) -> None:
 
         page.select_option("#filter-alert-type", "all")
         page.wait_for_function(
-            "pointLayers.size === 4"
+            "() => pointLayers.size === 4"
             " && [...pointLayers.keys()].every(k => map.getLayer(k))"
         )
         vis = page.evaluate(
-            "[...pointLayers.keys()].map(k => map.getLayoutProperty(k, 'visibility'))"
+            "() => [...pointLayers.keys()]"
+            ".map(k => map.getLayoutProperty(k, 'visibility'))"
         )
         assert vis == ["visible"] * 4
         assert not errors
