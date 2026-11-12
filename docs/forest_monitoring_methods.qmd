@@ -27,7 +27,7 @@ csl: report-assets/ambio.csl
 fig-cap-location: bottom
 format:
   html:
-    embed-resources: true
+    # embed-resources: true
     html-math-method: mathml   # no script: the default MathJax setup pulls polyfill.io
     toc: true
     toc-title: Contents
