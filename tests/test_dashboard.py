@@ -89,6 +89,16 @@ def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Pat
             **{f"dor_global_{y}": 0.5 + (y - 2017) / 100 for y in range(2017, 2026)},
         }
     ).to_parquet(root / "condition/parquet/condition_stands.parquet")
+    (root / "c2c/parquet").mkdir(parents=True)
+    pd.DataFrame(
+        [  # forest_type, pix_id, change_year, magnitude
+            ("olivinskog", "a", 2019.996, -0.3),  # loss in 2020
+            ("olivinskog", "a", 2019.996, -0.3),  # same cell in an overlapping polygon
+            ("olivinskog", "b", 2020.996, -0.1),  # below the cut-off
+            ("kalklindeskog", "c", 2017.996, -0.175),  # at the cut-off: loss in 2018
+        ],
+        columns=dashboard.C2C_COLS,
+    ).to_parquet(root / "c2c/parquet/c2c_pixels.parquet")
     return root
 
 
@@ -160,6 +170,23 @@ def test_index_lists_existing_files_and_columns_align(baked) -> None:
         for name in kinds.values():
             cols = json.loads((out / name).read_text())
             assert len({len(v) for v in cols.values()}) == 1
+
+
+def test_forest_area_counts_c2c_loss_once_per_year(baked) -> None:
+    fa = baked[0]["forest_area"]
+    assert fa["years"] == dashboard.C2C_YEARS
+    # Two 100 m squares (the third polygon repeats one); one 200 m square.
+    assert fa["olivinskog"]["mapped_ha"] == 2.0
+    assert fa["kalklindeskog"]["mapped_ha"] == 4.0
+    loss = {a: dict(zip(fa["years"], fa[a]["loss_ha"])) for a in dashboard.AOIS}
+    assert loss["olivinskog"][2020] == 0.01 and sum(loss["olivinskog"].values()) == 0.01
+    assert loss["kalklindeskog"][2018] == 0.01 and sum(loss["kalklindeskog"].values()) == 0.01
+
+
+def test_no_c2c_in_the_source_hides_forest_area(tmp_path: Path) -> None:
+    src = make_source(tmp_path / "src")
+    (src / "c2c/parquet/c2c_pixels.parquet").unlink()
+    assert dashboard.bake(str(src), tmp_path / "out")["forest_area"] is None
 
 
 def test_missing_polygons_for_an_aoi_raises(tmp_path: Path) -> None:

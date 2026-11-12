@@ -5,7 +5,8 @@ in the browser. Inputs are the hand-published products under the project's
 S3 prefix (alerts/parquet, condition/parquet), or a local copy laid out the
 same way. One alert row is a break event on a 10 m pixel; only rows the site
 would publish are kept (`alerts.publishable_mask`), minus reviewer-rejected
-ones, and areas count each pixel once.
+ones, and areas count each pixel once. The C2C loss pixels (c2c/parquet), taken
+as likely forest loss, give the forest area remaining each year.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import requests
 import shapely
@@ -28,7 +30,7 @@ KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
 # The app's Certainty choices (all, medium and high, high): monthly areas per choice.
 CONF_TIERS = (0.0, 0.34, 0.67)
-SCHEMA = 7  # bump when a file's shape changes; the app refuses other versions
+SCHEMA = 8  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -52,6 +54,12 @@ STAND_COLS = [
     *[f"dor_global_{y}" for y in range(2017, 2026)],
 ]
 YEARS = list(range(2017, 2026))
+# C2C: a loss is an NBR drop of at least the cut-off tuned on labelled cells (as
+# the report and the app's map). C2C dates a loss to the first yearly composite
+# after it, so loss years run 2018-2025.
+C2C_COLS = ["forest_type", "pix_id", "change_year", "magnitude"]
+C2C_GATE = 0.175
+C2C_YEARS = list(range(2018, 2026))
 
 
 def default_source() -> str | None:
@@ -127,6 +135,31 @@ def points(px: pd.DataFrame) -> dict:
     }
 
 
+def forest_area(polys: gpd.GeoDataFrame, c2c: pd.DataFrame) -> dict:
+    """Mapped area per type (overlapping polygons once) and its C2C loss each year."""
+    loss = c2c[c2c["magnitude"] <= -C2C_GATE].drop_duplicates(["forest_type", "pix_id"])
+    # change_year X.996 is the end of year X: the loss shows in year X+1.
+    year = np.floor(loss["change_year"]).astype(int) + 1
+    per = loss.groupby(["forest_type", year]).size()
+    out = {"years": C2C_YEARS}
+    for aoi in AOIS:
+        mapped = polys.loc[polys["forest_type"] == aoi].geometry.union_all().area / 1e4
+        out[aoi] = {
+            "mapped_ha": round(mapped, 2),
+            "loss_ha": [round(int(per.get((aoi, y), 0)) * PIXEL_HA, 2) for y in C2C_YEARS],
+        }
+    return out
+
+
+def _c2c(source: str, tmp: Path) -> pd.DataFrame | None:
+    """The C2C pixels, or None when the source has none (the chart is then hidden)."""
+    try:
+        path = _local(source, "c2c/parquet/c2c_pixels.parquet", tmp)
+        return pd.read_parquet(path, columns=C2C_COLS)
+    except (FileNotFoundError, requests.HTTPError):
+        return None
+
+
 def _write(obj, path: Path) -> str:
     tmp = path.with_suffix(path.suffix + ".tmp")
     text = json.dumps(obj, separators=(",", ":"), allow_nan=False)
@@ -159,6 +192,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
             _local(source, "condition/parquet/condition_stands.parquet", tmp),
             columns=STAND_COLS,
         )
+        c2c = _c2c(source, tmp)
 
     polys = polys[polys["forest_type"].isin(AOIS)]
     if polys.crs is None or not polys.crs.is_projected:
@@ -222,6 +256,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
         "date_range": [f"{px['first'].min():%Y-%m-%d}", f"{px['last'].max():%Y-%m-%d}"],
         "years": YEARS,
         "conf_tiers": list(CONF_TIERS),
+        "forest_area": None if c2c is None else forest_area(polys, c2c),
         "files": files,
     }
     _write(index, out_dir / "index.json")  # last: the app reads it first

@@ -143,6 +143,7 @@ select:hover, .pill-btn:hover {
   background: var(--control-hover);
 }
 .pill-btn { cursor: pointer; white-space: nowrap; }
+a.pill-btn { display: inline-block; text-decoration: none; }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   flex: none; width: 28px; height: 28px; padding: 0;
@@ -451,7 +452,7 @@ input[type="date"]:hover { background: var(--control-hover); }
   font: 400 12px Roboto, Arial, sans-serif; color: var(--ink);
   background: var(--control); border: 1px solid var(--line-strong); border-radius: 999px;
 }
-.about a { color: var(--accent); }
+.about a, .info-dialog a { color: var(--accent); }
 /* In a dialog the method notes read as body text, not as a small aside. */
 .info-dialog .about { font-size: inherit; color: inherit; }
 .info-dialog .about summary { margin-top: 6px; }
@@ -470,3 +471,20 @@ label.opacity input { flex: 1; min-width: 0; accent-color: var(--ink); }
 .sizes i:nth-child(3) { width: 11px; height: 11px; }
 
 #detail-body [data-zoom-stand] { margin-top: 8px; }
+
+/* Wayback release picker, under the Background choice */
+#wayback { margin-top: 8px; }
+.wb-row { display: flex; align-items: center; gap: 4px; }
+.wb-row select { flex: 1 1 auto; min-width: 0; }
+.wb-row .icon-btn:disabled { opacity: .4; cursor: default; }
+
+/* Forest area remaining: line colours per forest type, validated for each mode */
+:root { --line-olivinskog: #2f6e22; --line-kalklindeskog: #a8800f; }
+html[data-theme="dark"] { --line-olivinskog: #2f7a2a; --line-kalklindeskog: #b48c22; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.chart .line--low { stroke-dasharray: 5 4; }
+.chart .pt { stroke: var(--surface-2); stroke-width: 2; }
+.chart .hit { fill: transparent; }
+.chart .end-label { fill: var(--ink); font-weight: 500; }
+.dash-key { display: inline-block; width: 22px; vertical-align: middle;
+  border-top: 2px dashed var(--muted); }

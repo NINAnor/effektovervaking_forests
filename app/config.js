@@ -17,6 +17,9 @@ window.DASHBOARD_CONFIG = {
   // Sentinel-2 time series for a clicked S-CCD pixel; {lon} and {lat} are filled in.
   timeseriesUrl: 'https://jstnbraaten.users.earthengine.app/view/eo-timeseries-explorer#run=true;sensor=Sentinel-2%20SR;lon={lon};lat={lat};index=NBR;rgb=SWIR1%2FNIR%2FGREEN;duration=12;cloud=30;chipwidth=2;',
 
+  // Esri World Imagery Wayback: the release list behind the "Past" background.
+  waybackConfig: 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json',
+
   // Basemaps offered in the layer panel; the first is the default.
   basemaps: {
     satellite: {

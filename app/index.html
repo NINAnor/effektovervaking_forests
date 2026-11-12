@@ -15,6 +15,7 @@
 <title>Forest Monitor · possible tree loss and regrowth</title>
 <link rel="preconnect" href="https://cache.kartverket.no" crossorigin>
 <link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
+<link rel="preconnect" href="https://wayback.maptiles.arcgis.com" crossorigin>
 <script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/pmtiles.js"></script>
 <link href="vendor/maplibre-gl.css" rel="stylesheet">
@@ -31,6 +32,8 @@
     <div class="topbar__right">
       <div class="topbar__status" id="data-status" role="status">Loading data&hellip;</div>
       <button type="button" class="pill-btn" data-info="guide">How to read this map</button>
+      <a class="pill-btn" href="https://ninanor.github.io/effektovervaaking-2026-2030/effektovervaking_forests/docs/" target="_blank" rel="noopener"
+         title="The report behind this map: methods, accuracy and results">Full report</a>
       <button type="button" class="pill-btn" id="theme-toggle" aria-pressed="false">Dark</button>
     </div>
   </header>
@@ -87,6 +90,16 @@
               <button type="button" class="info-btn" data-info="basemap" aria-label="About the background maps">i</button>
             </div>
             <div class="seg" id="basemap-options" role="radiogroup" aria-labelledby="basemap-title"></div>
+            <!-- Esri Wayback: past versions of the satellite photo, shown when Background is "Past". -->
+            <div id="wayback" hidden>
+              <div class="wb-row">
+                <button type="button" class="icon-btn" id="wb-prev" aria-label="Older photo">&lsaquo;</button>
+                <select id="wb-select" aria-label="Photo version (Esri Wayback release)"><option>loading&hellip;</option></select>
+                <button type="button" class="icon-btn" id="wb-next" aria-label="Newer photo">&rsaquo;</button>
+              </div>
+              <label class="check"><input type="checkbox" id="wb-local" checked> Only versions with a new photo here</label>
+              <p class="hint" id="wb-note" role="status"></p>
+            </div>
           </div>
 
           <div class="layer-group layer-group--main" role="group" aria-label="Tree-cover alerts">
@@ -205,6 +218,14 @@
         new candidates at the chosen certainty, by the month they were first seen.</p>
       <div id="chart-alerts" class="chart"></div>
 
+      <div id="forest-area-section" hidden>
+        <div class="panel__header"><h2>Forest area remaining</h2></div>
+        <p class="hint">The stands' mapped area minus the forest-loss map (C2C), taken as
+          likely forest loss. An upper estimate of the loss: about 1 in 3 C2C loss cells
+          is not real loss.</p>
+        <div id="chart-forest-area" class="chart"></div>
+      </div>
+
       <div class="panel__header"><h2>Summary</h2></div>
       <div id="summary-cards" class="summary-cards"></div>
     </section>
@@ -235,19 +256,26 @@
       forest-loss map, 2018&ndash;2025, made once a year.</li>
     <li><b>Bigger dot, bigger change.</b> Each dot is one 10 &times; 10 m cell.</li>
     <li>Choose the period with the date boxes, the quick buttons, or the two markers
-      on the <i>Alert area over time</i> chart. Click anything for its details; the
-      sliders set each layer's opacity.</li>
+      on the <i>Alert area over time</i> chart. Click anything for its details: what
+      you picked is marked in <b>pink</b>. The sliders set each layer's opacity.</li>
   </ul>
   <p><b>Candidates, not proof.</b> Each change candidate should be reviewed before
     it is considered forest loss: breaks also come from thinning, storms or wet
     ground, and on checked cells about 9 of 10 candidates were rejected. All layers
     record canopy loss of any cause; they cannot tell felling from storm or dieback.</p>
-  <p>Each layer has an <b>i</b> button that explains it.</p>
+  <p>Each layer has an <b>i</b> button that explains it. For the methods, accuracy and
+    results in full, read the <a href="https://ninanor.github.io/effektovervaaking-2026-2030/effektovervaking_forests/docs/" target="_blank" rel="noopener">report</a>.</p>
 </template>
 
 <template id="info-basemap" data-title="Background maps">
   <p><b>Satellite</b>: aerial and satellite photos (Esri World Imagery). The photo is
     often several years old, so a recent felling may not show on it yet.</p>
+  <p><b>Past</b>: earlier versions of the same satellite photos (Esri World
+    Imagery Wayback), to see what a place looked like before a change. Step with
+    &lsaquo; and &rsaquo;. Each version is dated by when Esri released it; the
+    photo itself is often older, so the line below it gives the photo's own date
+    at the centre of the map. <i>Only versions with a new photo here</i> skips
+    versions that repeat the photo before them.</p>
   <p><b>Map</b>: Kartverket's topographic map of Norway, with roads, paths, contours and place names.</p>
 </template>
 

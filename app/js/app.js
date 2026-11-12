@@ -4,7 +4,7 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 7; // must match dashboard.SCHEMA in Python
+const SCHEMA = 8; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 // Bright, with a white ring on the map, so the alerts stand out on imagery.
 const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
@@ -47,6 +47,14 @@ const dotRadius = (k = 1, add = 0) => ['interpolate', ['exponential', 2], ['zoom
 /** Dot scale from a change's size: half at zero, 0.75 at the cut-off, 1.4 at `full` and above. */
 const bySize = (prop, gate, full) =>
   ['interpolate', ['linear'], ['abs', ['coalesce', ['get', prop], 0]], 0, 0.5, gate, 0.75, full, 1.4];
+/** bySize for one value, to redraw a picked dot at its own size. */
+function sizeOf(v, gate, full) {
+  const a = Math.abs(Number(v) || 0);
+  return a >= full ? 1.4 : a >= gate ? 0.75 + 0.65 * (a - gate) / (full - gate) : 0.5 + 0.25 * a / gate;
+}
+// The selection, in a colour no layer uses, with a dark halo for light ground.
+const SEL_COLOR = '#ff2bd6';
+const SEL_HALO = '#111111';
 const SCCD_GATE = 0.075; // |dB08 - dB12|, the candidate cut-off; certainty saturates at 3x
 // Up close the dots cover their pixel: let the imagery show through.
 const DOT_OPACITY = ['interpolate', ['linear'], ['zoom'], 15, 0.95, 18, 0.6];
@@ -495,6 +503,171 @@ function setupRaddLink() {
   });
 }
 
+// ── Esri Wayback: past versions of the satellite photo ("Past" background) ───
+const WAYBACK_CONFIG = CFG.waybackConfig ||
+  'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json';
+// "New photo here" follows each release's tilemap at the zoom on screen, capped:
+// the recent releases are the useful ones, the tail re-serves old tiles.
+const WB_LOCAL_HOPS = 20;
+const wb = {
+  /** @type {any[]} newest first */ releases: null,
+  /** @type {any[]} the releases offered */ view: [],
+  /** @type {any} */ rel: null,
+  local: new Map(), // z/x/y tile -> Set of release numbers with a new photo there
+  viewGen: 0,
+  dateGen: 0
+};
+
+async function loadWayback() {
+  const r = await fetch(WAYBACK_CONFIG);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return Object.entries(await r.json()).map(([num, e]) => ({
+    num: Number(num),
+    date: /Wayback\s+([\d-]+)/.exec(e.itemTitle || '')?.[1] || `release ${num}`,
+    tiles: e.itemURL.replace('{level}', '{z}').replace('{row}', '{y}').replace('{col}', '{x}'),
+    meta: e.metadataLayerUrl
+  })).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Release numbers whose photo at [lon, lat] differs from the release before:
+ *  each tilemap names the release its tile really comes from, so follow that chain. */
+async function wbLocalReleases([lon, lat], zoom) {
+  const z = Math.min(Math.max(Math.round(zoom), 10), 19);
+  const n = 2 ** z;
+  const rad = lat * Math.PI / 180;
+  const x = Math.floor((lon + 180) / 360 * n);
+  const y = Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n);
+  const key = `${z}/${x}/${y}`;
+  if (wb.local.has(key)) return wb.local.get(key);
+  const out = new Set();
+  for (let i = 0, hops = 0; i < wb.releases.length && hops < WB_LOCAL_HOPS; hops++) {
+    const url = wb.releases[i].tiles.replace('/tile/', '/tilemap/')
+      .replace('{z}', z).replace('{y}', y).replace('{x}', x);
+    const tm = await fetch(url).then((r) => r.json()).catch(() => null);
+    if (!tm?.valid || !tm.data?.[0]) break;
+    const actual = tm.select?.length ? Number(tm.select[0]) : wb.releases[i].num;
+    out.add(actual);
+    i = Math.max(i, wb.releases.findIndex((rel) => rel.num === actual)) + 1;
+  }
+  if (out.size) wb.local.set(key, out); // a failed walk is retried next time
+  return out;
+}
+
+/** The photo's own date under [lon, lat] in a release, as the zoom shows it. */
+async function wbPhotoDate(rel, [lon, lat], zoom) {
+  const d = 0.01;
+  const q = new URLSearchParams({
+    geometry: `${lon},${lat}`, geometryType: 'esriGeometryPoint', sr: '4326', layers: 'all',
+    tolerance: '0', mapExtent: `${lon - d},${lat - d},${lon + d},${lat + d}`,
+    imageDisplay: '100,100,96', returnGeometry: 'false', f: 'json'
+  });
+  const r = await fetch(`${rel.meta}/identify?${q}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  // One metadata layer per zoom band (layer 23 - z); 12-13 are the undated 15 m base.
+  const band = 23 - Math.min(Math.round(zoom), 19);
+  const rows = ((await r.json()).results || [])
+    .map((row) => ({ L: row.layerId, a: row.attributes, m: /^(\d{4})(\d{2})?(\d{2})?$/.exec(String(row.attributes.SRC_DATE)) }))
+    .filter((row) => row.m)
+    .sort((p, q2) => Math.abs(p.L - band) - Math.abs(q2.L - band) || p.L - q2.L);
+  if (!rows.length) return null;
+  const { a, m } = rows[0];
+  return { date: m.slice(1).filter(Boolean).join('-'), source: a.NICE_DESC, res: Number(a.SRC_RES) || null };
+}
+
+/** Switched to "Past": load the release list once, then fill the picker. */
+async function showWayback() {
+  const note = document.getElementById('wb-note');
+  if (!wb.releases) {
+    note.textContent = 'Loading the photo versions…';
+    try {
+      wb.releases = await loadWayback();
+    } catch (e) {
+      note.textContent = `The photo versions could not be loaded (${e.message}).`;
+      return;
+    }
+  }
+  await updateWbView();
+}
+
+/** The releases to offer at the map centre; keeps the chosen one (or the nearest
+ *  older), and the newest stays the newest. */
+async function updateWbView() {
+  const gen = ++wb.viewGen;
+  let view = wb.releases;
+  if (/** @type {HTMLInputElement} */ (document.getElementById('wb-local')).checked) {
+    document.getElementById('wb-note').textContent = 'Finding the versions with a new photo here…';
+    const nums = await wbLocalReleases(map.getCenter().toArray(), map.getZoom());
+    if (gen !== wb.viewGen) return;
+    if (nums.size) view = wb.releases.filter((rel) => nums.has(rel.num));
+  }
+  const cur = wb.rel;
+  wb.rel = !cur || cur === wb.view[0] ? view[0] : view.find((rel) => rel.date <= cur.date) || view[view.length - 1];
+  wb.view = view;
+  document.getElementById('wb-select').innerHTML =
+    view.map((rel) => `<option value="${rel.num}">${esc(rel.date)}</option>`).join('');
+  applyWayback();
+}
+
+function applyWayback() {
+  const rel = wb.rel;
+  if (!rel || state.basemap !== 'wayback') return;
+  const src = map.getSource('base-wayback');
+  if (src) src.setTiles([rel.tiles]);
+  else {
+    map.addSource('base-wayback', { type: 'raster', tiles: [rel.tiles], tileSize: 256, maxzoom: 19,
+      attribution: 'Imagery &copy; Esri World Imagery Wayback' });
+    // With the other backgrounds: under every data layer.
+    const above = map.getStyle().layers.find((l) => !l.id.startsWith('base-'));
+    map.addLayer({ id: 'base-wayback', type: 'raster', source: 'base-wayback' }, above?.id);
+  }
+  map.setLayoutProperty('base-wayback', 'visibility', 'visible');
+  const i = wb.view.indexOf(rel);
+  /** @type {HTMLSelectElement} */ (document.getElementById('wb-select')).value = String(rel.num);
+  /** @type {HTMLButtonElement} */ (document.getElementById('wb-prev')).disabled = i >= wb.view.length - 1;
+  /** @type {HTMLButtonElement} */ (document.getElementById('wb-next')).disabled = i <= 0;
+  updatePhotoDate();
+}
+
+async function updatePhotoDate() {
+  const gen = ++wb.dateGen;
+  const note = document.getElementById('wb-note');
+  const rel = wb.rel;
+  const head = `Released ${rel.date}`;
+  note.textContent = `${head}. Looking up the photo date…`;
+  let p = null;
+  try {
+    p = rel.meta ? await wbPhotoDate(rel, map.getCenter().toArray(), map.getZoom()) : null;
+  } catch {
+    if (gen === wb.dateGen) note.textContent = `${head}. The photo date could not be looked up.`;
+    return;
+  }
+  if (gen !== wb.dateGen) return;
+  note.textContent = p
+    ? `${head}. Photo at the map centre: ${p.date}${p.source ? `, ${p.source}` : ''}${p.res ? `, ${p.res} m` : ''}.`
+    : `${head}. No dated photo at the map centre.`;
+}
+
+function setupWayback() {
+  const step = (d) => {
+    const rel = wb.view[wb.view.indexOf(wb.rel) + d];
+    if (rel) { wb.rel = rel; applyWayback(); }
+  };
+  document.getElementById('wb-prev').addEventListener('click', () => step(1)); // older: later in the list
+  document.getElementById('wb-next').addEventListener('click', () => step(-1));
+  document.getElementById('wb-select').addEventListener('change', (e) => {
+    const num = Number(/** @type {HTMLSelectElement} */ (e.target).value);
+    wb.rel = wb.view.find((rel) => rel.num === num);
+    applyWayback();
+  });
+  document.getElementById('wb-local').addEventListener('change', () => updateWbView());
+  let pending = 0;
+  map.on('moveend', () => {
+    if (state.basemap !== 'wayback' || !wb.releases) return;
+    clearTimeout(pending);
+    pending = window.setTimeout(() => updateWbView(), 400);
+  });
+}
+
 // ── the click card: everything under the clicked point ───────────────────────
 /** Stand properties by poly_id; the map's copies have their arrays stringified. */
 const standById = new Map();
@@ -619,46 +792,84 @@ function showDetail(e) {
   const standId = !dot && !cell && stand ? stand.properties.poly_id : null;
   // Zoomed out a stand is a dot (forest-pts) and its outline is sub-pixel: ring its centre.
   const centre = standId !== null && stand.layer.id === 'forest-pts' ? stand.properties : null;
-  const ring = dot ? [Number(dot.properties.lon), Number(dot.properties.lat)]
-    : centre ? [Number(centre.lon), Number(centre.lat)]
-      : standId === null ? [e.lngLat.lng, e.lngLat.lat] : null;
+  /** @type {any} */ let sel = null;
+  if (dot) {
+    const p = dot.properties;
+    const c2cDot = dot === c2c;
+    sel = { type: 'Point', coordinates: [Number(p.lon), Number(p.lat)], props: {
+      color: c2cDot ? dotColor(dot) : KIND_COLORS[p.kind],
+      k: c2cDot ? sizeOf(p.magnitude, C2C_GATE, 0.5) : sizeOf(p.mag, SCCD_GATE, 3 * SCCD_GATE)
+    } };
+  } else if (cell) sel = { ...cell.geometry, props: { cell: true, k: 1 } };
+  else if (centre) sel = { type: 'Point', coordinates: [Number(centre.lon), Number(centre.lat)], props: { k: 1 } };
+  else if (standId === null) sel = { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat], props: { k: 1 } };
   document.getElementById('detail-title').textContent =
     `${fmt(e.lngLat.lat, 5)}° N, ${fmt(e.lngLat.lng, 5)}° E`;
   document.getElementById('detail-body').innerHTML = html;
   card.hidden = false;
   if (!card.contains(document.activeElement)) document.getElementById('detail-close').focus();
   if (popup) popup.remove();
-  setMarker(ring, standId);
+  setMarker(sel, standId);
+  keepInView(sel ? centreOf(sel) : [e.lngLat.lng, e.lngLat.lat]);
+}
+
+/** The colour a dot is drawn in, as MapLibre evaluated it. */
+const dotColor = (f) => {
+  const c = f.layer.paint?.['circle-color'];
+  return c && typeof c === 'object' && 'r' in c ? `rgba(${c.r * 255},${c.g * 255},${c.b * 255},1)` : '#ffffff';
+};
+const centreOf = (g) => (g.type === 'Point' ? g.coordinates : g.coordinates.flat(2).reduce(
+  (a, c, i, all) => [a[0] + c[0] / all.length, a[1] + c[1] / all.length], [0, 0]));
+
+/** Pan the selection out from under the details card, to the middle of what is left. */
+function keepInView(lngLat) {
+  const card = document.getElementById('detail').getBoundingClientRect();
+  const box = map.getCanvas().getBoundingClientRect();
+  const pt = map.project(lngLat);
+  const x = pt.x + box.left, y = pt.y + box.top, pad = 40;
+  if (x < card.left - pad || x > card.right + pad || y < card.top - pad || y > card.bottom + pad) return;
+  // A bottom sheet on a phone, a column on the right otherwise.
+  const sheet = card.left - box.left < 20;
+  const to = sheet ? [pt.x, (card.top - box.top) / 2] : [(card.left - box.left) / 2, pt.y];
+  map.panBy([pt.x - to[0], pt.y - to[1]]);
 }
 
 let pulse = 0;
 
-/** The selection: a dark-and-white ring around the picked dot (pulsing once), and/or the stand's outline. */
-function setMarker(coords, standId = null) {
-  const data = { type: 'FeatureCollection', features: coords
-    ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: coords } }] : [] };
+/** The selection: the picked dot redrawn larger and ringed, a cell's square
+ *  outlined, a stand's outline; all in SEL_COLOR, the ring pulsing once. */
+function setMarker(sel, standId = null) {
+  const data = { type: 'FeatureCollection', features: sel
+    ? [{ type: 'Feature', properties: sel.props, geometry: { type: sel.type, coordinates: sel.coordinates } }] : [] };
+  const k = ['*', 1.5, ['get', 'k']];
+  const ring = (add) => dotRadius(k, add);
   if (!map.getSource('sel')) {
     map.addSource('sel', { type: 'geojson', data });
-    for (const [id, color, width] of [['sel-halo', '#111', 6], ['sel', '#fff', 3]]) {
-      map.addLayer({
-        id, type: 'circle', source: 'sel',
-        paint: { 'circle-radius': dotRadius(1, 6), 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': color, 'circle-stroke-width': width }
-      });
+    const point = ['==', ['geometry-type'], 'Point'];
+    map.addLayer({ id: 'sel-dot', type: 'circle', source: 'sel', filter: ['all', point, ['has', 'color']],
+      paint: { 'circle-radius': dotRadius(k), 'circle-color': ['get', 'color'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5 } });
+    for (const [id, color, width] of [['sel-halo', SEL_HALO, 7], ['sel', SEL_COLOR, 4]]) {
+      map.addLayer({ id, type: 'circle', source: 'sel', filter: point,
+        paint: { 'circle-radius': ring(6), 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': color, 'circle-stroke-width': width } });
     }
-    for (const [id, color, width] of [['sel-stand-halo', '#111', 6], ['sel-stand', '#fff', 3]]) {
+    for (const [id, color, width] of [['sel-cell-halo', SEL_HALO, 6], ['sel-cell', SEL_COLOR, 3]]) {
+      map.addLayer({ id, type: 'line', source: 'sel', filter: ['!=', ['geometry-type'], 'Point'],
+        paint: { 'line-color': color, 'line-width': width } });
+    }
+    for (const [id, color, width] of [['sel-stand-halo', SEL_HALO, 6], ['sel-stand', SEL_COLOR, 3]]) {
       map.addLayer({ id, type: 'line', source: 'forest', filter: ['==', ['get', 'poly_id'], -1], paint: { 'line-color': color, 'line-width': width } });
     }
   } else map.getSource('sel').setData(data);
   for (const id of ['sel-stand-halo', 'sel-stand']) map.setFilter(id, ['==', ['get', 'poly_id'], standId ?? -1]);
   // Alert layers load later: keep the selection on top.
-  for (const id of ['sel-stand-halo', 'sel-stand', 'sel-halo', 'sel']) map.moveLayer(id);
+  for (const id of ['sel-stand-halo', 'sel-stand', 'sel-cell-halo', 'sel-cell', 'sel-dot', 'sel-halo', 'sel']) map.moveLayer(id);
   cancelAnimationFrame(pulse);
-  if (!coords || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!sel || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const t0 = performance.now();
   const step = (t) => {
-    const k = Math.min(1, (t - t0) / 700);
-    for (const id of ['sel-halo', 'sel']) map.setPaintProperty(id, 'circle-radius', dotRadius(1, 6 + 24 * (1 - k) ** 2));
-    if (k < 1) pulse = requestAnimationFrame(step);
+    const f = Math.min(1, (t - t0) / 700);
+    for (const id of ['sel-halo', 'sel']) map.setPaintProperty(id, 'circle-radius', ring(6 + 24 * (1 - f) ** 2));
+    if (f < 1) pulse = requestAnimationFrame(step);
   };
   pulse = requestAnimationFrame(step);
 }
@@ -726,6 +937,9 @@ function applyMapState() {
   }
   for (const id of Object.keys(BASEMAPS)) {
     map.setLayoutProperty(`base-${id}`, 'visibility', id === state.basemap ? 'visible' : 'none');
+  }
+  if (map.getLayer('base-wayback')) {
+    map.setLayoutProperty('base-wayback', 'visibility', state.basemap === 'wayback' ? 'visible' : 'none');
   }
   if (popup) popup.remove();
   for (const li of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('li[data-kind]'))) {
@@ -811,20 +1025,22 @@ function byResolution(rows) {
   return [...out.values()];
 }
 
-function chartFrame(el, xs, yMax, yLabel) {
+/** Axes for xs; y from 0 (bars) or from yMin (lines may start above zero). */
+function chartFrame(el, xs, yMax, yLabel, { yMin = 0, right = 10 } = {}) {
   const W = Math.max(el.clientWidth || 480, 280), H = 220;
-  const m = { l: 60, r: 10, t: 10, b: 26 };
+  const m = { l: 60, r: right, t: 10, b: 26 };
   const band = (W - m.l - m.r) / xs.length;
   const x = (i) => m.l + (i + 0.5) * band;
   // Round tick steps (1, 2 or 5 x 10^n), never finer than one pixel (0.01 ha).
-  const raw = Math.max((yMax || 1) / 4, 0.01);
+  const raw = Math.max(((yMax || 1) - yMin) / 4, 0.01);
   const mag = 10 ** Math.floor(Math.log10(raw));
   const tick = [1, 2, 5, 10].map((k) => k * mag).find((t) => t >= raw * 0.999);
   const top = Math.ceil((yMax || 1) / tick) * tick;
-  const y = (v) => H - m.b - (v / top) * (H - m.t - m.b);
+  const lo = Math.floor(yMin / tick) * tick;
+  const y = (v) => H - m.b - ((v - lo) / (top - lo)) * (H - m.t - m.b);
   const digits = Math.max(0, -Math.floor(Math.log10(tick) + 1e-9));
   let g = '';
-  for (let v = 0; v <= top + tick / 2; v += tick) {
+  for (let v = lo; v <= top + tick / 2; v += tick) {
     g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/>` +
       `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, digits)}</text>`;
   }
@@ -882,6 +1098,56 @@ function renderAlerts() {
     `<svg viewBox="0 0 ${f.W} ${f.H}" role="group" aria-label="Alert area over time, with the period markers">${g}</svg>`;
   setupBrush(el.querySelector('svg'), xs, f);
 }
+
+/** Forest area remaining: the mapped area minus the C2C loss each year, taken
+ *  as likely forest loss. As a share of the mapped area, so both types share
+ *  one axis; the hectares are on the line ends and in the tooltips. */
+function renderForestArea() {
+  const fa = index.forest_area;
+  document.getElementById('forest-area-section').hidden = !fa;
+  if (!fa) return;
+  const el = document.getElementById('chart-forest-area');
+  const xs = [fa.years[0] - 1, ...fa.years]; // the stands as mapped, then after each loss year
+  const aois = state.forestType === 'all' ? index.forest_types : [state.forestType];
+  const series = aois.map((aoi) => {
+    const { mapped_ha: mapped, loss_ha: loss } = fa[aoi];
+    let left = mapped;
+    const ha = [mapped, ...loss.map((l) => (left -= l))];
+    return { aoi, mapped, loss: [0, ...loss], ha, pct: ha.map((v) => (100 * v) / mapped) };
+  });
+  const yMin = Math.min(...series.flatMap((d) => d.pct));
+  const f = chartFrame(el, xs, 100, 'remaining (% of mapped)', { yMin: yMin - 0.5, right: 110 });
+  // C2C confirms a break only after later images, so the last two years are undercounted.
+  const firstLow = xs.indexOf(fa.years[fa.years.length - 2]);
+  let g = f.g;
+  for (const d of series) {
+    const c = `var(--line-${d.aoi})`;
+    const pts = d.pct.map((v, i) => [f.x(i), f.y(v)]);
+    const path = (a, b) => 'M' + pts.slice(a, b).map((p) => p.join(',')).join('L');
+    g += `<path class="line" d="${path(0, firstLow)}" stroke="${c}"/>` +
+      `<path class="line line--low" d="${path(firstLow - 1, pts.length)}" stroke="${c}"/>`;
+    pts.forEach(([px, py], i) => {
+      const lost = i ? `; ${fmt(d.loss[i], 2)} ha likely lost in ${xs[i]}` : ' (as mapped)';
+      g += `<circle class="pt" cx="${px}" cy="${py}" r="4" fill="${c}"/>` +
+        `<circle class="hit" cx="${px}" cy="${py}" r="12"><title>${esc(cap(d.aoi))} ${xs[i]}: ` +
+        `${fmt(d.ha[i], 1)} ha (${fmt(d.pct[i], 1)} %)${lost}</title></circle>`;
+    });
+    d.end = pts[pts.length - 1];
+  }
+  // Direct labels at the line ends, nudged apart when the lines end close together.
+  const ends = [...series].sort((a, b) => a.end[1] - b.end[1]);
+  for (let i = 1; i < ends.length; i++) ends[i].labelY = Math.max(ends[i].end[1], (ends[i - 1].labelY ?? ends[i - 1].end[1]) + 30);
+  for (const d of ends) {
+    const ly = d.labelY ?? d.end[1];
+    g += `<text class="end-label" x="${d.end[0] + 10}" y="${ly - 2}">${esc(cap(d.aoi))}</text>` +
+      `<text x="${d.end[0] + 10}" y="${ly + 12}">${fmt(d.ha[d.ha.length - 1], 0)} ha, ${fmt(d.pct[d.pct.length - 1], 1)} %</text>`;
+  }
+  // One line needs no legend: the end label names it.
+  el.innerHTML = (series.length > 1 ? legend(series.map((d) => [cap(d.aoi), `var(--line-${d.aoi})`])) : '') +
+    `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Forest area remaining per year, as a share of the mapped area">${g}</svg>` +
+    `<p class="hint"><span class="dash-key" aria-hidden="true"></span> ${fa.years.slice(-2).join('–')}: C2C undercounts the newest losses; read them as minimum values.</p>`;
+}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Which bar a date falls in: the first at or after it (start) or the last at or before it (end). */
 function periodIndex(xs, iso, end) {
@@ -1126,7 +1392,9 @@ function setupControls() {
   bind('stand-color', 'standColor');
   document.getElementById('basemap-options').innerHTML = Object.entries(BASEMAPS).map(([id, b]) =>
     `<label class="seg__opt"><input type="radio" name="basemap" value="${esc(id)}"${id === state.basemap ? ' checked' : ''}>` +
-    `<span>${esc(b.short || b.label || id)}</span></label>`).join('');
+    `<span>${esc(b.short || b.label || id)}</span></label>`).join('') +
+    '<label class="seg__opt" title="Earlier versions of the satellite photo (Esri Wayback)">' +
+    '<input type="radio" name="basemap" value="wayback"><span>Past</span></label>';
   const link = storedRaddLink();
   if (link) raddTiles = linkTiles(link);
   describeRadd();
@@ -1168,6 +1436,9 @@ function setupControls() {
   for (const el of document.querySelectorAll('input[name="basemap"]')) {
     el.addEventListener('change', (e) => {
       state.basemap = /** @type {HTMLInputElement} */ (e.target).value;
+      document.getElementById('wayback').hidden = state.basemap !== 'wayback';
+      // Wayback draws under the data layers, so it never hides them.
+      if (state.basemap === 'wayback') showWayback();
       applyMapState();
     });
   }
@@ -1189,6 +1460,7 @@ function setupControls() {
 
 function renderCharts() {
   renderAlerts();
+  renderForestArea();
   renderSummary();
 }
 
@@ -1244,6 +1516,7 @@ async function init() {
   setupStatus();
   setupControls();
   setupLayerErrors();
+  setupWayback();
   addPolygons(polygons);
   addConditionCells();
   addC2c();

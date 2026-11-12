@@ -1,8 +1,8 @@
 # Forest Monitor dashboard
 
 A static page showing S-CCD candidates of tree loss and regrowth for
-**olivinskog** and **kalklindeskog**: a MapLibre map, an SVG chart of alert area over time and a
-summary.
+**olivinskog** and **kalklindeskog**: a MapLibre map, an SVG chart of alert area over time, the forest area remaining
+each year (C2C) and a summary.
 
 ```
 app/
@@ -36,7 +36,7 @@ the same layout. `index.json` is written last and lists the other files:
 
 | file | contents |
 | --- | --- |
-| `index.json` | schema version, generation time, counts, period, file names |
+| `index.json` | schema version, generation time, counts, period, file names; `forest_area`: per forest type the mapped area (overlapping polygons once) and the C2C loss each year 2018-2025 (NBR drop ≥ 0.175, each cell once, from `c2c/parquet/c2c_pixels.parquet`; null when the source has none, and the chart is hidden) |
 | `polygons.geojson` | the 737 mapped stands (EPSG:4326, lightly simplified), with their 2025 condition class (local and global), score, trajectory, field condition and survey year from `condition/parquet/condition_stands.parquet` |
 | `monthly.json` | per forest type and month: new loss/gain area, one value per certainty choice (`conf_tiers` in `index.json`: all, medium and high, high) |
 | `points_<aoi>_<kind>.json` | one point per 10 m pixel, columnar: lon, lat, latest break date (YYYYMMDD), certainty, event count, |magnitude| of the latest break (dot size) |
@@ -96,6 +96,11 @@ trajectory.
 
 The map's **Layers** panel switches the basemap (`basemaps` in `config.js`:
 Kartverket topo and Esri World Imagery) and each layer, with its key beside it.
+**Past** is Esri World Imagery Wayback (`waybackConfig`), as in the habloss
+labelling app: a release picker with ‹ ›, by default only the releases with a
+new photo at the map centre (each release's tilemap names the release its tile
+comes from), and the photo's own capture date there from the release's
+metadata service.
 
 `config.js`'s `dataBase` says where the JSON is: `data/` beside the page, or
 any URL with CORS (e.g. the baked files copied to an S3 prefix).
