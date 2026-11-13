@@ -146,7 +146,9 @@ def forest_area(polys: gpd.GeoDataFrame, c2c: pd.DataFrame) -> dict:
         mapped = polys.loc[polys["forest_type"] == aoi].geometry.union_all().area / 1e4
         out[aoi] = {
             "mapped_ha": round(mapped, 2),
-            "loss_ha": [round(int(per.get((aoi, y), 0)) * PIXEL_HA, 2) for y in C2C_YEARS],
+            "loss_ha": [
+                round(int(per.get((aoi, y), 0)) * PIXEL_HA, 2) for y in C2C_YEARS
+            ],
         }
     return out
 
@@ -162,7 +164,7 @@ def _c2c(source: str, tmp: Path) -> pd.DataFrame | None:
 
 def _write(obj, path: Path) -> str:
     tmp = path.with_suffix(path.suffix + ".tmp")
-    text = json.dumps(obj, separators=(",", ":"), allow_nan=False)
+    text = json.dumps(obj, separators=(",", ":"), allow_nan=False) + "\n"
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
     return path.name

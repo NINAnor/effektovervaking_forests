@@ -180,7 +180,10 @@ def test_forest_area_counts_c2c_loss_once_per_year(baked) -> None:
     assert fa["kalklindeskog"]["mapped_ha"] == 4.0
     loss = {a: dict(zip(fa["years"], fa[a]["loss_ha"])) for a in dashboard.AOIS}
     assert loss["olivinskog"][2020] == 0.01 and sum(loss["olivinskog"].values()) == 0.01
-    assert loss["kalklindeskog"][2018] == 0.01 and sum(loss["kalklindeskog"].values()) == 0.01
+    assert (
+        loss["kalklindeskog"][2018] == 0.01
+        and sum(loss["kalklindeskog"].values()) == 0.01
+    )
 
 
 def test_no_c2c_in_the_source_hides_forest_area(tmp_path: Path) -> None:
