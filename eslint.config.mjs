@@ -20,6 +20,8 @@ export default [
         requestAnimationFrame: "readonly",
         cancelAnimationFrame: "readonly",
         performance: "readonly",
+        URLSearchParams: "readonly",
+        clearTimeout: "readonly",
         matchMedia: "readonly",
         ResizeObserver: "readonly",
         maplibregl: "readonly",
