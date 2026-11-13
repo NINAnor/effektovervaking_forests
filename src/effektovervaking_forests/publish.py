@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import shutil
-import subprocess
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -42,15 +41,22 @@ GIS_OUT = config.GIS_OUT
 DEFAULT_OUT = WEB_OUT
 
 
-def _gdal(tool: str) -> str:
-    """Locate a GDAL CLI tool (`ogr2ogr` >= 3.8 for PMTiles).
+def _write_ogr(frame, path: Path, driver: str, layer: str, **dsco) -> str | None:
+    """Write with the GDAL bundled in pyogrio (>= 3.8 has PMTiles), so no GDAL
+    install is needed. Returns the error message, or None on success."""
+    import pyogrio
 
-    FORESTMON_GDAL_BIN names the directory; otherwise PATH.
-    """
-    bin_dir = os.environ.get("FORESTMON_GDAL_BIN")
-    if bin_dir:
-        return str(Path(bin_dir).expanduser() / tool)
-    return shutil.which(tool) or tool
+    try:
+        with warnings.catch_warnings():
+            # GDAL documents MAX_SIZE/MAX_FEATURES >= 1 and warns about 0; the
+            # ogr2ogr CLI this replaced printed the same warning.
+            warnings.filterwarnings("ignore", "'0' is an unexpected value")
+            pyogrio.write_dataframe(
+                frame, path, driver=driver, layer=layer, dataset_options=dsco or None
+            )
+    except Exception as e:  # noqa: BLE001 - reported in the result, like before
+        return str(e)[-400:]
+    return None
 
 
 def _days(s: pd.Series) -> pd.Series:
@@ -152,12 +158,11 @@ def _pixel_points(px: pd.DataFrame, grid: pd.DataFrame):
 def write_vector(
     gdf, out_dir: Path, stem: str, layer: str, gis_dir: Path | None = None, points=None
 ) -> dict:
-    """GeoJSON first, then PMTiles and GPKG derived from it by GDAL.
+    """GeoJSON, PMTiles and GPKG of the same features.
 
     SQLite-backed outputs are built on local disk and copied, because SQLite
     cannot lock files on a CIFS share.
     """
-    import shutil
     import tempfile
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -170,107 +175,50 @@ def write_vector(
 
     with tempfile.TemporaryDirectory(prefix="forestmon_publish_") as tmp:
         tmp = Path(tmp)
-        local_gj = tmp / f"{stem}.geojson"
-        shutil.copyfile(gj, local_gj)
+
+        def build(frame, name: str, driver: str, dest: Path, key: str, **dsco) -> None:
+            # Built on local disk, then copied (see the docstring).
+            local = tmp / name
+            err = _write_ogr(frame, local, driver, layer, **dsco)
+            if err is None and local.exists():
+                dest.unlink(missing_ok=True)
+                shutil.copyfile(local, dest)
+                if driver == "PMTiles":
+                    made[key] = dest.name
+                    made[f"{key}_mb"] = round(local.stat().st_size / 1e6, 2)
+                else:
+                    made[key] = str(dest)
+            else:
+                made[f"{key}_error"] = err or "no output"
 
         # Footprints only at z12+: MVT quantisation (EXTENT units per tile) makes
         # a 10 m square bloat and shift at lower zooms, and raising EXTENT does
         # not fix it. MAX_SIZE/MAX_FEATURES=0 only stop feature dropping.
-        local_pm = tmp / f"{stem}.pmtiles"
-        r = subprocess.run(
-            [
-                _gdal("ogr2ogr"),
-                "-f",
-                "PMTiles",
-                str(local_pm),
-                str(local_gj),
-                "-dsco",
-                "MINZOOM=12",
-                "-dsco",
-                "MAXZOOM=16",
-                "-dsco",
-                "MAX_SIZE=0",
-                "-dsco",
-                "MAX_FEATURES=0",
-                "-dsco",
-                f"NAME={layer}",
-                "-nln",
-                layer,
-            ],
-            capture_output=True,
-            text=True,
+        tiles = dict(MAX_SIZE=0, MAX_FEATURES=0, NAME=layer)
+        build(
+            gdf,
+            f"{stem}.pmtiles",
+            "PMTiles",
+            out_dir / f"{stem}.pmtiles",
+            "pmtiles",
+            MINZOOM=12,
+            MAXZOOM=16,
+            **tiles,
         )
-        if r.returncode == 0 and local_pm.exists():
-            dest_pm = out_dir / f"{stem}.pmtiles"
-            if dest_pm.exists():
-                dest_pm.unlink()
-            shutil.copyfile(local_pm, dest_pm)
-            made["pmtiles"] = f"{stem}.pmtiles"
-            made["pmtiles_mb"] = round(local_pm.stat().st_size / 1e6, 2)
-        else:
-            made["pmtiles_error"] = (r.stderr or "no output")[-400:]
-
         # Centres below z12 (z5-11): a point's quantisation error is invisible,
         # and the overview claims only a location, not an area.
         if points is not None and len(points):
-            local_pts_gj = tmp / f"{stem}_pts.geojson"
-            points.to_file(local_pts_gj, driver="GeoJSON")
-            local_pts = tmp / f"{stem}_pts.pmtiles"
-            rp = subprocess.run(
-                [
-                    _gdal("ogr2ogr"),
-                    "-f",
-                    "PMTiles",
-                    str(local_pts),
-                    str(local_pts_gj),
-                    "-dsco",
-                    "MINZOOM=5",
-                    "-dsco",
-                    "MAXZOOM=11",
-                    "-dsco",
-                    "MAX_SIZE=0",
-                    "-dsco",
-                    "MAX_FEATURES=0",
-                    "-dsco",
-                    f"NAME={layer}",
-                    "-nln",
-                    layer,
-                ],
-                capture_output=True,
-                text=True,
+            build(
+                points,
+                f"{stem}_pts.pmtiles",
+                "PMTiles",
+                out_dir / f"{stem}_pts.pmtiles",
+                "pmtiles_points",
+                MINZOOM=5,
+                MAXZOOM=11,
+                **tiles,
             )
-            if rp.returncode == 0 and local_pts.exists():
-                dest_pts = out_dir / f"{stem}_pts.pmtiles"
-                if dest_pts.exists():
-                    dest_pts.unlink()
-                shutil.copyfile(local_pts, dest_pts)
-                made["pmtiles_points"] = f"{stem}_pts.pmtiles"
-                made["pmtiles_points_mb"] = round(local_pts.stat().st_size / 1e6, 2)
-            else:
-                made["pmtiles_points_error"] = (rp.stderr or "no output")[-400:]
-
-        local_gpkg = tmp / f"{stem}.gpkg"
-        r = subprocess.run(
-            [
-                _gdal("ogr2ogr"),
-                "-f",
-                "GPKG",
-                str(local_gpkg),
-                str(local_gj),
-                "-nln",
-                layer,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if r.returncode == 0 and local_gpkg.exists():
-            dest = gis_dir / f"{stem}.gpkg"
-            if dest.exists():
-                dest.unlink()
-            shutil.copyfile(local_gpkg, dest)
-            made["gpkg"] = str(dest)
-        else:
-            made["gpkg_error"] = (r.stderr or "no output")[-400:]
+        build(gdf, f"{stem}.gpkg", "GPKG", gis_dir / f"{stem}.gpkg", "gpkg")
 
     return made
 

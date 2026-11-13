@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from effektovervaking_forests import cdse_auth, confidence, config, publish
+from effektovervaking_forests import cdse_auth, confidence, config
 
 CDSE_KEYS = (config.S3_KEY_ENV, config.S3_SECRET_ENV)
 
@@ -191,24 +191,6 @@ def test_warning_when_dotenv_holds_keys(
     monkeypatch.setattr(cdse_auth, "CRED_FILES", (tmp_path / "none", env))
     with pytest.warns(UserWarning, match="readable"):
         cdse_auth._warn_if_world_readable()
-
-
-# ── publish._gdal ────────────────────────────────────────────────────────────
-def test_gdal_uses_explicit_bin_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("FORESTMON_GDAL_BIN", str(tmp_path))
-    assert publish._gdal("ogr2ogr") == str(tmp_path / "ogr2ogr")
-
-
-def test_gdal_falls_back_to_path_then_bare_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("FORESTMON_GDAL_BIN", raising=False)
-    monkeypatch.setattr(publish.shutil, "which", lambda _t: "/opt/bin/ogr2ogr")
-    assert publish._gdal("ogr2ogr") == "/opt/bin/ogr2ogr"
-    monkeypatch.setattr(publish.shutil, "which", lambda _t: None)
-    assert publish._gdal("ogr2ogr") == "ogr2ogr"
 
 
 # ── opera_agreement default path ─────────────────────────────────────────────

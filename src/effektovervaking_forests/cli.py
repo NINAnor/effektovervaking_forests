@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 
 import numpy as np
 import pandas as pd
@@ -519,11 +518,6 @@ def publish_site(
     )
     if not names:
         _fail("no AOI has an alert table yet")
-    # Check up front, not as a FileNotFoundError halfway through the first AOI.
-    if not shutil.which(publish_mod._gdal("ogr2ogr")):
-        _fail(
-            "ogr2ogr (GDAL >= 3.8) not found; put it on PATH or set FORESTMON_GDAL_BIN"
-        )
 
     results = []
     for name in names:
@@ -803,12 +797,6 @@ def doctor():
     )
     _echo(f"  S2 source: {config.S2_SOURCE} (EOPF from {config.EOPF_START})")
     ok &= creds or not need
-    ogr = publish_mod._gdal("ogr2ogr")
-    have_ogr = bool(shutil.which(ogr))
-    _echo(
-        f"  {'OK ' if have_ogr else 'WARN'}  ogr2ogr "
-        f"{'' if have_ogr else '(only `publish site` needs it; set FORESTMON_GDAL_BIN)'}"  # noqa: E501
-    )
     _echo(f"  data dir: {config.DATA}")
     _echo(
         f"  AOI dir:  {config.AOI_DIR} "
