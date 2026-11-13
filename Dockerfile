@@ -3,9 +3,8 @@
 # Run:    docker run --rm --env-file .env -v "$PWD/data:/data" forestmon run <aoi>
 # See docs/deployment.md. CDSE keys are passed at run time, never baked in.
 #
-# `ogr2ogr` (GDAL >= 3.8 with the PMTiles driver) is NOT installed: it could not
-# be verified from apt in this base, so `publish site` needs a derived image or
-# FORESTMON_GDAL_BIN pointing at a mounted GDAL. Everything else works.
+# Untested: never built. It has no rclone, so it runs detection and publish on
+# a mounted /data but not the S3 sync in scripts/forestmon_cycle.sh.
 
 FROM python:3.12-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /usr/local/bin/uv

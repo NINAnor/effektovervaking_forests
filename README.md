@@ -28,9 +28,8 @@ uv run forestmon doctor      # checks dependencies, credentials, AOIs
 
 Console scripts `forestmon` and `effektovervaking-forests` are the same app.
 Extras: `--extra gee` (earthengine-api, only for condition step 02e).
-`publish site` also needs the
-`ogr2ogr` CLI (GDAL >= 3.8, PMTiles driver) on `PATH` or via `FORESTMON_GDAL_BIN`.
-The JP2 driver ships with the rasterio wheel.
+No system GDAL is needed: the rasterio and pyogrio wheels bundle it (JP2, Zarr
+and PMTiles drivers).
 
 ## Configure
 Everything comes from environment variables or a `.env` in the working
@@ -39,7 +38,7 @@ directory (real env vars win); see `.env.example`.
 - `FORESTMON_DATA_DIR` data root (default `./data`, outputs in `<data>/operational`)
 - `FORESTMON_AOI_DIR` one GeoParquet per AOI, name = file stem (default `<data>/aoi`)
 - `FORESTMON_LOG_DIR`, `FORESTMON_WEB_OUT`, `FORESTMON_GIS_OUT` (defaults under `<data>`)
-- `FORESTMON_EE_PROJECT` Earth Engine project (optional), `FORESTMON_GDAL_BIN`
+- `FORESTMON_EE_PROJECT` Earth Engine project (optional)
 - `FORESTMON_S2_SOURCE` `eopf` (default) or `cdse`; `FORESTMON_EOPF_START` first
   date read from EOPF (default `FORESTMON_MONITORING_START`, 2026-01-01)
 
@@ -99,10 +98,10 @@ Details and outputs:
 [docs/condition/METHODS.md](docs/condition/METHODS.md).
 
 ## Deploy
-To run the monitor on a server, follow [docs/deployment.md](docs/deployment.md). It
-covers requirements, install, keeping the data in an S3 bucket (rclone), taking
-over the existing AOIs or starting a new one, scheduling with
-`scripts/forestmon_cycle.sh`, health checks and backups.
+To run the monitor on a server: [docs/deployment.md](docs/deployment.md). In short,
+with uv, rclone and git installed: clone, `uv sync --frozen --no-dev`, fill in
+`.env.s3`, run `scripts/forestmon_cycle.sh` once, then
+`scripts/forestmon_cycle.sh --install-cron`.
 
 ## Test
 ```bash

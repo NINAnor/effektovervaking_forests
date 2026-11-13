@@ -155,8 +155,9 @@ container can inject credentials without touching disk at all.
 bundles a GDAL with the JP2OpenJPEG driver, so nothing extra needs installing
 (`forestmon doctor` checks this).
 
-**`ogr2ogr`** (GDAL >= 3.8 CLI with the PMTiles driver) is a system tool needed
-only by `publish site`. It is found on `PATH` or via `FORESTMON_GDAL_BIN`.
+**PMTiles.** `publish site` writes PMTiles and GeoPackage through pyogrio, whose
+wheel bundles a GDAL with the PMTiles driver; no GDAL command-line tools are
+needed.
 
 **Earth Engine** is needed only by condition step 02e (Hansen loss year): install
 the `gee` extra (`uv sync --extra gee`) and set `FORESTMON_EE_PROJECT`. The
