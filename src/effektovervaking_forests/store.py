@@ -103,7 +103,7 @@ def lease(
             raise LockBusy(
                 f"{aoi_name}: '{held.get('what')}' already running "
                 f"(pid {held.get('pid')} on {held.get('host')}, started "
-                f"{acquired}). Wait for it, or pass --force if you are certain "
+                f"{acquired}). Wait for it, or pass --force-lock if you are certain "
                 "it is dead."
             )
         taken_over = held
