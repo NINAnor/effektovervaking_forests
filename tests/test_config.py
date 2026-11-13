@@ -297,3 +297,19 @@ def test_cycle_script_parses_dotenv(tmp_path: Path) -> None:
     log = (repo / "rel" / "logs" / "cycle.log").read_text()
     assert f"FAKE web=[{web}] gis=[unset] cdse=[]" in log
     assert "args=[run a1]" in log
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_cycle_script_is_executable_in_git() -> None:
+    # A CIFS checkout shows every file as 755, so check the mode git records.
+    root = Path(__file__).parent.parent
+    out = subprocess.run(
+        [shutil.which("git") or "git", "ls-files", "-s", "scripts/forestmon_cycle.sh"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    if not out:
+        pytest.skip("not a git checkout")
+    assert out.startswith("100755"), out

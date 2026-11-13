@@ -32,7 +32,8 @@
 #                       (default: from $REPO/.env.s3 if present, else local
 #                       data only). See "S3" below.
 #   UV_PROJECT_ENVIRONMENT
-#                       Venv directory (default: "$HOME/.venvs/effektovervaking_forests")
+#                       Venv directory (default: uv's, $REPO/.venv). Set it, e.g.
+#                       in .env, when the repo is on a share that cannot hold a venv.
 #
 # SAFETY PROPERTIES
 #   * flock (on local disk): cycles cannot overlap. `forestmon run` already takes
@@ -99,9 +100,6 @@ DATA_DIR="$(realpath -m "${FORESTMON_DATA_DIR:-$REPO/data}")"
 # Cron's PATH is minimal, so put $HOME/.local/bin on PATH.
 export PATH="$HOME/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 
-# The repo lives on a CIFS mount that cannot hold a venv.
-export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$HOME/.venvs/effektovervaking_forests}"
-
 UV_BIN="$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
 
 AOIS="${FORESTMON_AOIS:-kalklindeskog olivinskog}"
@@ -137,10 +135,17 @@ PUSH="${FORESTMON_PUSH:-1}"
 if [ -n "${FORESTMON_BIN:-}" ]; then
   FORESTMON=("$FORESTMON_BIN")
 else
-  FORESTMON=("$UV_BIN" run --frozen --no-sync forestmon)
+  # Syncs the venv to uv.lock first (a no-op when current), so a `git pull` is
+  # enough to update.
+  FORESTMON=("$UV_BIN" run --frozen --no-dev forestmon)
 fi
 
-log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG"; }
+# Cron already sends stdout to $LOG, so echo only when run from a terminal.
+log() {
+  local line; line="$(date -Is) $*"
+  printf '%s\n' "$line" >>"$LOG"
+  if [ -t 1 ]; then printf '%s\n' "$line"; fi
+}
 
 s3_pull() {
   if [ -e "$PENDING" ]; then
