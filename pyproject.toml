@@ -21,6 +21,7 @@ dependencies = [
   "numpy>=1.24",
   "pandas>=2.0",
   "pyarrow>=15",
+  "pyogrio>=0.10",
   "pyproj>=3.6",
   "pystac-client>=0.8",
   "pyxccd>=1.0.3",
