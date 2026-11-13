@@ -182,8 +182,7 @@ pyrightconfig.json
 .env.s3
 *.credentials
 
-# Dashboard JSON baked by `forestmon publish dashboard`
-app/data/
+# app/data/ is committed for GitHub Pages; index.json `source` is blanked so the S3 URL stays out of the public repo
 
 docs/.quarto/
 docs/*_files/
