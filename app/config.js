@@ -7,12 +7,12 @@ window.DASHBOARD_CONFIG = {
 
   // Condition per 10 m cell, read by range requests (needs CORS with Range).
   // Empty: condition/pmtiles/condition_pixels.pmtiles under the S3 prefix the
-  // data were baked from (index.json `source`); hidden when baked from a folder.
-  conditionCells: '',
+  // data were baked from (index.json `source`), which the committed data leave blank.
+  conditionCells: 'https://s3-int-1.nina.no/miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/pmtiles/condition_pixels.pmtiles',
 
   // C2C yearly change pixels (pmtiles, as conditionCells). Empty:
   // c2c/pmtiles/c2c_pixels.pmtiles under the S3 prefix the data were baked from.
-  c2cPixels: '',
+  c2cPixels: 'https://s3-int-1.nina.no/miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/c2c/pmtiles/c2c_pixels.pmtiles',
 
   // Sentinel-2 time series for a clicked S-CCD pixel; {lon} and {lat} are filled in.
   timeseriesUrl: 'https://jstnbraaten.users.earthengine.app/view/eo-timeseries-explorer#run=true;sensor=Sentinel-2%20SR;lon={lon};lat={lat};index=NBR;rgb=SWIR1%2FNIR%2FGREEN;duration=12;cloud=30;chipwidth=2;',

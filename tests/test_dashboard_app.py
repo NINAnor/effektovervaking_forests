@@ -37,10 +37,10 @@ def site(tmp_path_factory):
         ignore=shutil.ignore_patterns("data"),
         copy_function=lambda s, d: Path(d).write_bytes(Path(s).read_bytes()),
     )
-    # No S3 in tests: the condition-cell layer stays off.
+    # No S3 in tests: the pmtiles layers stay off.
     cfg = root / "config.js"
     cfg.write_text(
-        re.sub(r"conditionCells: '[^']*'", "conditionCells: ''", cfg.read_text())
+        re.sub(r"(conditionCells|c2cPixels): '[^']*'", r"\1: ''", cfg.read_text())
     )
     src = make_source(tmp_path_factory.mktemp("src"))
     dashboard.bake(str(src), root / "data")
