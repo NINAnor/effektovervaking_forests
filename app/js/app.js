@@ -1421,7 +1421,7 @@ function setupControls() {
   state.c2cWeak = val('c2c-weak').checked;
   state.radd = val('toggle-radd').checked;
   state.raddMode = /** @type {HTMLInputElement} */ (document.querySelector('input[name="radd-mode"]:checked')).value;
-  if (window.innerWidth < 700) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
+  if (window.matchMedia('(max-width: 700px), (max-height: 600px)').matches) /** @type {HTMLDetailsElement} */ (document.getElementById('layer-panel')).open = false;
   for (const k of KINDS) {
     for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(`.sw--${k}`))) el.style.background = KIND_COLORS[k];
   }
