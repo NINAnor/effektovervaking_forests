@@ -5,10 +5,11 @@ window.DASHBOARD_CONFIG = {
   // (e.g. an S3 prefix with public read and CORS).
   dataBase: 'data/',
 
-  // Condition per 10 m cell, read by range requests (needs CORS with Range).
+  // Condition per 10 m cell, read by range requests (needs CORS with Range; the dms
+  // bucket sends none yet, so it only loads where a CORS extension or rule is in place).
   // Empty: condition/pmtiles/condition_pixels.pmtiles under the S3 prefix the
   // data were baked from (index.json `source`), which the committed data leave blank.
-  conditionCells: 'https://s3-int-1.nina.no/miljodata-test/156004_08_effektovervaking_2026_2030_opsjon_2_fjernmaling/condition/pmtiles/condition_pixels.pmtiles',
+  conditionCells: 'https://s3-ext-1.nina.no/dms/data/project/156004-08/datasets/07f78c97-237f-460c-9017-c2f42ca991ee/condition_pixels.pmtiles',
 
   // C2C yearly change pixels (pmtiles, as conditionCells). Empty:
   // c2c/pmtiles/c2c_pixels.pmtiles under the S3 prefix the data were baked from.
