@@ -190,3 +190,6 @@ docs/*.html.md
 docs/*.docx.md
 docs/*.typst.md
 docs/forest_monitoring_*.typ
+
+# Local copy of the S3 bucket (see docs); data, not code
+/bucket_mirror/
