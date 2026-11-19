@@ -25,6 +25,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -126,19 +127,18 @@ def _month(s: pd.Series) -> pd.Series:
 
 
 def pixels(events: pd.DataFrame) -> pd.DataFrame:
-    """One row per (pixel, kind): first break (for area) and latest (for the map)."""
-    ev = events.assign(break_date=pd.to_datetime(events["break_date"]))
-    g = ev.sort_values("break_date").groupby(["aoi", "kind", "pix_id"], sort=False)
-    out = g.agg(
-        lon=("lon", "last"),
-        lat=("lat", "last"),
-        first=("break_date", "first"),
-        last=("break_date", "last"),
-        conf=("conf_score", "last"),
-        mag=("magnitude", "last"),
-        n_events=("break_date", "size"),
-    )
-    return out.reset_index()
+    """One row per (pixel, kind): first break (for area) and latest (for the map),
+    in a fixed order, so a re-bake of the same alerts writes the same files."""
+    return duckdb.sql(
+        """
+        WITH e AS (SELECT *, CAST(break_date AS TIMESTAMP) AS d FROM events)
+        SELECT aoi, kind, pix_id, min(lon) AS lon, min(lat) AS lat,
+               min(d) AS first, max(d) AS last,
+               arg_max(conf_score, d) AS conf, arg_max(magnitude, d) AS mag,
+               count(*) AS n_events
+        FROM e GROUP BY aoi, kind, pix_id ORDER BY aoi, kind, first, pix_id
+        """
+    ).df()
 
 
 def monthly(px: pd.DataFrame) -> list[dict]:
@@ -179,11 +179,19 @@ def points(px: pd.DataFrame) -> dict:
 
 def forest_area(polys: gpd.GeoDataFrame, c2c: pd.DataFrame) -> dict:
     """Mapped area per type (overlapping polygons once) and its C2C loss each year."""
-    loss = c2c[c2c["magnitude"] <= -C2C_GATE].drop_duplicates(["forest_type", "pix_id"])
-    # change_year X.996 is the end of year X: the loss shows in year X+1.
-    year = np.floor(loss["change_year"]).astype(int) + 1
-    per = loss.groupby(["forest_type", year]).size()
-    years = list(range(C2C_FIRST, int(np.floor(c2c["change_year"].max())) + 2))
+    c = c2c[["forest_type", "pix_id", "change_year", "magnitude"]]
+    # Each cell once, at its first loss. change_year X.996 is the end of year X:
+    # the loss shows in year X+1.
+    rows = duckdb.sql(
+        f"""
+        SELECT forest_type, year, count(*) AS n FROM (
+            SELECT forest_type, CAST(floor(min(change_year)) AS INT) + 1 AS year
+            FROM c WHERE magnitude <= -{C2C_GATE} GROUP BY forest_type, pix_id)
+        GROUP BY ALL
+        """
+    ).fetchall()
+    per = {(t, y): n for t, y, n in rows}
+    years = list(range(C2C_FIRST, int(np.floor(c["change_year"].max())) + 2))
     out = {"years": years}
     for aoi in AOIS:
         mapped = polys.loc[polys["forest_type"] == aoi].geometry.union_all().area / 1e4
