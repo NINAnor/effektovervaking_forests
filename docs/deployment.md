@@ -7,7 +7,11 @@ Once a day, for each area of interest (AOI), `scripts/forestmon_cycle.sh`:
    per-pixel S-CCD model and records new breaks as alerts;
 3. runs `forestmon publish site <aoi>`: writes the map files (PMTiles, COG,
    GeoPackage);
-4. pushes the data and the results back to the bucket.
+4. re-bakes the dashboard (`app/data`), when `FORESTMON_DASHBOARD_SOURCE` and
+   `FORESTMON_CONDITION_SOURCE` are set (see `app/README.md`);
+5. pushes the data and the results back to the bucket;
+6. with `--install-cron push`, commits `app/data` and pushes it to GitHub, and
+   Pages redeploys the dashboard. A night with no new alerts commits nothing.
 
 The bucket holds the data and the server keeps a working copy, so a server can
 be replaced by installing on a new one. Each step does nothing when there is
@@ -79,28 +83,23 @@ anyone is logged in. `scripts/forestmon_cycle.sh --check` shows the end of the
 log (`data/logs/cycle.log`). A second cycle that starts while one is running
 exits at once, so overlapping runs are harmless.
 
-## 5. Taking over from the current machine (once)
+## 5. Moving to another machine
 
-The two AOIs currently run nightly on another machine, which does not use the
-bucket, so the bucket falls behind it. The alerts hold reviewers' verdicts, which
-cannot be rebuilt. **Two machines must never run the same AOI**: each would
-apply scenes the other has not seen and the alerts would diverge. So, in this
-order:
+Since 2026-11-19 the cycle runs nightly on a NINA workstation, from a clone with
+its data in a local working copy, exactly as above; the bucket is kept current
+by every cycle. The alerts hold reviewers' verdicts, which cannot be rebuilt,
+and **two machines must never run the same AOI**: each would apply scenes the
+other has not seen and the alerts would diverge. So, in this order:
 
-1. On the current machine, after its last nightly cycle, remove its
-   `forestmon_cycle.sh` line (`crontab -e`).
-2. On the current machine, upload its data from a clone of this repository that
-   has the same `.env.s3`:
-
-   ```bash
-   FORESTMON_DATA_DIR=<old data dir> FORESTMON_AOI_DIR=<old AOI dir> \
-   FORESTMON_WEB_OUT=/nonexistent FORESTMON_GIS_OUT=/nonexistent \
-     scripts/forestmon_cycle.sh --s3-push
-   ```
-
-   This sends `aoi/` and the six `operational/` folders and only uploads what
-   changed. The `/nonexistent` outputs are skipped; the server publishes its own.
-3. On the server, sections 2–4.
+1. On the old machine, after its last nightly cycle,
+   `scripts/forestmon_cycle.sh --uninstall-cron`. If that cycle did not end with
+   `S3 push ok` (`--check`), run `scripts/forestmon_cycle.sh --s3-push` there.
+2. On the new machine, sections 2–4, with the old machine's `.env` minus its
+   paths (`FORESTMON_DASHBOARD_SOURCE` and `FORESTMON_CONDITION_SOURCE` carry
+   over unchanged). Its first cycle pulls what the old one pushed.
+3. For the dashboard to update itself, `git push` must work there without a
+   prompt (a deploy key with write access, or `gh auth setup-git`); then
+   `scripts/forestmon_cycle.sh --install-cron push`.
 
 ## 6. Adding a new AOI
 
@@ -180,5 +179,7 @@ up 8 days of scenes for both AOIs (0 errors; the new alerts matched the
 current machine's own nightly runs, 159/159 and 427/431), published and pushed;
 a second cycle that found nothing to do; `health`; a cycle skipped because
 another was running; a cycle aborted because the bucket was unreachable; and
-`--install-cron`. Not verified: the takeover push (section 5), the real bucket
-as the push target, Docker and systemd.
+`--install-cron`. On 2026-11-19, the takeover from the old research checkout: its data uploaded
+with `--s3-push` (`rclone check`: 0 differences), pulled into a local working
+copy, and a cycle with the dashboard bake run against the real bucket. Not
+verified: Docker and systemd.
