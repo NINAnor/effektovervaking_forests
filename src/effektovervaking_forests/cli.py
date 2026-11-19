@@ -536,54 +536,77 @@ def publish_site(
     _echo(f"manifest: {m}")
 
 
-@publish_app.command("dashboard")
-def publish_dashboard(
-    source: str = typer.Option(
-        None,
-        help="S3 prefix URL or local folder holding alerts/ and condition/ "
-        "(default: FORESTMON_DASHBOARD_SOURCE).",
-    ),
-    out: str = typer.Option("app/data", help="Where the dashboard reads its JSON."),
+def _condition_option(
+    help_: str = "Condition dataset folder (dms URL) or local folder",
 ):
-    """Bake the dashboard's JSON from the published alert and condition parquet."""
+    return typer.Option(None, help=f"{help_} (default: FORESTMON_CONDITION_SOURCE).")
+
+
+def _condition(condition: str | None) -> str:
     from . import dashboard
 
-    source = source or dashboard.default_source()
-    if not source:
-        _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
-    idx = dashboard.bake(source, out)
-    _echo(f"{out}/index.json: {idx['pixels']} pixels, {idx['date_range']}")
+    condition = condition or dashboard.default_condition()
+    if not condition:
+        _fail("pass --condition or set FORESTMON_CONDITION_SOURCE")
+    return condition
 
 
-@publish_app.command("radd")
-def publish_radd(
-    source: str = typer.Option(
-        None, help="Where condition/parquet/polygons_geo.parquet is (as dashboard)."
-    ),
-    out: str = typer.Option("app/data/radd_tiles.json", help="Tile file to write."),
-):
-    """Mint RADD Europe alert tiles masked to the stands (needs Earth Engine).
-
-    Map IDs expire within days: run this nightly, next to the dashboard bake.
-    """
+def _stands(condition: str):
+    """The mapped stands of the dashboard's forest types, from the condition folder."""
     import tempfile
     from pathlib import Path
 
     import geopandas as gpd
 
     from . import dashboard
-    from . import radd as radd_mod
+
+    with tempfile.TemporaryDirectory() as t:
+        polys = gpd.read_parquet(
+            dashboard._local(condition, "polygons_geo.parquet", Path(t))
+        )
+    return polys[polys["forest_type"].isin(dashboard.AOIS)]
+
+
+@publish_app.command("dashboard")
+def publish_dashboard(
+    source: str = typer.Option(
+        None,
+        help="S3 prefix URL or local folder holding c2c/ and sccd/operational/alerts/ "
+        "(default: FORESTMON_DASHBOARD_SOURCE).",
+    ),
+    condition: str = _condition_option(),
+    alerts_dir: str = typer.Option(
+        None, help="Folder of <aoi>_alerts.parquet (default: the source's)."
+    ),
+    out: str = typer.Option("app/data", help="Where the dashboard reads its JSON."),
+):
+    """Bake the dashboard's JSON and downloads from the alerts, condition and C2C."""
+    from . import dashboard
 
     source = source or dashboard.default_source()
     if not source:
         _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
-    with tempfile.TemporaryDirectory() as t:
-        polys = gpd.read_parquet(
-            dashboard._local(source, "condition/parquet/polygons_geo.parquet", Path(t))
-        )
-    tiles = radd_mod.mint_tiles(
-        polys[polys["forest_type"].isin(dashboard.AOIS)], config.EE_PROJECT
-    )
+    try:
+        idx = dashboard.bake(source, _condition(condition), out, alerts=alerts_dir)
+    except ValueError as e:
+        _fail(str(e))
+    _echo(f"{out}/index.json: {idx['pixels']} pixels, {idx['date_range']}")
+
+
+@publish_app.command("radd")
+def publish_radd(
+    condition: str = _condition_option(),
+    out: str = typer.Option("app/data/radd_tiles.json", help="Tile file to write."),
+):
+    """Mint RADD Europe alert tiles masked to the stands (needs Earth Engine).
+
+    Map IDs expire within days: run this nightly, next to the dashboard bake.
+    """
+    from pathlib import Path
+
+    from . import radd as radd_mod
+
+    tiles = radd_mod.mint_tiles(_stands(_condition(condition)), config.EE_PROJECT)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     store.write_json(tiles, out)
     _echo(f"{out}: RADD {tiles['image_id']} (v{tiles['version_date']})")
@@ -591,28 +614,13 @@ def publish_radd(
 
 @publish_app.command("stands-asset")
 def publish_stands_asset(
-    source: str = typer.Option(
-        None, help="Where condition/parquet/polygons_geo.parquet is (as dashboard)."
-    ),
+    condition: str = _condition_option(),
     out: str = typer.Option("forest_stands.zip", help="Shapefile zip to write."),
 ):
     """Write the stands for upload as an Earth Engine table asset (RADD clipping)."""
-    import tempfile
-    from pathlib import Path
-
-    import geopandas as gpd
-
-    from . import dashboard
     from . import radd as radd_mod
 
-    source = source or dashboard.default_source()
-    if not source:
-        _fail("pass --source or set FORESTMON_DASHBOARD_SOURCE")
-    with tempfile.TemporaryDirectory() as t:
-        polys = gpd.read_parquet(
-            dashboard._local(source, "condition/parquet/polygons_geo.parquet", Path(t))
-        )
-    radd_mod.write_stands_zip(polys[polys["forest_type"].isin(dashboard.AOIS)], out)
+    radd_mod.write_stands_zip(_stands(_condition(condition)), out)
     typer.echo(
         f"wrote {out}: upload it in the Code Editor (Assets > New > Shape files)"
     )

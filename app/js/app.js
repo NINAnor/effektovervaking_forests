@@ -4,7 +4,7 @@
 
 const CFG = window.DASHBOARD_CONFIG || {};
 const BASE = (CFG.dataBase || 'data/').replace(/\/?$/, '/');
-const SCHEMA = 8; // must match dashboard.SCHEMA in Python
+const SCHEMA = 9; // must match dashboard.SCHEMA in Python
 const FOREST_COLORS = { olivinskog: '#6aa84f', kalklindeskog: '#d6b656' };
 // Bright, with a white ring on the map, so the alerts stand out on imagery.
 const KIND_COLORS = { loss: '#f03c3c', gain: '#2fd39a' };
@@ -34,8 +34,16 @@ const fieldCondition = (t) => (t ? TILSTAND[t] || t : 'not recorded');
 const TRAJ_COLORS = { improving: '#35978f', stable: '#9aa39c', fluctuating: '#c8ccc2', declining: '#bf812d' };
 // Cells: (score - threshold) x 1000, brown below the threshold, blue-green above.
 // C2C: the year a change ended, light to dark purple (apart from the red/green alerts).
-const C2C_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025];
 const C2C_COLORS = ['#efedf5', '#dadaeb', '#bcbddc', '#9e9ac8', '#807dba', '#6a51a3', '#54278f', '#3f007d'];
+/** The condition years (index.json `years`, from the stands' yearly scores). */
+const firstYear = () => index.years[0];
+const lastYear = () => index.years[index.years.length - 1];
+const yearSpan = () => `${firstYear()}–${lastYear()}`;
+const scoreKey = () => `dor_global_${lastYear()}`;
+/** C2C's loss years (set by fillYears), spread over the palette. */
+let C2C_YEARS = [];
+const c2cColor = (i) =>
+  C2C_COLORS[Math.round(Math.max(0, i) * (C2C_COLORS.length - 1) / Math.max(1, C2C_YEARS.length - 1))];
 const C2C_GATE = 0.175; // |NBR drop| tuned against the labelled pixels (old inspector)
 // Dot size by zoom: large when zoomed out, so scattered pixels are findable;
 // smallest at mid zoom; from z16 the true 10 m footprint (at ~60° N: 5 m radius
@@ -231,11 +239,9 @@ function addPolygons(geojson) {
   fitTo(geojson);
 }
 
-/** config.js wins; otherwise the pmtiles under the S3 prefix the data were baked from. */
+/** config.js wins; otherwise the pmtiles in the condition folder the data were baked from. */
 function cellsUrl() {
-  if (CFG.conditionCells) return CFG.conditionCells;
-  const src = index.source;
-  return src && src !== 'local' ? src.replace(/\/?$/, '/') + 'condition/pmtiles/condition_pixels.pmtiles' : '';
+  return CFG.conditionCells || (index.condition ? index.condition + 'condition_pixels.pmtiles' : '');
 }
 
 let pmtilesReady = false;
@@ -255,7 +261,7 @@ function addConditionCells() {
   }
   usePmtiles();
   map.addSource('cells', { type: 'vector', url: 'pmtiles://' + url });
-  const diff = ['*', 1000, ['-', ['to-number', ['get', 'dor_global_2025']], ['to-number', ['get', 'threshold_global']]]];
+  const diff = ['*', 1000, ['-', ['to-number', ['get', scoreKey()]], ['to-number', ['get', 'threshold_global']]]];
   const ramp = ['step', diff, CELL_RAMP[0][0]];
   for (let k = 0; k < CELL_RAMP.length - 1; k++) ramp.push(CELL_RAMP[k][1], CELL_RAMP[k + 1][0]);
   map.addLayer({
@@ -263,17 +269,15 @@ function addConditionCells() {
     minzoom: 12, // below this a 10 m cell is smaller than a screen pixel
     layout: { visibility: state.cells ? 'visible' : 'none' },
     paint: {
-      'fill-color': ['case', ['has', 'dor_global_2025'], ramp, CLASS_COLORS.no_data],
+      'fill-color': ['case', ['has', scoreKey()], ramp, CLASS_COLORS.no_data],
       'fill-opacity': CELL_FILL
     }
   }, 'forest-line');
 }
 
-/** config.js wins; otherwise C2C's pmtiles under the S3 prefix the data were baked from. */
+/** C2C's pmtiles (config.js); empty hides the layer. */
 function c2cUrl() {
-  if (CFG.c2cPixels) return CFG.c2cPixels;
-  const src = index.source;
-  return src && src !== 'local' ? src.replace(/\/?$/, '/') + 'c2c/pmtiles/c2c_pixels.pmtiles' : '';
+  return CFG.c2cPixels || '';
 }
 
 function addC2c() {
@@ -286,7 +290,7 @@ function addC2c() {
   map.addSource('c2c', { type: 'vector', url: 'pmtiles://' + url });
   const year = ['round', ['coalesce', ['get', 'change_year'], C2C_YEARS[0]]];
   const color = ['step', year, C2C_COLORS[0]];
-  C2C_YEARS.slice(1).forEach((y, i) => color.push(y, C2C_COLORS[i + 1]));
+  C2C_YEARS.slice(1).forEach((y, i) => color.push(y, c2cColor(i + 1)));
   map.addLayer({
     id: 'c2c', type: 'circle', source: 'c2c', 'source-layer': 'c2c_pixels',
     layout: { visibility: 'none' },
@@ -303,9 +307,9 @@ const c2cYear = (p) => Math.round(Number(p.change_year));
 
 function c2cSection(p) {
   const year = c2cYear(p), drop = Math.abs(Number(p.magnitude));
-  const late = year >= 2024 ? ' (last years are undercounted)' : '';
+  const late = year >= C2C_YEARS[C2C_YEARS.length - 2] ? ' (last years are undercounted)' : '';
   return `<section><h4>Forest-loss map (C2C)</h4><div class="chips">` +
-    chip(`loss in ${year}`, C2C_COLORS[Math.max(0, C2C_YEARS.indexOf(year))]) +
+    chip(`loss in ${year}`, c2cColor(C2C_YEARS.indexOf(year))) +
     (drop < C2C_GATE ? chip('weak: below the 0.175 cut-off', CLASS_COLORS.no_data) : '') + '</div>' +
     `<dl><dt>Loss year</dt><dd>${year}${late}</dd>` +
     `<dt>Size of drop (NBR)</dt><dd>${fmt(drop, 2)} (cut-off 0.175)</dd>` +
@@ -327,15 +331,15 @@ const POPUPS = [
   [(id) => id === 'c2c', (p) =>
     `<strong>Forest loss in ${c2cYear(p)}</strong> (C2C)<br>size of drop ${fmt(Math.abs(p.magnitude), 2)} &middot; click for details`],
   [(id) => id === 'cells', (p) =>
-    `<strong>10 m cell</strong><br>score 2025: ${score(p.dor_global_2025)} ` +
+    `<strong>10 m cell</strong><br>score ${lastYear()}: ${score(p[scoreKey()])} ` +
     `(good/poor threshold ${fmt(p.threshold_global, 3)})<br>` +
-    `stand: ${esc(CLASS_LABELS[p.stand_condition_class] || '—')}, change 2017–2025 ${esc(p.trajectory_class || '—')}<br>` +
+    `stand: ${esc(CLASS_LABELS[p.stand_condition_class] || '—')}, change ${yearSpan()} ${esc(p.trajectory_class || '—')}<br>` +
     `${fmt(p.edge_m, 0)} m from the stand edge`],
   [(id) => id === 'forest-fill' || id === 'forest-pts', (p) =>
     `<strong>${esc(p.forest_type)} stand</strong> &mdash; ${esc(survey(p.layer))}<br>` +
     `${fmt(p.area_ha, 2)} ha, surveyed ${esc(p.survey_year ?? '—')} (field condition: ${esc(fieldCondition(p.tilstand))})<br>` +
-    `condition 2025: ${score(p.dor_global_2025)}, ${esc(CLASS_LABELS[p.condition_local] || 'no score')} (local) / ` +
-    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (nature type)<br>change 2017–2025 ${esc(p.trajectory || '—')}`]
+    `condition ${lastYear()}: ${score(p[scoreKey()])}, ${esc(CLASS_LABELS[p.condition_local] || 'no score')} (local) / ` +
+    `${esc(CLASS_LABELS[p.condition_global] || 'no score')} (nature type)<br>change ${yearSpan()} ${esc(p.trajectory || '—')}`]
 ];
 
 /** @type {any} */ let popup;
@@ -741,15 +745,15 @@ function chip(text, color) {
 function cellSection(p) {
   const series = index.years.map((yr) => p[`dor_global_${yr}`] ?? null);
   const traj = p.trajectory_class || '—';
-  const above = Number(p.dor_global_2025) >= Number(p.threshold_global);
+  const above = Number(p[scoreKey()]) >= Number(p.threshold_global);
   return '<section><h4>10 m cell condition</h4>' +
     trajChart(series, p.threshold_global, index.years) +
     '<div class="chips">' +
-    (p.dor_global_2025 == null ? chip('2025: no score', CLASS_COLORS.no_data)
-      : chip(`2025: ${above ? 'above' : 'below'} threshold`, above ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition)) +
-    chip(`change 2017–2025: ${traj}`, TRAJ_COLORS[traj] || CLASS_COLORS.no_data) + '</div>' +
-    `<dl><dt>Score 2025 (nature type)</dt><dd>${score(p.dor_global_2025)}</dd><dt>Good/poor threshold</dt><dd>${fmt(p.threshold_global, 3)}</dd>` +
-    `<dt>Trend 2017–2025</dt><dd>${trend(series)}</dd><dt>Distance to stand edge</dt><dd>${fmt(p.edge_m, 0)} m</dd></dl></section>`;
+    (p[scoreKey()] == null ? chip(`${lastYear()}: no score`, CLASS_COLORS.no_data)
+      : chip(`${lastYear()}: ${above ? 'above' : 'below'} threshold`, above ? CLASS_COLORS.good_condition : CLASS_COLORS.poor_condition)) +
+    chip(`change ${yearSpan()}: ${traj}`, TRAJ_COLORS[traj] || CLASS_COLORS.no_data) + '</div>' +
+    `<dl><dt>Score ${lastYear()} (nature type)</dt><dd>${score(p[scoreKey()])}</dd><dt>Good/poor threshold</dt><dd>${fmt(p.threshold_global, 3)}</dd>` +
+    `<dt>Trend ${yearSpan()}</dt><dd>${trend(series)}</dd><dt>Distance to stand edge</dt><dd>${fmt(p.edge_m, 0)} m</dd></dl></section>`;
 }
 
 function standSection(p) {
@@ -759,11 +763,11 @@ function standSection(p) {
     '<div class="chips">' +
     chip(`local: ${CLASS_LABELS[local] || 'no score'}`, CLASS_COLORS[local]) +
     chip(`nature type: ${CLASS_LABELS[global] || 'no score'}`, CLASS_COLORS[global]) +
-    chip(`change 2017–2025: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
+    chip(`change ${yearSpan()}: ${p.trajectory || '—'}`, TRAJ_COLORS[p.trajectory] || CLASS_COLORS.no_data) + '</div>' +
     `<dl><dt>Area</dt><dd>${fmt(p.area_ha, 2)} ha</dd><dt>Survey</dt><dd>${esc(survey(p.layer))}, ${esc(p.survey_year ?? 'year unknown')}</dd>` +
     `<dt>Survey ID</dt><dd>${esc(String(p.poly_id).split(':').pop())}</dd>` +
-    `<dt>Field condition (survey)</dt><dd>${esc(fieldCondition(p.tilstand))}</dd><dt>Score 2025 (nature type)</dt><dd>${score(p.dor_global_2025)}</dd>` +
-    `<dt>Trend 2017–2025</dt><dd>${trend(p.series || [])}</dd></dl>` +
+    `<dt>Field condition (survey)</dt><dd>${esc(fieldCondition(p.tilstand))}</dd><dt>Score ${lastYear()} (nature type)</dt><dd>${score(p[scoreKey()])}</dd>` +
+    `<dt>Trend ${yearSpan()}</dt><dd>${trend(p.series || [])}</dd></dl>` +
     `<button type="button" class="pill-btn" data-zoom-stand="${esc(p.poly_id)}">Zoom to stand</button></section>`;
 }
 
@@ -1430,7 +1434,7 @@ function setupControls() {
     el.style.border = `2.5px solid ${NEW_COLOR}`;
   }
   document.getElementById('c2c-key').innerHTML = C2C_YEARS.map((y, i) =>
-    `<span><i class="sw" style="background:${C2C_COLORS[i]}"></i>${y}</span>`).join('');
+    `<span><i class="sw" style="background:${c2cColor(i)}"></i>${y}</span>`).join('');
   document.getElementById('cell-ramp').style.background =
     `linear-gradient(90deg, ${CELL_RAMP.map(([c]) => c).join(', ')})`;
   for (const el of document.querySelectorAll('input[name="basemap"]')) {
@@ -1499,6 +1503,56 @@ function setupLayerErrors() {
   });
 }
 
+/** The years in the page's text (data-tpl), from the data rather than the HTML. */
+function fillYears() {
+  const last = lastYear();
+  C2C_YEARS = index.forest_area?.years || Array.from({ length: last - 2017 }, (_, i) => 2018 + i);
+  const n = C2C_YEARS.length;
+  const t = { first: firstYear(), last, c0: C2C_YEARS[0] - 1, c1: C2C_YEARS[0], cn: C2C_YEARS[n - 1], cp: C2C_YEARS[n - 2] };
+  const roots = [document, ...Array.from(document.querySelectorAll('template'), (x) => x.content)];
+  for (const root of roots) {
+    for (const el of /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll('[data-tpl]'))) {
+      el.textContent = el.dataset.tpl.replace(/\{(\w+)\}/g, (_, k) => t[k]);
+    }
+  }
+}
+
+const DOWNLOAD_FORMATS = {
+  geoparquet: 'GeoParquet', gpkg: 'GeoPackage (zip)',
+  // Condition's COGs are 67 blocks in three UTM zones: the list of them, each beside it.
+  cogs: 'COG blocks (index.csv)'
+};
+
+/**
+ * Download menus from index.json `downloads`: a `file` beside the data, or a `url`
+ * (condition, in its bucket). Hidden for layers without any.
+ */
+function setupDownloads() {
+  const layers = index.downloads || {};
+  for (const el of /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySelectorAll('details[data-download]'))) {
+    const files = layers[el.dataset.download];
+    if (!files) continue;
+    const menu = el.querySelector('.dl-menu');
+    for (const [fmt, label] of Object.entries(DOWNLOAD_FORMATS)) {
+      if (!files[fmt]) continue;
+      const a = document.createElement('a');
+      a.href = files[fmt].url || BASE + files[fmt].file;
+      a.download = '';
+      const size = document.createElement('span');
+      size.textContent = files[fmt].bytes ? `${(files[fmt].bytes / 1e6).toFixed(1)} MB` : '';
+      a.append(label, size);
+      menu.append(a);
+    }
+    el.hidden = false;
+  }
+  // One menu open at a time; a click elsewhere closes it.
+  document.addEventListener('click', (e) => {
+    for (const el of document.querySelectorAll('details.dl[open]')) {
+      if (!el.contains(/** @type {Node} */ (e.target))) el.removeAttribute('open');
+    }
+  });
+}
+
 async function init() {
   // The buttons work even if the data never arrive.
   setupTheme();
@@ -1513,7 +1567,9 @@ async function init() {
   ]);
   monthly = rows;
   raddTiles = raddFile = radd;
+  fillYears();
   setupStatus();
+  setupDownloads();
   setupControls();
   setupLayerErrors();
   setupWayback();

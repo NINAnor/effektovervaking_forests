@@ -43,7 +43,7 @@ def site(tmp_path_factory):
         re.sub(r"(conditionCells|c2cPixels): '[^']*'", r"\1: ''", cfg.read_text())
     )
     src = make_source(tmp_path_factory.mktemp("src"))
-    dashboard.bake(str(src), root / "data")
+    dashboard.bake(str(src), str(src / "condition"), root / "data")
     # Minting needs Earth Engine; a stub tile host stands in (routed in _open).
     (root / "data" / "radd_tiles.json").write_text(
         json.dumps(
@@ -339,6 +339,43 @@ def test_layer_info_dialog(browser, site) -> None:
         assert "Candidates, not proof" in page.inner_text("#info-body")
         page.keyboard.press("Escape")
         assert dlg.is_hidden()
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_download_menus(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        page.wait_for_selector('details[data-download="stands"]:not([hidden])')
+        page.click('[data-download="stands"] summary')
+        link = page.locator('[data-download="stands"] .dl-menu a')
+        label, size = link.inner_text().split("\n")
+        assert label == "GeoPackage (zip)" and size.endswith(" MB")
+        assert link.get_attribute("href") == "data/downloads/stands.gpkg.zip"
+        # Opening another menu closes the first.
+        page.click('[data-download="alerts"] summary')
+        assert page.locator('[data-download="stands"] .dl-menu').is_hidden()
+        href = page.get_attribute('[data-download="alerts"] .dl-menu a', "href")
+        assert href == "data/downloads/alerts.gpkg.zip"
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_years_come_from_the_data(browser, site) -> None:
+    _, url = site
+    ctx, page, errors = _open(browser, url)
+    try:
+        opts = page.locator("#stand-color option").all_inner_texts()
+        assert "Condition 2025 (local)" in opts and "Change 2017–2025" in opts
+        # Every templated year is filled, the info dialogs' too.
+        text = page.evaluate(
+            "() => document.body.innerText + Array.from(document"
+            ".querySelectorAll('template'), t => t.content.textContent).join('')"
+        )
+        assert "{" not in text and "undefined" not in text
         assert not errors
     finally:
         ctx.close()

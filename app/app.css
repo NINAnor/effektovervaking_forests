@@ -400,6 +400,24 @@ label.inline select { flex: 1 1 auto; min-width: 0; max-width: 150px; }
   border-radius: 50%; cursor: pointer;
 }
 .info-btn:hover { color: var(--ink); background: var(--control-hover); }
+
+/* Download menu: a <details> beside the "i" button, listing the layer's files. */
+.dl { position: relative; flex: none; }
+.dl-btn { display: grid; place-items: center; list-style: none; font: 500 14px/1 system-ui, sans-serif; }
+.dl-btn::-webkit-details-marker { display: none; }
+.dl-btn::before { content: "\2193"; }
+.dl[open] > .dl-btn { color: var(--ink); background: var(--control-hover); }
+.dl-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5;
+  min-width: 210px; padding: 4px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2);
+}
+.dl-menu a {
+  display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px;
+  border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 13px;
+}
+.dl-menu a:hover, .dl-menu a:focus-visible { background: var(--control-hover); }
+.dl-menu a span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .count { font-weight: 400; color: var(--muted); }
 /* The main layer: a quiet tint so it reads first. */
 .layer-group--main { background: var(--hover); }

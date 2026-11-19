@@ -1,12 +1,17 @@
-"""Bake the dashboard's JSON from the published alert and condition parquet.
+"""Bake the dashboard's JSON from the alert, condition and C2C parquet.
 
 The app (app/) is static and reads only what this writes: no parquet reader
-in the browser. Inputs are the hand-published products under the project's
-S3 prefix (alerts/parquet, condition/parquet), or a local copy laid out the
-same way. One alert row is a break event on a 10 m pixel; only rows the site
-would publish are kept (`alerts.publishable_mask`), minus reviewer-rejected
-ones, and areas count each pixel once. The C2C loss pixels (c2c/parquet), taken
-as likely forest loss, give the forest area remaining each year.
+in the browser. Inputs: the S-CCD alert tables (the nightly cycle's
+operational/alerts, or sccd/operational/alerts under the project's S3 prefix),
+C2C (c2c/parquet under the prefix) and condition (one folder, the public dms
+dataset, which the app also reads its cells and downloads from). One alert
+row is a break event on a 10 m pixel; only rows the site would publish are
+kept (`alerts.publishable_mask`), minus reviewer-rejected ones, and areas
+count each pixel once. The C2C loss pixels, taken as likely forest loss, give
+the forest area remaining each year.
+
+downloads/ holds the layers for GIS users, as the map shows them: stands and
+alerts as GeoPackage, C2C as GeoParquet. Condition is downloaded from its bucket.
 """
 
 from __future__ import annotations
@@ -14,12 +19,16 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
+import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 import requests
 import shapely
 
@@ -30,7 +39,7 @@ KINDS = ("loss", "gain")
 PIXEL_HA = 0.01
 # The app's Certainty choices (all, medium and high, high): monthly areas per choice.
 CONF_TIERS = (0.0, 0.34, 0.67)
-SCHEMA = 8  # bump when a file's shape changes; the app refuses other versions
+SCHEMA = 9  # bump when a file's shape changes; the app refuses other versions
 ALERT_COLS = [
     "pix_id",
     "lon",
@@ -42,7 +51,8 @@ ALERT_COLS = [
     "magnitude",
     "gate",
 ]
-# Per-stand condition joined onto the polygons (condition/parquet).
+# Per-stand condition joined onto the polygons, plus its score each year
+# (dor_global_<year>: the years come from the data, so a new year needs no code).
 STAND_COLS = [
     "poly_id",
     "tilstand",
@@ -51,20 +61,52 @@ STAND_COLS = [
     "condition_global",
     "threshold_global",
     "trajectory",
-    *[f"dor_global_{y}" for y in range(2017, 2026)],
 ]
-YEARS = list(range(2017, 2026))
 # C2C: a loss is an NBR drop of at least the cut-off tuned on labelled cells (as
 # the report and the app's map). C2C dates a loss to the first yearly composite
-# after it, so loss years run 2018-2025.
+# after it, so loss years run from 2018 (the 2017 composite is the first).
 C2C_COLS = ["forest_type", "pix_id", "change_year", "magnitude"]
 C2C_GATE = 0.175
-C2C_YEARS = list(range(2018, 2026))
+C2C_FIRST = 2018
+
+
+# The condition folder (dms dataset) must hold these, plus the blocks index.csv lists.
+CONDITION_FILES = (
+    "polygons_geo.parquet",
+    "condition_stands.parquet",
+    "condition_pixels.parquet",
+    "condition_pixels.pmtiles",
+    "index.csv",
+)
 
 
 def default_source() -> str | None:
     """FORESTMON_DASHBOARD_SOURCE: the project's public S3 prefix URL, or a folder."""
     return os.environ.get("FORESTMON_DASHBOARD_SOURCE") or None
+
+
+def default_condition() -> str | None:
+    """FORESTMON_CONDITION_SOURCE: the condition dataset (dms URL), or a folder."""
+    return os.environ.get("FORESTMON_CONDITION_SOURCE") or None
+
+
+def _is_url(s: str) -> bool:
+    return s.startswith(("http://", "https://"))
+
+
+def missing_condition_files(condition: str, tmp: Path) -> list[str]:
+    """What the app needs from the condition folder and cannot find there."""
+    blocks = pd.read_csv(_local(condition, "index.csv", tmp))["file"].tolist()
+    missing = []
+    for name in [*CONDITION_FILES, *blocks]:
+        if _is_url(condition):
+            r = requests.head(f"{condition.rstrip('/')}/{name}", timeout=30)
+            ok = r.ok
+        else:
+            ok = (Path(condition) / name).is_file()
+        if not ok:
+            missing.append(name)
+    return missing
 
 
 def _local(source: str, rel: str, tmp: Path) -> Path:
@@ -141,25 +183,24 @@ def forest_area(polys: gpd.GeoDataFrame, c2c: pd.DataFrame) -> dict:
     # change_year X.996 is the end of year X: the loss shows in year X+1.
     year = np.floor(loss["change_year"]).astype(int) + 1
     per = loss.groupby(["forest_type", year]).size()
-    out = {"years": C2C_YEARS}
+    years = list(range(C2C_FIRST, int(np.floor(c2c["change_year"].max())) + 2))
+    out = {"years": years}
     for aoi in AOIS:
         mapped = polys.loc[polys["forest_type"] == aoi].geometry.union_all().area / 1e4
         out[aoi] = {
             "mapped_ha": round(mapped, 2),
-            "loss_ha": [
-                round(int(per.get((aoi, y), 0)) * PIXEL_HA, 2) for y in C2C_YEARS
-            ],
+            "loss_ha": [round(int(per.get((aoi, y), 0)) * PIXEL_HA, 2) for y in years],
         }
     return out
 
 
-def _c2c(source: str, tmp: Path) -> pd.DataFrame | None:
-    """The C2C pixels, or None when the source has none (the chart is then hidden)."""
+def _c2c(source: str, tmp: Path) -> gpd.GeoDataFrame | None:
+    """The C2C pixels, or None when the source has none (chart and download hidden)."""
     try:
-        path = _local(source, "c2c/parquet/c2c_pixels.parquet", tmp)
-        return pd.read_parquet(path, columns=C2C_COLS)
+        gdf = gpd.read_parquet(_local(source, "c2c/parquet/c2c_pixels.parquet", tmp))
     except (FileNotFoundError, requests.HTTPError):
         return None
+    return gdf.drop(columns=["bbox", "__index_level_0__"], errors="ignore")
 
 
 def _write(obj, path: Path) -> str:
@@ -170,16 +211,61 @@ def _write(obj, path: Path) -> str:
     return path.name
 
 
-def bake(source: str, out_dir: Path | str) -> dict:
+def _download(dl: Path, name: str, write) -> dict:
+    """Write in a local temp dir (SQLite locking fails on CIFS). A GeoPackage is
+    zipped (a quarter the size); both keep fixed timestamps, so a bake of
+    unchanged data leaves the committed files unchanged."""
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t) / name
+        write(tmp)
+        out = dl / (f"{name}.zip" if name.endswith(".gpkg") else name)
+        if out.suffix == ".zip":
+            info = zipfile.ZipInfo(name, date_time=(2017, 1, 1, 0, 0, 0))
+            with zipfile.ZipFile(out, "w") as z:
+                z.writestr(info, tmp.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+        else:
+            shutil.copyfile(tmp, out)
+    return {"file": f"downloads/{out.name}", "bytes": out.stat().st_size}
+
+
+def _gpkg(gdf: gpd.GeoDataFrame, layer: str):
+    def write(path: Path) -> None:
+        pyogrio.set_gdal_config_options({"OGR_CURRENT_DATE": "2017-01-01T00:00:00Z"})
+        try:
+            gdf.to_file(path, layer=layer, engine="pyogrio")
+        finally:
+            pyogrio.set_gdal_config_options({"OGR_CURRENT_DATE": None})
+
+    return write
+
+
+def alert_points(px: pd.DataFrame) -> gpd.GeoDataFrame:
+    """The map's alert pixels as points: one row per (pixel, kind)."""
+    cols = ["aoi", "kind", "pix_id", "first", "last", "conf", "mag", "n_events"]
+    out = px[cols].rename(
+        columns={"aoi": "forest_type", "first": "first_break", "last": "last_break"}
+    )
+    geom = gpd.points_from_xy(px["lon"], px["lat"], crs=4326)
+    return gpd.GeoDataFrame(out.assign(conf=px["conf"].round(2)), geometry=geom)
+
+
+def bake(
+    source: str, condition: str, out_dir: Path | str, alerts: str | None = None
+) -> dict:
+    """source: the S3 prefix (C2C, and the alerts unless `alerts` names their folder).
+    condition: the condition folder; refused while a file the app needs is missing."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    alerts = alerts or f"{source.rstrip('/')}/sccd/operational/alerts"
     with tempfile.TemporaryDirectory(prefix="forestmon_dash_") as t:
         tmp = Path(t)
+        missing = missing_condition_files(condition, tmp)
+        if missing:
+            raise ValueError(f"not in {condition}: {', '.join(missing)}")
         events = pd.concat(
             [
                 pd.read_parquet(
-                    _local(source, f"alerts/parquet/{a}_alerts_all.parquet", tmp),
-                    columns=ALERT_COLS,
+                    _local(alerts, f"{a}_alerts.parquet", tmp), columns=ALERT_COLS
                 ).assign(aoi=a)
                 for a in AOIS
             ],
@@ -187,15 +273,17 @@ def bake(source: str, out_dir: Path | str) -> dict:
         )
         keep = alerts_mod.publishable_mask(events) & (events["status"] != "rejected")
         events = events[keep]
-        polys = gpd.read_parquet(
-            _local(source, "condition/parquet/polygons_geo.parquet", tmp)
-        )
-        stands = pd.read_parquet(
-            _local(source, "condition/parquet/condition_stands.parquet", tmp),
-            columns=STAND_COLS,
-        )
+        polys = gpd.read_parquet(_local(condition, "polygons_geo.parquet", tmp))
+        stands = pd.read_parquet(_local(condition, "condition_stands.parquet", tmp))
         c2c = _c2c(source, tmp)
 
+    years = sorted(
+        int(m[1]) for c in stands if (m := re.fullmatch(r"dor_global_(\d{4})", c))
+    )
+    if not years:
+        raise ValueError("condition_stands.parquet has no dor_global_<year> columns")
+    yearly = [f"dor_global_{y}" for y in years]
+    stands = stands[STAND_COLS + yearly]
     polys = polys[polys["forest_type"].isin(AOIS)]
     if polys.crs is None or not polys.crs.is_projected:
         raise ValueError("polygons_geo.parquet must be in a projected CRS")
@@ -205,7 +293,7 @@ def bake(source: str, out_dir: Path | str) -> dict:
         raise ValueError(f"no polygons for {missing}")
 
     if events.empty:
-        raise ValueError(f"no publishable alerts in {source}")
+        raise ValueError(f"no publishable alerts in {alerts}")
     px = pixels(events)
     files = {"points": {}}
     for aoi in AOIS:
@@ -221,7 +309,6 @@ def bake(source: str, out_dir: Path | str) -> dict:
     web["survey_year"] = web["survey_year"].astype("Int64")  # stays int if unmatched
     # A point inside each stand, for finding small stands at overview zoom.
     inside = web.geometry.representative_point().to_crs(4326)
-    yearly = [f"dor_global_{y}" for y in YEARS]
     web = web.assign(
         area_ha=web["area_ha"].round(2),
         threshold_global=web["threshold_global"].round(3),
@@ -234,9 +321,8 @@ def bake(source: str, out_dir: Path | str) -> dict:
         lon=inside.x.round(5),
         lat=inside.y.round(5),
     ).to_crs(4326)
-    web = web.drop(columns=yearly[:-1]).assign(
-        dor_global_2025=web["dor_global_2025"].round(3)
-    )
+    # The last year's score stays a column: the map colours by it.
+    web = web.drop(columns=yearly[:-1]).assign(**{yearly[-1]: web[yearly[-1]].round(3)})
     geom = web.geometry.simplify(1e-5, preserve_topology=True)
     web = web.assign(geometry=shapely.set_precision(geom.values, 1e-5))
     # na="null": the app reads a missing score as "no score".
@@ -244,11 +330,34 @@ def bake(source: str, out_dir: Path | str) -> dict:
     files["polygons"] = _write(feats, out_dir / "polygons.geojson")
     files["monthly"] = _write(monthly(px), out_dir / "monthly.json")
 
+    dl = out_dir / "downloads"
+    dl.mkdir(exist_ok=True)
+    downloads = {
+        "stands": {
+            "gpkg": _download(
+                dl, "stands.gpkg", _gpkg(web.drop(columns="series"), "stands")
+            )
+        },
+        "alerts": {
+            "gpkg": _download(dl, "alerts.gpkg", _gpkg(alert_points(px), "alerts"))
+        },
+    }
+    if c2c is not None:
+        downloads["c2c"] = {"geoparquet": _download(dl, "c2c.parquet", c2c.to_parquet)}
+    # Condition is too big for the repo: linked where the app reads its cells.
+    cond_url = condition.rstrip("/") + "/" if _is_url(condition) else None
+    if cond_url:
+        downloads["condition"] = {
+            "geoparquet": {"url": cond_url + "condition_pixels.parquet"},
+            "cogs": {"url": cond_url + "index.csv"},
+        }
+
     counts = px.groupby(["aoi", "kind"]).size()
     index = {
         "schema": SCHEMA,
         "generated_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
-        "source": source if source.startswith(("http://", "https://")) else "local",
+        # The condition folder the app reads its cells from; null when local.
+        "condition": cond_url,
         "forest_types": list(AOIS),
         "polygon_count": int(len(polys)),
         "polygon_counts": {
@@ -256,10 +365,18 @@ def bake(source: str, out_dir: Path | str) -> dict:
         },
         "pixels": {a: {k: int(counts.get((a, k), 0)) for k in KINDS} for a in AOIS},
         "date_range": [f"{px['first'].min():%Y-%m-%d}", f"{px['last'].max():%Y-%m-%d}"],
-        "years": YEARS,
+        "years": years,
         "conf_tiers": list(CONF_TIERS),
         "forest_area": None if c2c is None else forest_area(polys, c2c),
         "files": files,
+        "downloads": downloads,
     }
+    # Same data as the last bake: keep its time, so the nightly cycle commits nothing.
+    try:
+        last = json.loads((out_dir / "index.json").read_text())
+        if {**last, "generated_at": None} == {**index, "generated_at": None}:
+            index["generated_at"] = last["generated_at"]
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
     _write(index, out_dir / "index.json")  # last: the app reads it first
     return index

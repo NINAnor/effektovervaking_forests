@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One scheduled monitoring cycle: [S3 pull,] detect, publish, [S3 push,] git push.
+# One scheduled monitoring cycle: [S3 pull,] detect, publish, dashboard bake,
+# [S3 push,] git push.
 #
 # This is the half of the system CI cannot do. `forestmon run` needs the
 # observation store and the S-CCD state pickle, which do not belong in a public
@@ -28,6 +29,10 @@
 #   FORESTMON_LOCK      Lockfile path (default: "/tmp/forestmon_cycle.<uid>.lock")
 #   FORESTMON_PUSH      Whether to commit & push (1) or skip (0) (default: 1)
 #   FORESTMON_WEB_OUT   Payload directory for web alerts (default: "$FORESTMON_DATA_DIR/web")
+#   FORESTMON_DASHBOARD_SOURCE, FORESTMON_CONDITION_SOURCE
+#                       With both set, each cycle re-bakes app/data (the dashboard)
+#                       from this cycle's alerts, C2C under the S3 prefix and the
+#                       condition dataset, and commits it. See app/README.md.
 #   FORESTMON_S3_REMOTE rclone path that holds the data, e.g. nina:forestmon
 #                       (default: from $REPO/.env.s3 if present, else local
 #                       data only). See "S3" below.
@@ -296,6 +301,21 @@ for aoi in $AOIS; do
   fi
 done
 
+# ── dashboard ───────────────────────────────────────────────────────────────
+# Re-baked from this cycle's alert tables; C2C and condition change yearly.
+# A failed bake (e.g. a condition file missing from dms) keeps the last one.
+if [ -n "${FORESTMON_DASHBOARD_SOURCE:-}" ] && [ -n "${FORESTMON_CONDITION_SOURCE:-}" ]; then
+  log "--- dashboard bake"
+  if "${FORESTMON[@]}" publish dashboard --alerts-dir "$DATA_DIR/operational/alerts" \
+      --out "$REPO/app/data" >>"$LOG" 2>&1; then
+    log "--- dashboard bake ok"
+  else
+    log "--- dashboard bake FAILED: the dashboard keeps the last bake"
+    git -C "$REPO" checkout -q -- app/data 2>>"$LOG" || true  # no half-written bake
+    rc_total=1
+  fi
+fi
+
 if [ -n "$S3" ]; then
   log "--- S3 push to $S3"
   if s3_push; then
@@ -307,24 +327,27 @@ if [ -n "$S3" ]; then
 fi
 
 # ── commit and push the web payload ─────────────────────────────────────────
-# Only WEB_OUT. The GIS artefacts (FORESTMON_GIS_OUT) are never committed,
-# and nothing else this script touches belongs in a commit.
+# Only app/data (the dashboard) and WEB_OUT when git tracks it (the default,
+# under data/, is ignored). The GIS artefacts (FORESTMON_GIS_OUT) are never
+# committed, and nothing else this script touches belongs in a commit.
 if [ "$PUSH" = "1" ]; then
-  WEB_REPO="$(git -C "$WEB_OUT" rev-parse --show-toplevel 2>/dev/null || true)"
-  if [ -z "$WEB_REPO" ]; then
-    log "$WEB_OUT is not inside a git work tree — skipping push"
-  elif git -C "$WEB_REPO" diff --quiet -- "$WEB_OUT" 2>/dev/null && [ -z "$(git -C "$WEB_REPO" status --porcelain -- "$WEB_OUT" 2>/dev/null)" ]; then
+  PAYLOAD=("$REPO/app/data")
+  if git -C "$REPO" ls-files --error-unmatch -- "$WEB_OUT" >/dev/null 2>&1 ||
+     { [[ "$WEB_OUT" == "$REPO"/* ]] && ! git -C "$REPO" check-ignore -q -- "$WEB_OUT"; }; then
+    PAYLOAD+=("$WEB_OUT")
+  fi
+  if [ -z "$(git -C "$REPO" status --porcelain -- "${PAYLOAD[@]}" 2>/dev/null)" ]; then
     log "no data change — nothing to push"
   else
     ver=$(python3 -c \
-      "import json, sys; print(json.load(open(sys.argv[1]))['data_version'])" \
-      "$WEB_OUT/manifest.json" 2>/dev/null || echo unknown)
-    git -C "$WEB_REPO" add -- "$WEB_OUT"
-    # Pathspec-limited: anything else staged in the web repo stays out of it.
-    if git -C "$WEB_REPO" commit -q -m "Publish alerts $ver" -- "$WEB_OUT" 2>>"$LOG"; then
-      log "committed $ver"
-      branch=$(git -C "$WEB_REPO" rev-parse --abbrev-ref HEAD)
-      if git -C "$WEB_REPO" push -q origin "$branch" 2>>"$LOG"; then
+      "import json, sys; print(json.load(open(sys.argv[1]))['date_range'][1])" \
+      "$REPO/app/data/index.json" 2>/dev/null || echo unknown)
+    git -C "$REPO" add -- "${PAYLOAD[@]}"
+    # Pathspec-limited: anything else staged in the repo stays out of it.
+    if git -C "$REPO" commit -q -m "Publish alerts to $ver" -- "${PAYLOAD[@]}" 2>>"$LOG"; then
+      log "committed alerts to $ver"
+      branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD)
+      if git -C "$REPO" push -q origin "$branch" 2>>"$LOG"; then
         log "pushed to origin/$branch — Pages will redeploy"
       else
         # The commit is safe on disk; the next cycle will carry it.

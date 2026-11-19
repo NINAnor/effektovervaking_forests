@@ -6,7 +6,10 @@ known number of events, polygons with a known area. Nothing touches the network.
 
 from __future__ import annotations
 
+import functools
+import http.server
 import json
+import threading
 from pathlib import Path
 
 import geopandas as gpd
@@ -52,11 +55,17 @@ def _alerts(rows: list[tuple]) -> pd.DataFrame:
 
 
 def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Path:
-    """Write the synthetic alerts + polygons under root, like the real prefix."""
-    (root / "alerts/parquet").mkdir(parents=True)
-    (root / "condition/parquet").mkdir(parents=True)
-    _alerts(_OLIVIN).to_parquet(root / "alerts/parquet/olivinskog_alerts_all.parquet")
-    _alerts(_KALK).to_parquet(root / "alerts/parquet/kalklindeskog_alerts_all.parquet")
+    """Write the synthetic alerts + C2C under root, like the real prefix, and the
+    condition folder (as the dms dataset) at root/condition."""
+    alerts, cond = root / "sccd/operational/alerts", root / "condition"
+    alerts.mkdir(parents=True)
+    cond.mkdir(parents=True)
+    _alerts(_OLIVIN).to_parquet(alerts / "olivinskog_alerts.parquet")
+    _alerts(_KALK).to_parquet(alerts / "kalklindeskog_alerts.parquet")
+    # Only checked for: the app reads these from the condition folder.
+    for name in ("condition_pixels.parquet", "condition_pixels.pmtiles", "b1.tif"):
+        (cond / name).write_bytes(b"x")
+    (cond / "index.csv").write_text("file,block\nb1.tif,1\n")
     x, y = 300_000, 6_600_000
     shapes = {
         "olivinskog": [
@@ -75,7 +84,7 @@ def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Pat
         rows,
         columns=["poly_id", "forest_type", "layer", "naturtype", "geometry"],
         crs=25833,
-    ).to_parquet(root / "condition/parquet/polygons_geo.parquet")
+    ).to_parquet(cond / "polygons_geo.parquet")
     pd.DataFrame(
         {
             "poly_id": [r[0] for r in rows],
@@ -88,16 +97,20 @@ def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Pat
             # 2017 .. 2025: 0.50, 0.51, ..., 0.58
             **{f"dor_global_{y}": 0.5 + (y - 2017) / 100 for y in range(2017, 2026)},
         }
-    ).to_parquet(root / "condition/parquet/condition_stands.parquet")
+    ).to_parquet(cond / "condition_stands.parquet")
     (root / "c2c/parquet").mkdir(parents=True)
-    pd.DataFrame(
+    c2c = pd.DataFrame(
         [  # forest_type, pix_id, change_year, magnitude
             ("olivinskog", "a", 2019.996, -0.3),  # loss in 2020
             ("olivinskog", "a", 2019.996, -0.3),  # same cell in an overlapping polygon
             ("olivinskog", "b", 2020.996, -0.1),  # below the cut-off
             ("kalklindeskog", "c", 2017.996, -0.175),  # at the cut-off: loss in 2018
+            ("kalklindeskog", "d", 2024.996, -0.05),  # weak, but sets the years to 2025
         ],
         columns=dashboard.C2C_COLS,
+    )
+    gpd.GeoDataFrame(
+        c2c, geometry=gpd.points_from_xy([15.0] * 5, [59.6] * 5), crs=4326
     ).to_parquet(root / "c2c/parquet/c2c_pixels.parquet")
     return root
 
@@ -105,7 +118,8 @@ def make_source(root: Path, forest_types=("olivinskog", "kalklindeskog")) -> Pat
 @pytest.fixture
 def baked(tmp_path: Path):
     out = tmp_path / "out"
-    idx = dashboard.bake(str(make_source(tmp_path / "src")), out)
+    src = make_source(tmp_path / "src")
+    idx = dashboard.bake(str(src), str(src / "condition"), out)
     return idx, out
 
 
@@ -174,7 +188,7 @@ def test_index_lists_existing_files_and_columns_align(baked) -> None:
 
 def test_forest_area_counts_c2c_loss_once_per_year(baked) -> None:
     fa = baked[0]["forest_area"]
-    assert fa["years"] == dashboard.C2C_YEARS
+    assert fa["years"] == list(range(2018, 2026))  # from the data
     # Two 100 m squares (the third polygon repeats one); one 200 m square.
     assert fa["olivinskog"]["mapped_ha"] == 2.0
     assert fa["kalklindeskog"]["mapped_ha"] == 4.0
@@ -189,19 +203,58 @@ def test_forest_area_counts_c2c_loss_once_per_year(baked) -> None:
 def test_no_c2c_in_the_source_hides_forest_area(tmp_path: Path) -> None:
     src = make_source(tmp_path / "src")
     (src / "c2c/parquet/c2c_pixels.parquet").unlink()
-    assert dashboard.bake(str(src), tmp_path / "out")["forest_area"] is None
+    idx = dashboard.bake(str(src), str(src / "condition"), tmp_path / "out")
+    assert idx["forest_area"] is None
+    assert "c2c" not in idx["downloads"]
+
+
+def test_downloads_match_the_map(baked) -> None:
+    idx, out = baked
+    files = {
+        k: {f: v["file"] for f, v in d.items()} for k, d in idx["downloads"].items()
+    }
+    assert files == {
+        "stands": {"gpkg": "downloads/stands.gpkg.zip"},
+        "alerts": {"gpkg": "downloads/alerts.gpkg.zip"},
+        "c2c": {"geoparquet": "downloads/c2c.parquet"},
+    }
+    for d in idx["downloads"].values():
+        for v in d.values():
+            assert (out / v["file"]).stat().st_size == v["bytes"]
+    stands = gpd.read_file(f"zip://{out}/downloads/stands.gpkg.zip!stands.gpkg")
+    assert len(stands) == len(
+        json.loads((out / "polygons.geojson").read_text())["features"]
+    )
+    alerts = gpd.read_file(f"zip://{out}/downloads/alerts.gpkg.zip!alerts.gpkg")
+    # As the map: pixels once per kind, sub-gate and rejected breaks left out.
+    assert sorted(zip(alerts["forest_type"], alerts["kind"])) == sorted(
+        [("olivinskog", "loss")] * 2
+        + [("olivinskog", "gain")]
+        + [("kalklindeskog", "loss")] * 2
+    )
+    assert len(gpd.read_parquet(out / "downloads/c2c.parquet")) == 5
 
 
 def test_missing_polygons_for_an_aoi_raises(tmp_path: Path) -> None:
     src = make_source(tmp_path / "src", forest_types=("olivinskog",))
     with pytest.raises(ValueError, match="kalklindeskog"):
-        dashboard.bake(str(src), tmp_path / "out")
+        dashboard.bake(str(src), str(src / "condition"), tmp_path / "out")
 
 
 def test_cli_publish_dashboard(tmp_path: Path) -> None:
     src, out = make_source(tmp_path / "src"), tmp_path / "out"
     result = runner.invoke(
-        app, ["publish", "dashboard", "--source", str(src), "--out", str(out)]
+        app,
+        [
+            "publish",
+            "dashboard",
+            "--source",
+            str(src),
+            "--condition",
+            str(src / "condition"),
+            "--out",
+            str(out),
+        ],
     )
     assert result.exit_code == 0, result.output
     assert (out / "index.json").is_file()
@@ -210,13 +263,50 @@ def test_cli_publish_dashboard(tmp_path: Path) -> None:
 def test_cli_publish_stands_asset(tmp_path: Path) -> None:
     src, out = make_source(tmp_path / "src"), tmp_path / "stands.zip"
     result = runner.invoke(
-        app, ["publish", "stands-asset", "--source", str(src), "--out", str(out)]
+        app,
+        [
+            "publish",
+            "stands-asset",
+            "--condition",
+            str(src / "condition"),
+            "--out",
+            str(out),
+        ],
     )
     assert result.exit_code == 0, result.output
     stands = gpd.read_file(f"zip://{out}")
     # Dissolved per forest type, in lon/lat for Earth Engine.
     assert sorted(stands["type"]) == ["kalklindeskog", "olivinskog"]
     assert stands.crs.to_epsg() == 4326
+
+
+def test_missing_condition_file_is_refused_by_name(tmp_path: Path) -> None:
+    src = make_source(tmp_path / "src")
+    (src / "condition/b1.tif").unlink()  # a block index.csv lists
+    (src / "condition/condition_pixels.pmtiles").unlink()
+    with pytest.raises(ValueError, match="condition_pixels.pmtiles, b1.tif"):
+        dashboard.bake(str(src), str(src / "condition"), tmp_path / "out")
+    assert not (tmp_path / "out/index.json").exists()
+
+
+def test_condition_url_gives_the_app_its_cells_and_downloads(tmp_path: Path) -> None:
+    src = make_source(tmp_path / "src")
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(src / "condition")
+    )
+    handler.log_message = lambda *a, **k: None
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        idx = dashboard.bake(str(src), url, tmp_path / "out")
+    finally:
+        srv.shutdown()
+    assert idx["condition"] == url + "/"
+    assert idx["downloads"]["condition"] == {
+        "geoparquet": {"url": url + "/condition_pixels.parquet"},
+        "cogs": {"url": url + "/index.csv"},
+    }
 
 
 def test_cli_publish_dashboard_needs_a_source(
@@ -253,3 +343,23 @@ def test_stand_series_and_no_radd(baked):
     assert p["series"] == pytest.approx([0.5 + i / 100 for i in range(9)])
     assert p["threshold_global"] == 0.51
     assert idx["years"] == list(range(2017, 2026))
+
+
+def test_rebake_of_unchanged_data_changes_no_file(tmp_path: Path) -> None:
+    src, out = make_source(tmp_path / "src"), tmp_path / "out"
+    dashboard.bake(str(src), str(src / "condition"), out)
+    before = {p: p.read_bytes() for p in out.rglob("*") if p.is_file()}
+    dashboard.bake(str(src), str(src / "condition"), out)
+    assert {p: p.read_bytes() for p in out.rglob("*") if p.is_file()} == before
+
+
+def test_a_new_condition_year_needs_no_code(tmp_path: Path) -> None:
+    src = make_source(tmp_path / "src")
+    path = src / "condition/condition_stands.parquet"
+    pd.read_parquet(path).assign(dor_global_2026=0.6).to_parquet(path)
+    idx = dashboard.bake(str(src), str(src / "condition"), tmp_path / "out")
+    assert idx["years"] == list(range(2017, 2027))
+    feats = json.loads((tmp_path / "out/polygons.geojson").read_text())["features"]
+    props = feats[0]["properties"]
+    assert props["dor_global_2026"] == 0.6 and "dor_global_2025" not in props
+    assert len(props["series"]) == 10

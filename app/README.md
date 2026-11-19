@@ -22,38 +22,46 @@ RECOVER labelling app.
 
 ## Data
 
-The browser reads only JSON, baked by Python from the published parquet under
-the project's S3 prefix (`alerts/parquet/<aoi>_alerts_all.parquet` and
-`condition/parquet/polygons_geo.parquet`):
+The browser reads only JSON, baked by Python from three inputs (set in `.env`,
+see `.env.example`):
+
+* the S-CCD alert tables, `<aoi>_alerts.parquet`: the cycle's own
+  `operational/alerts/` (`--alerts-dir`), else `sccd/operational/alerts/` under
+  `FORESTMON_DASHBOARD_SOURCE`, the project's S3 prefix;
+* C2C, `c2c/parquet/c2c_pixels.parquet` under the same prefix;
+* condition, `FORESTMON_CONDITION_SOURCE`: the public dms dataset folder. The
+  bake reads the stands from it and refuses to run while a file the app needs
+  is missing there (`polygons_geo.parquet`, `condition_stands.parquet`,
+  `condition_pixels.parquet`, `condition_pixels.pmtiles`, `index.csv` and every
+  block it lists), naming the missing ones.
 
 ```bash
-forestmon publish dashboard --source "$FORESTMON_DASHBOARD_SOURCE" --out app/data
+forestmon publish dashboard --out app/data
 ```
 
-`FORESTMON_DASHBOARD_SOURCE` is the public HTTPS URL of the prefix
-(`<endpoint>/<bucket>/<prefix>`; see `.env.example`) or a local folder with
-the same layout. `index.json` is written last and lists the other files:
+`index.json` is written last and lists the other files:
 
 | file | contents |
 | --- | --- |
-| `index.json` | schema version, generation time, counts, period, file names; `forest_area`: per forest type the mapped area (overlapping polygons once) and the C2C loss each year 2018-2025 (NBR drop ≥ 0.175, each cell once, from `c2c/parquet/c2c_pixels.parquet`; null when the source has none, and the chart is hidden) |
-| `polygons.geojson` | the 737 mapped stands (EPSG:4326, lightly simplified), with their 2025 condition class (local and global), score, trajectory, field condition and survey year from `condition/parquet/condition_stands.parquet` |
+| `index.json` | schema version, generation time (kept when nothing else changed), counts, period, file names; `condition`: the condition folder, when a URL; `forest_area`: per forest type the mapped area (overlapping polygons once) and the C2C loss each year from 2018 (NBR drop ≥ 0.175, each cell once, from `c2c/parquet/c2c_pixels.parquet`; null when the source has none, and the chart is hidden) |
+| `polygons.geojson` | the 737 mapped stands (EPSG:4326, lightly simplified), with their latest condition class (local and global), score, trajectory, field condition and survey year from `condition/parquet/condition_stands.parquet` |
 | `monthly.json` | per forest type and month: new loss/gain area, one value per certainty choice (`conf_tiers` in `index.json`: all, medium and high, high) |
 | `points_<aoi>_<kind>.json` | one point per 10 m pixel, columnar: lon, lat, latest break date (YYYYMMDD), certainty, event count, |magnitude| of the latest break (dot size) |
+| `downloads/` | behind the layers' ↓ menus, as the map shows them: `stands.gpkg.zip` (the polygons above), `alerts.gpkg.zip` (the points above, all forest types and kinds, with first and latest break), `c2c.parquet` (GeoParquet, every C2C pixel; absent when the source has none). Listed in `index.json` `downloads`, with condition's GeoParquet and block `index.csv` as links into its dms folder; fixed timestamps, so a bake of unchanged data leaves them unchanged |
 
 Each pixel counts once: area by its first break, map date by its latest.
 The app refuses an `index.json` whose `schema` differs from `SCHEMA` in
 `js/app.js`; bump both (and `dashboard.SCHEMA`) when a file's shape changes.
 
-Condition per 10 m cell is not baked: the page reads
-`condition/pmtiles/condition_pixels.pmtiles` straight from S3 by range
-requests (`conditionCells` in `config.js`; empty takes it from the S3 prefix the data were
-baked from, and hides the layer when they were baked from a folder). It draws from
-zoom 12 and is coloured by the 2025 score minus the stand threshold.
+Condition per 10 m cell is not baked: the page reads `condition_pixels.pmtiles`
+in the condition folder (`index.json` `condition`) by range requests
+(`conditionCells` in `config.js` overrides it; no layer when baked from a local
+folder). It draws from
+zoom 12 and is coloured by the latest score minus the stand threshold.
 
-**C2C** (Composite2Change, yearly Sentinel-2 composites 2017–2025) is read
-from `c2c/pmtiles/c2c_pixels.pmtiles` under the same S3 prefix (or `c2cPixels`
-in `config.js`), source-layer `c2c_pixels`. Shown only where |ΔNBR| ≥ 0.175,
+**C2C** (Composite2Change, yearly Sentinel-2 composites from 2017) is read
+from `c2cPixels` in `config.js` (`c2c/pmtiles/c2c_pixels.pmtiles` under the S3
+prefix), source-layer `c2c_pixels`. Shown only where |ΔNBR| ≥ 0.175,
 the loss gate tuned against the labels in the old inspector, unless *Include
 weak changes* is ticked (94 % of the pixels are below it). Coloured by the year
 the change ended; `duration` is the years the line was stable before the drop.
@@ -90,7 +98,7 @@ print(vis.getMap().urlFormat);  // paste this into the dashboard
 
 **Clicking the map** opens a card with everything under the point: S-CCD
 alerts (with a link to the pixel's Sentinel-2 NBR time series, `timeseriesUrl`
-in `config.js`), the 10 m cell's condition 2017–2025 against its threshold, and
+in `config.js`), the 10 m cell's yearly condition against its threshold, and
 the stand's yearly condition (survey year marked) with its classes and
 trajectory.
 
@@ -104,6 +112,33 @@ metadata service.
 
 `config.js`'s `dataBase` says where the JSON is: `data/` beside the page, or
 any URL with CORS (e.g. the baked files copied to an S3 prefix).
+
+## Updates
+
+**Alerts (nightly, nothing to do).** With `FORESTMON_DASHBOARD_SOURCE` and
+`FORESTMON_CONDITION_SOURCE` in `.env`, `scripts/forestmon_cycle.sh` re-bakes
+`app/data` after each detect and publish, then commits and pushes it, and Pages
+redeploys. A night without new alerts commits nothing. A failed bake keeps the
+last one and makes the cycle exit non-zero.
+
+**Condition (annual).** Run the condition pipeline, then upload its outputs to the
+dms dataset by hand: `polygons_geo.parquet`, `condition_stands.parquet`,
+`condition_pixels.parquet`, `condition_pixels.pmtiles`, `index.csv` and the
+block COGs. If dms gives the update a new folder, point
+`FORESTMON_CONDITION_SOURCE` at it. The next cycle picks it up, or run
+`forestmon publish dashboard` to see it now. Until every file is there, the bake
+says which are missing and the dashboard keeps showing the last year.
+
+**C2C (annual).** Upload `c2c/parquet/c2c_pixels.parquet` and
+`c2c/pmtiles/c2c_pixels.pmtiles` under the S3 prefix (same names); the next
+bake refreshes the chart and the download.
+
+A new year needs no code: the bake takes the years from the condition stands'
+`dor_global_<year>` columns and C2C's change years, and the page's labels, keys
+and C2C colours follow `index.json`.
+
+The cycle runs on whichever machine has its cron line; moving it is in
+`docs/deployment.md`, section 5.
 
 ## Running locally
 

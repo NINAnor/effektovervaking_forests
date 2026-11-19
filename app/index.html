@@ -106,6 +106,10 @@
             <div class="layer-head">
               <label class="switch"><span>Tree-cover alerts <span class="count" id="alert-count"></span></span><input type="checkbox" role="switch" id="toggle-alerts" checked></label>
               <button type="button" class="info-btn" data-info="alerts" aria-label="About tree-cover alerts">i</button>
+              <details class="dl" data-download="alerts" hidden>
+                <summary class="info-btn dl-btn" aria-label="Download tree-cover alerts" title="Download"></summary>
+                <div class="dl-menu glass"></div>
+              </details>
             </div>
             <ul class="key">
               <li data-kind="loss"><i class="sw sw--dot sw--loss"></i> Possible tree loss</li>
@@ -121,12 +125,16 @@
             <div class="layer-head">
               <label class="switch"><span>Forest-loss map (C2C)</span><input type="checkbox" role="switch" id="toggle-c2c"></label>
               <button type="button" class="info-btn" data-info="c2c" aria-label="About the forest-loss map">i</button>
+              <details class="dl" data-download="c2c" hidden>
+                <summary class="info-btn dl-btn" aria-label="Download the forest-loss map" title="Download"></summary>
+                <div class="dl-menu glass"></div>
+              </details>
             </div>
             <div class="key key--years" id="c2c-key" aria-label="Loss year"></div>
             <ul class="key"><li><span class="sizes"><i></i><i></i><i></i></span> Bigger dot: bigger drop</li></ul>
             <label class="opacity">Opacity <input type="range" min="0" max="100" value="100" data-opacity="c2c" aria-label="Opacity of the forest-loss map"></label>
             <label class="check"><input type="checkbox" id="c2c-weak"> Include weak changes</label>
-            <p class="hint">Main loss map, by loss year 2018&ndash;2025. Not filtered by date.</p>
+            <p class="hint">Main loss map, by loss year <span data-tpl="{c1}–{cn}">2018&ndash;2025</span>. Not filtered by date.</p>
           </div>
 
           <div class="layer-group" role="group" aria-label="Radar alerts" id="radd-section">
@@ -165,13 +173,17 @@
             <div class="layer-head">
               <label class="switch"><span>Forest stands <span class="count" id="stand-count"></span></span><input type="checkbox" role="switch" id="toggle-stands" checked></label>
               <button type="button" class="info-btn" data-info="stands" aria-label="About the forest stands">i</button>
+              <details class="dl" data-download="stands" hidden>
+                <summary class="info-btn dl-btn" aria-label="Download the forest stands" title="Download"></summary>
+                <div class="dl-menu glass"></div>
+              </details>
             </div>
             <label class="inline">Colour by
               <select id="stand-color">
                 <option value="forest_type" selected>Forest type</option>
-                <option value="condition_local">Condition 2025 (local)</option>
-                <option value="condition_global">Condition 2025 (nature type)</option>
-                <option value="trajectory">Change 2017&ndash;2025</option>
+                <option value="condition_local" data-tpl="Condition {last} (local)">Condition 2025 (local)</option>
+                <option value="condition_global" data-tpl="Condition {last} (nature type)">Condition 2025 (nature type)</option>
+                <option value="trajectory" data-tpl="Change {first}–{last}">Change 2017&ndash;2025</option>
               </select>
             </label>
             <ul class="key" id="stand-legend" aria-label="Stand colours"></ul>
@@ -182,6 +194,10 @@
             <div class="layer-head">
               <label class="switch"><span>Condition, 10 m squares</span><input type="checkbox" role="switch" id="toggle-cells"></label>
               <button type="button" class="info-btn" data-info="cells" aria-label="About the condition squares">i</button>
+              <details class="dl" data-download="condition" hidden>
+                <summary class="info-btn dl-btn" aria-label="Download the condition squares" title="Download"></summary>
+                <div class="dl-menu glass"></div>
+              </details>
             </div>
             <div class="ramp" id="cell-ramp" role="img"
                  aria-label="Colour scale from brown, worse than the stand threshold, through cream at the threshold, to dark teal, better than it"></div>
@@ -253,7 +269,7 @@
       Sentinel-2 image suggests trees were lost. <b>Green dots</b> are the opposite,
       regrowth. A <b>yellow ring</b> marks the newest (30 days up to the newest alert).</li>
     <li><b>Purple dots</b> (switch on <i>Forest-loss map</i>) are the main
-      forest-loss map, 2018&ndash;2025, made once a year.</li>
+      forest-loss map, <span data-tpl="{c1}–{cn}">2018&ndash;2025</span>, made once a year.</li>
     <li><b>Bigger dot, bigger change.</b> Each dot is one 10 &times; 10 m cell.</li>
     <li>Choose the period with the date boxes, the quick buttons, or the two markers
       on the <i>Alert area over time</i> chart. Click anything for its details: what
@@ -313,17 +329,17 @@
 
 <template id="info-c2c" data-title="Forest-loss map (C2C)">
   <p><b>What it shows.</b> The main forest-loss map: 10 m cells where the canopy was
-    opened or removed, coloured by the year of loss, 2018&ndash;2025. Made once a
+    opened or removed, coloured by the year of loss, <span data-tpl="{c1}–{cn}">2018&ndash;2025</span>. Made once a
     year, so the date filter does not apply.</p>
   <p><b>How far to trust it.</b> It finds about 80 % of real loss, and about 2 in 3
     of its loss cells are real loss, so read its areas as an upper estimate.
-    <b>2024&ndash;2025 are undercounted</b>: read them as minimum values.</p>
+    <b><span data-tpl="{cp}–{cn}">2024&ndash;2025</span> are undercounted</b>: read them as minimum values.</p>
   <p><b>What to do.</b> Use it to see where and when the canopy was lost; it cannot
     tell felling from storm or dieback.</p>
   <details class="about">
   <summary>How it is made</summary>
   <p>C2C (Composite2Change) fits straight segments
-    to a yearly Sentinel-2 value of each 10 m cell, 2017&ndash;2025: the median NBR of
+    to a yearly Sentinel-2 value of each 10 m cell, <span data-tpl="{c0}–{cn}">2017&ndash;2025</span>: the median NBR of
     all clear observations from 1 June to 30 September. NBR (normalised burn ratio)
     falls when the canopy is opened or removed.</p>
   <p>Where the line breaks downwards, C2C reports a change, its year and its size. A
@@ -332,9 +348,9 @@
     cells. A bigger dot is a bigger drop; <i>Include weak changes</i> also shows those
     below the cut-off.</p>
   <p>The <b>colour</b> is the loss year. C2C dates a loss to the first yearly image
-    after it, so loss years run 2018&ndash;2025. <b>The last two years are
+    after it, so loss years run <span data-tpl="{c1}–{cn}">2018&ndash;2025</span>. <b>The last two years are
     undercounted</b>, because a break needs later images to be confirmed: read
-    2024&ndash;2025 as minimum values.</p>
+    <span data-tpl="{cp}–{cn}">2024&ndash;2025</span> as minimum values.</p>
   <p>Against labelled cells C2C finds 80 % of the loss cells, and 67 % of its loss
     calls are true loss.</p>
   </details>
@@ -354,8 +370,8 @@
 
 <template id="info-stands" data-title="Forest stands">
   <p><b>What it shows.</b> The 737 mapped olivinskog and kalklindeskog stands,
-    coloured by forest type, by their condition in 2025 (good, poor or not decided)
-    or by their change 2017&ndash;2025.</p>
+    coloured by forest type, by their condition in <span data-tpl="{last}">2025</span> (good, poor or not decided)
+    or by their change <span data-tpl="{first}–{last}">2017&ndash;2025</span>.</p>
   <p><b>How far to trust it.</b> The condition comes from satellite data, not a field
     visit. Small stands (below about 0.5 ha) are the least reliable.</p>
   <p><b>What to do.</b> Use it to rank stands and choose where to look first; for a
@@ -366,7 +382,7 @@
     Milj&oslash;direktoratet's nature-type mapping (MI), Nature in Norway (NiN)
     1:5000 and DN-h&aring;ndbok 13 (HB13). The surveys overlap on 24 % of their area;
     every area counts overlapping ground once.</p>
-  <p><b>Condition 2025 (AE score).</b> Each 10 m cell's AlphaEarth satellite embedding
+  <p><b>Condition <span data-tpl="{last}">2025</span> (AE score).</b> Each 10 m cell's AlphaEarth satellite embedding
     is compared with cells of good forest of the same type (stands a field survey
     called good) and with transformed land (cropland and built-up). Near 1: like good
     forest; near 0: like transformed land. A stand's score is the median of its cells.
@@ -376,7 +392,7 @@
     kalklindeskog: the nearest 32), never within 3 km. <i>Nature type</i> compares
     with all good stands of the type in Norway; it is used for the 44 stands with no
     local score.</p>
-  <p><b>Change 2017&ndash;2025</b> (trajectory) is the trend of the yearly score.
+  <p><b>Change <span data-tpl="{first}–{last}">2017&ndash;2025</span></b> (trajectory) is the trend of the yearly score.
     Declining and improving are the steepest 2 % of trends on ground with no recorded
     clearing, so about 15 stands fall in each by chance. Read <i>stable</i> as "no
     change detected", and <i>improving</i> as rising faster than the area as a whole.</p>
@@ -386,12 +402,12 @@
 </template>
 
 <template id="info-cells" data-title="Condition, 10 m squares">
-  <p>The AE score of each 10 m cell in 2025, minus its stand's threshold.
+  <p>The AE score of each 10 m cell in <span data-tpl="{last}">2025</span>, minus its stand's threshold.
     <b>Brown</b> cells are more like transformed land, <b>teal</b> ones more like good
     forest of their type. A stand is not in one condition: a clear-cut in one part of
     a stand shows here, not in the stand's class.</p>
   <p>Cell scores have no interval, and cells near the stand edge mix forest with
-    roads and fields. Click a cell for its scores 2017&ndash;2025.</p>
+    roads and fields. Click a cell for its scores <span data-tpl="{first}–{last}">2017&ndash;2025</span>.</p>
 </template>
 <script src="js/app.js"></script>
 </body>
