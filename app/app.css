@@ -188,12 +188,12 @@ a.pill-btn { display: inline-block; text-decoration: none; }
   font-size: 14px;
 }
 .layer-panel[open] { width: min(260px, calc(100% - 70px)); }
-.layer-panel summary {
+.layer-panel > summary {
   cursor: pointer; padding: 10px 16px; font-weight: 500;
   list-style-position: inside;
 }
-.layer-panel summary:focus-visible { outline-offset: -3px; border-radius: 24px; }
-.layer-panel[open] summary { border-bottom: 1px solid var(--line); }
+.layer-panel > summary:focus-visible { outline-offset: -3px; border-radius: 24px; }
+.layer-panel[open] > summary { border-bottom: 1px solid var(--line); }
 
 .layer-group { padding: 10px 16px 12px; border-bottom: 1px solid var(--line); }
 .layer-group:last-child { border-bottom: 0; }
@@ -403,9 +403,15 @@ label.inline select { flex: 1 1 auto; min-width: 0; max-width: 150px; }
 
 /* Download menu: a <details> beside the "i" button, listing the layer's files. */
 .dl { position: relative; flex: none; }
-.dl-btn { display: grid; place-items: center; list-style: none; font: 500 14px/1 system-ui, sans-serif; }
+.dl-btn { display: grid; place-items: center; list-style: none; }
 .dl-btn::-webkit-details-marker { display: none; }
-.dl-btn::before { content: "\2193"; }
+/* Arrow into a tray, drawn in currentColor so it follows the hover and theme. */
+.dl-btn::before {
+  content: ""; width: 14px; height: 14px; background: currentColor;
+  -webkit-mask: var(--dl-icon) center / contain no-repeat;
+  mask: var(--dl-icon) center / contain no-repeat;
+  --dl-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10'/%3E%3C/svg%3E");
+}
 .dl[open] > .dl-btn { color: var(--ink); background: var(--control-hover); }
 .dl-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 5;
